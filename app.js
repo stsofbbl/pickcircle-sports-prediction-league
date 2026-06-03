@@ -65,6 +65,12 @@ const els = {
   exportButton: document.querySelector("#exportButton"),
   exportDialog: document.querySelector("#exportDialog"),
   exportText: document.querySelector("#exportText"),
+  confirmDialog: document.querySelector("#confirmDialog"),
+  confirmSaveButton: document.querySelector("#confirmSaveButton"),
+  matchFeatureTitle: document.querySelector("#matchFeatureTitle"),
+  matchFeatureMeta: document.querySelector("#matchFeatureMeta"),
+  historyEventName: document.querySelector("#historyEventName"),
+  resultEventName: document.querySelector("#resultEventName"),
 };
 
 function loadState() {
@@ -132,6 +138,7 @@ function render() {
   renderTemplates();
   renderEvent();
   renderScores();
+  renderShellMeta();
   persist();
 }
 
@@ -648,7 +655,23 @@ function updateFutureInput(event) {
 function renderScoresOnly() {
   els.eventTitle.textContent = state.event.name;
   renderScores();
+  renderShellMeta();
   persist();
+}
+
+function renderShellMeta() {
+  if (els.matchFeatureTitle) els.matchFeatureTitle.textContent = state.event?.name || "現在のイベント";
+  if (els.matchFeatureMeta) {
+    const template = templates[state.event?.templateId];
+    const count = state.event?.templateId === "fightCard"
+      ? getMarkets().length
+      : state.event?.templateId === "worldCup"
+        ? getCountries().length
+        : getTeams().length;
+    els.matchFeatureMeta.textContent = `${template?.name || "ルール"} / ${count}件の候補`;
+  }
+  if (els.historyEventName) els.historyEventName.textContent = state.event?.name || "未保存";
+  if (els.resultEventName) els.resultEventName.textContent = state.event?.name || "未設定";
 }
 
 function legacyEditableTeamsBlock(title, teams) {
@@ -1227,12 +1250,24 @@ els.newEventButton.addEventListener("click", () => {
 });
 
 els.saveButton.addEventListener("click", () => {
-  persist();
-  els.saveButton.textContent = "保存済み";
-  setTimeout(() => {
-    els.saveButton.textContent = "保存";
-  }, 900);
+  if (els.confirmDialog?.showModal) {
+    els.confirmDialog.showModal();
+    return;
+  }
+  confirmSave();
 });
+
+els.confirmSaveButton?.addEventListener("click", () => {
+  confirmSave();
+});
+
+function confirmSave() {
+  persist();
+  els.saveButton.textContent = "LOCKED";
+  setTimeout(() => {
+    els.saveButton.textContent = "LOCK IN";
+  }, 900);
+}
 
 els.resetButton.addEventListener("click", () => {
   if (!confirm("ローカル保存データを初期化しますか？")) return;

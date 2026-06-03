@@ -5,29 +5,83 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="仲間内のスポーツ予想リーグをポイント制で管理するアプリ"
+      content="身内用スポーツ予想リーグをポイント制で管理するアプリ"
     />
     <title>Yoso League</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Private prediction league</p>
+      <header class="topbar" id="home">
+        <div class="brand-lockup">
+          <p class="eyebrow">Private prediction lounge</p>
           <h1>Yoso League</h1>
+          <p class="brand-copy">
+            仲間内の予想を、静かに、熱く、ポイントで記録する。
+          </p>
         </div>
         <button class="icon-button" id="exportButton" title="データを書き出す" aria-label="データを書き出す">
           ⇩
         </button>
       </header>
 
+      <nav class="screen-nav" aria-label="画面ナビゲーション">
+        <a href="#home">ホーム</a>
+        <a href="#matches">今日の試合</a>
+        <a href="#prediction">予想入力</a>
+        <a href="#results">結果表示</a>
+        <a href="#history">履歴</a>
+        <a href="#ranking">ランキング</a>
+      </nav>
+
+      <section class="hero-panel" aria-label="ホーム画面">
+        <div>
+          <p class="eyebrow">Hidden room / Point only</p>
+          <h2>今日の勝負を、会員制ラウンジの空気で。</h2>
+          <p>
+            決済・送金・リアルマネーベット機能は含めず、身内のスポーツ予想をポイント制で管理します。
+          </p>
+        </div>
+        <div class="hero-stats" aria-label="現在の状態">
+          <span>Private table</span>
+          <strong>LOCKED ROOM</strong>
+          <small>Picks, odds, results</small>
+        </div>
+      </section>
+
+      <section class="match-strip" id="matches" aria-label="今日の試合一覧">
+        <div class="section-heading">
+          <div>
+            <h2>今日の試合一覧</h2>
+            <p>現在選んでいるルールのカードや候補を、入力前にざっと確認します。</p>
+          </div>
+          <span class="status-pill">Members only</span>
+        </div>
+        <div class="match-grid">
+          <article class="match-card">
+            <span class="match-kicker">Table one</span>
+            <strong id="matchFeatureTitle">現在のイベント</strong>
+            <small id="matchFeatureMeta">ルールを選択すると内容が更新されます</small>
+          </article>
+          <article class="match-card sub-card">
+            <span class="match-kicker">Line board</span>
+            <strong>候補・オッズ編集</strong>
+            <small>API取得できない大会も手入力で調整可能</small>
+          </article>
+          <article class="match-card sub-card">
+            <span class="match-kicker">Seats</span>
+            <strong>参加者別予想</strong>
+            <small>確定結果を入れるとランキングへ反映</small>
+          </article>
+        </div>
+      </section>
+
       <main class="workspace">
         <section class="league-panel" aria-label="リーグ設定">
           <div class="section-heading">
             <div>
               <h2>リーグ</h2>
-              <p>リアルマネー機能なしのポイント管理用です。</p>
+              <p>仲間内の参加者、ルール、イベントを設定します。</p>
             </div>
             <button id="resetButton" class="ghost-button">初期化</button>
           </div>
@@ -52,25 +106,69 @@
           </div>
         </section>
 
-        <section class="event-panel" aria-label="イベント設定">
+        <section class="event-panel" id="prediction" aria-label="予想入力画面">
           <div class="section-heading">
             <div>
               <h2 id="eventTitle">イベント</h2>
               <p id="eventSubtitle">プリセットを選ぶと入力欄が切り替わります。</p>
             </div>
-            <button id="newEventButton" class="primary-button">作成</button>
+            <button id="newEventButton" class="primary-button">NEW TABLE</button>
           </div>
 
           <div class="event-form" id="eventForm"></div>
         </section>
 
-        <section class="score-panel" aria-label="スコアボード">
+        <section class="results-panel" id="results" aria-label="結果表示画面">
           <div class="section-heading">
             <div>
-              <h2>スコアボード</h2>
-              <p>確定結果を入力すると自動で順位を計算します。</p>
+              <h2>結果表示</h2>
+              <p>確定した結果と、現在のテーブル状況を静かに確認します。</p>
             </div>
-            <button id="saveButton" class="primary-button">保存</button>
+            <span class="status-pill">Settlement</span>
+          </div>
+          <div class="result-board">
+            <div class="result-card">
+              <span>Current table</span>
+              <strong id="resultEventName">未設定</strong>
+              <small>確定結果の入力状況に応じてランキングが動きます</small>
+            </div>
+            <div class="result-card result-card-accent">
+              <span>House note</span>
+              <strong>POINT ONLY</strong>
+              <small>決済・送金・リアルマネー機能はありません</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="history-panel" id="history" aria-label="履歴画面">
+          <div class="section-heading">
+            <div>
+              <h2>履歴</h2>
+              <p>ローカル保存中のイベント状態を確認できます。</p>
+            </div>
+            <span class="status-pill">History</span>
+          </div>
+          <div class="history-list">
+            <div class="history-row">
+              <span>最新保存</span>
+              <strong id="historyEventName">未保存</strong>
+              <small>この端末のブラウザ内に保存されます</small>
+            </div>
+            <div class="history-row">
+              <span>安全メモ</span>
+              <strong>ポイント記録専用</strong>
+              <small>決済、送金、リアルマネー機能はありません</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="score-panel" id="ranking" aria-label="ランキング画面">
+          <div class="section-heading">
+            <div>
+              <h2>ランキング</h2>
+              <p>確定結果を入力すると順位が自動更新されます。</p>
+            </div>
+            <button id="saveButton" class="primary-button">LOCK IN</button>
           </div>
 
           <div class="scoreboard" id="scoreboard"></div>
@@ -78,6 +176,18 @@
         </section>
       </main>
     </div>
+
+    <dialog id="confirmDialog" class="confirm-dialog">
+      <form method="dialog">
+        <p class="eyebrow">Final call</p>
+        <h2>この予想を確定しますか？</h2>
+        <p>一度確定すると変更できません。内容を確認してから進めてください。</p>
+        <div class="dialog-actions">
+          <button class="ghost-button" value="cancel">戻る</button>
+          <button class="primary-button" id="confirmSaveButton" value="confirm">CONFIRM</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="exportDialog">
       <form method="dialog">
