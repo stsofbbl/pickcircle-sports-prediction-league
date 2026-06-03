@@ -7,9 +7,17 @@
 ## 今の状態
 
 - HTML / CSS / JavaScriptだけで動くUIモックです。
-- `github-index.html` をブラウザで開くと、1ファイル版のアプリを確認できます。
 - 元ファイルは `index.html`, `styles.css`, `app.js` です。
-- `scripts/build-github-index.js` を実行すると、元ファイルから `github-index.html` を再生成できます。
+- 大きな1ファイル版の `github-index.html` は削除しました。
+- 今後は通常のWebファイル構成で管理します。
+
+## ローカルで見る方法
+
+特別なサーバーは不要です。
+
+1. このフォルダを開く
+2. `index.html` をダブルクリック
+3. ブラウザで表示を確認
 
 ## 画面
 
@@ -35,26 +43,6 @@
 
 ただし、違法サイトっぽくなりすぎないように、リアルマネー機能は入れていません。
 
-## ローカルで見る方法
-
-特別なサーバーは不要です。
-
-1. このフォルダを開く
-2. `github-index.html` をダブルクリック
-3. ブラウザで表示を確認
-
-元ファイルで確認したい場合は `index.html` を開いてもOKです。
-
-## 1ファイル版を再生成する方法
-
-Node.jsが使える環境で、以下を実行します。
-
-```bash
-node scripts/build-github-index.js
-```
-
-これで `index.html`, `styles.css`, `app.js` の内容をまとめた `github-index.html` が更新されます。
-
 ## 初めて作業する人向け: GitHubの流れ
 
 ### 1. 最新版を取得
@@ -78,12 +66,6 @@ git checkout -b feature/button-design
 - `index.html`
 - `styles.css`
 - `app.js`
-
-`github-index.html` も更新したい場合は、編集後に以下を実行します。
-
-```bash
-node scripts/build-github-index.js
-```
 
 ### 4. 変更を確認
 
@@ -123,7 +105,7 @@ Pull Requestでは以下を書くとわかりやすいです。
 - スマホ表示で余白を調整
 
 ## 確認
-- github-index.htmlをChromeで開いて確認
+- index.htmlをChromeで開いて確認
 ```
 
 ### 8. マージ
