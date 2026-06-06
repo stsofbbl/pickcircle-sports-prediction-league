@@ -57,6 +57,15 @@ const els = {
   navLinks: [...document.querySelectorAll("[data-nav-page]")],
   themeToggle: document.querySelector("#themeToggle"),
   themeOptions: [...document.querySelectorAll("[data-theme-label]")],
+  homeClubLine: document.querySelector("#homeClubLine"),
+  homeParticipantName: document.querySelector("#homeParticipantName"),
+  homeOpenCount: document.querySelector("#homeOpenCount"),
+  homeMissingTournamentCount: document.querySelector("#homeMissingTournamentCount"),
+  homeMonthScore: document.querySelector("#homeMonthScore"),
+  homeTotalScore: document.querySelector("#homeTotalScore"),
+  homeTournamentCards: document.querySelector("#homeTournamentCards"),
+  activeTournamentCards: document.querySelector("#activeTournamentCards"),
+  approvalRuleText: document.querySelector("#approvalRuleText"),
   leagueName: document.querySelector("#leagueName"),
   participantList: document.querySelector("#participantList"),
   participantName: document.querySelector("#participantName"),
@@ -66,7 +75,9 @@ const els = {
   eventSubtitle: document.querySelector("#eventSubtitle"),
   eventForm: document.querySelector("#eventForm"),
   newEventButton: document.querySelector("#newEventButton"),
+  settingsNewEventButton: document.querySelector("#settingsNewEventButton"),
   saveButton: document.querySelector("#saveButton"),
+  rankingTabs: document.querySelector("#rankingTabs"),
   resetButton: document.querySelector("#resetButton"),
   scoreboard: document.querySelector("#scoreboard"),
   insightBand: document.querySelector("#insightBand"),
@@ -103,7 +114,7 @@ function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-const PAGE_IDS = new Set(["home", "active", "prediction", "archive", "ranking"]);
+const PAGE_IDS = new Set(["home", "active", "prediction", "archive", "ranking", "settings"]);
 const THEME_KEY = "yoso-theme";
 
 function currentPageId() {
@@ -193,17 +204,142 @@ function createResults(templateId) {
 }
 
 function render() {
-  els.leagueName.value = state.leagueName;
+  if (els.leagueName) els.leagueName.value = state.leagueName;
   renderParticipants();
   renderTemplates();
   renderEvent();
   renderScores();
+  renderDashboard();
+  renderActiveTournaments();
   renderShellMeta();
   renderPage();
   persist();
 }
 
+function renderDashboard() {
+  const participant = currentParticipantName();
+  const scores = calculateScores();
+  const myScore = scores.find((row) => row.name === participant)?.score || 0;
+  const missingCount = missingPredictionCount(participant);
+  const hasMissing = missingCount > 0;
+  const approvalRequired = requiredApprovalCount();
+
+  if (els.homeClubLine) els.homeClubLine.textContent = `${state.leagueName} / ${state.participants.length}人参加中`;
+  if (els.homeParticipantName) els.homeParticipantName.textContent = participant;
+  if (els.homeOpenCount) els.homeOpenCount.textContent = state.event ? "1" : "0";
+  if (els.homeMissingTournamentCount) els.homeMissingTournamentCount.textContent = hasMissing ? "1" : "0";
+  if (els.homeMonthScore) els.homeMonthScore.textContent = formatScore(myScore);
+  if (els.homeTotalScore) els.homeTotalScore.textContent = formatScore(myScore);
+  if (els.approvalRuleText) els.approvalRuleText.textContent = `結果確定には${approvalRequired}人の承認が必要`;
+
+  if (!els.homeTournamentCards) return;
+  els.homeTournamentCards.innerHTML = tournamentCardMarkup({
+    variant: "home",
+    status: "予想受付中",
+    statusClass: "open",
+    actionLabel: hasMissing ? "予想する" : "入力内容を見る",
+    missingCount,
+    showDeadline: true,
+  });
+}
+
+function renderActiveTournaments() {
+  if (!els.activeTournamentCards) return;
+  els.activeTournamentCards.innerHTML = [
+    tournamentCardMarkup({
+      variant: "active",
+      status: "予想受付中",
+      statusClass: "open",
+      actionLabel: "予想へ",
+      missingCount: missingPredictionCount(currentParticipantName()),
+      showDeadline: true,
+    }),
+    statusPreviewCardMarkup("締切済み", "入力は終了。結果入力待ちの状態です。", "locked"),
+    statusPreviewCardMarkup("結果入力待ち", "管理者が結果を入れ、参加者の承認を待ちます。", "pending"),
+  ].join("");
+}
+
+function tournamentCardMarkup({ status, statusClass, actionLabel, missingCount, showDeadline }) {
+  const sport = sportMeta(state.event?.templateId);
+  const template = templates[state.event?.templateId];
+  const candidateCount = candidateCountForCurrentEvent();
+  const missingText = missingCount > 0 ? `未入力 ${missingCount}項目` : "入力済み";
+  return `
+    <article class="tournament-card">
+      <div class="tournament-main">
+        <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
+        <div>
+          <span class="match-kicker">${escapeHtml(sport.label)} / ${escapeHtml(template?.name || "ルール")}</span>
+          <strong>${escapeHtml(state.event?.name || "現在の大会")}</strong>
+          <small>${escapeHtml(candidateCount)}件の候補 / ${escapeHtml(state.participants.length)}人参加</small>
+        </div>
+      </div>
+      <div class="tournament-chips">
+        <span class="status-label ${statusClass}">${escapeHtml(status)}</span>
+        ${showDeadline ? `<span class="deadline-chip">締切間近</span>` : ""}
+        <span class="missing-chip ${missingCount > 0 ? "has-missing" : ""}">${escapeHtml(missingText)}</span>
+      </div>
+      <div class="tournament-actions">
+        <a class="primary-link" href="#prediction">${escapeHtml(actionLabel)}</a>
+        <a class="ghost-link" href="#settings">大会設定</a>
+      </div>
+    </article>
+  `;
+}
+
+function statusPreviewCardMarkup(status, text, statusClass) {
+  const sport = sportMeta(state.event?.templateId);
+  return `
+    <article class="tournament-card muted-card">
+      <div class="tournament-main">
+        <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
+        <div>
+          <span class="match-kicker">Status sample</span>
+          <strong>${escapeHtml(status)}</strong>
+          <small>${escapeHtml(text)}</small>
+        </div>
+      </div>
+      <div class="tournament-chips">
+        <span class="status-label ${statusClass}">${escapeHtml(status)}</span>
+      </div>
+    </article>
+  `;
+}
+
+function currentParticipantName() {
+  return state.participants[0] || "あなた";
+}
+
+function candidateCountForCurrentEvent() {
+  if (state.event?.templateId === "fightCard") return getMarkets().length;
+  if (state.event?.templateId === "worldCup") return getCountries().length;
+  return getTeams().length;
+}
+
+function requiredApprovalCount() {
+  return Math.max(1, Math.ceil(state.participants.length / 2));
+}
+
+function missingPredictionCount(name) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  if (state.event.templateId === "rankingOdds") {
+    return prediction.picks.filter((pick) => !pick).length;
+  }
+  if (state.event.templateId === "draft") {
+    return prediction.teams.filter((team) => !team).length;
+  }
+  if (state.event.templateId === "fightCard") {
+    return getMarkets().filter((market) => !prediction.picks[market.id]).length;
+  }
+  if (state.event.templateId === "worldCup") {
+    return prediction.top4.filter((country) => !country).length;
+  }
+  return 0;
+}
+
 function renderParticipants() {
+  if (!els.participantList) return;
   els.participantList.innerHTML = "";
   state.participants.forEach((name) => {
     const chip = document.createElement("span");
@@ -219,6 +355,7 @@ function renderParticipants() {
 }
 
 function renderTemplates() {
+  if (!els.templateGrid) return;
   els.templateGrid.innerHTML = "";
   Object.values(templates).forEach((template) => {
     const button = document.createElement("button");
@@ -714,8 +851,10 @@ function updateFutureInput(event) {
 }
 
 function renderScoresOnly() {
-  els.eventTitle.textContent = state.event.name;
+  if (els.eventTitle) els.eventTitle.textContent = state.event.name;
   renderScores();
+  renderDashboard();
+  renderActiveTournaments();
   renderShellMeta();
   persist();
 }
@@ -1307,12 +1446,12 @@ function renderShellMeta() {
   if (els.resultEventName) els.resultEventName.textContent = state.event?.name || "未設定";
 }
 
-els.leagueName.addEventListener("input", () => {
+els.leagueName?.addEventListener("input", () => {
   state.leagueName = els.leagueName.value;
   persist();
 });
 
-els.addParticipantButton.addEventListener("click", () => {
+els.addParticipantButton?.addEventListener("click", () => {
   const name = els.participantName.value.trim();
   if (!name || state.participants.includes(name)) return;
   state.participants.push(name);
@@ -1321,16 +1460,22 @@ els.addParticipantButton.addEventListener("click", () => {
   render();
 });
 
-els.participantName.addEventListener("keydown", (event) => {
+els.participantName?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") els.addParticipantButton.click();
 });
 
-els.newEventButton.addEventListener("click", () => {
+els.newEventButton?.addEventListener("click", () => {
   state.event = createEvent(state.activeTemplate, state.participants);
   render();
 });
 
-els.saveButton.addEventListener("click", () => {
+els.settingsNewEventButton?.addEventListener("click", () => {
+  state.event = createEvent(state.activeTemplate, state.participants);
+  window.location.hash = "prediction";
+  render();
+});
+
+els.saveButton?.addEventListener("click", () => {
   if (els.confirmDialog?.showModal) {
     els.confirmDialog.showModal();
     return;
@@ -1350,7 +1495,7 @@ function confirmSave() {
   }, 900);
 }
 
-els.resetButton.addEventListener("click", () => {
+els.resetButton?.addEventListener("click", () => {
   if (!confirm("ローカル保存データを初期化しますか？")) return;
   localStorage.removeItem(STORAGE_KEY);
   state = createDefaultState();
@@ -1365,6 +1510,12 @@ els.exportButton.addEventListener("click", () => {
 els.navLinks.forEach((link) => {
   link.addEventListener("click", () => {
     requestAnimationFrame(renderPage);
+  });
+});
+
+els.rankingTabs?.querySelectorAll("button").forEach((button) => {
+  button.addEventListener("click", () => {
+    els.rankingTabs.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
   });
 });
 

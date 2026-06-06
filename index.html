@@ -25,42 +25,44 @@
             <img src="./assets/yoso-header-logo.png" alt="" />
           </span>
         </a>
-
-        <button class="theme-toggle" id="themeToggle" type="button" aria-label="表示モードを切り替える">
-          <span class="theme-toggle-option is-active" data-theme-label="dark">ダーク</span>
-          <span class="theme-toggle-option" data-theme-label="day">デイ</span>
-        </button>
       </header>
 
       <main class="app-pages">
         <section class="app-page home-page" id="home" data-page="home" aria-label="ホーム">
-          <section class="league-panel" aria-label="リーグ設定">
+          <section class="dashboard-panel" aria-label="ホームダッシュボード">
             <div class="section-heading">
               <div>
                 <h2>ホーム</h2>
-                <p>リーグ、参加者、ルールを管理します。</p>
+                <p id="homeClubLine">参加中のクラブと受付中の大会を確認します。</p>
               </div>
-              <button id="resetButton" class="ghost-button">初期化</button>
+              <span class="status-pill">DASHBOARD</span>
             </div>
 
-            <label class="field">
-              <span>リーグ名</span>
-              <input id="leagueName" type="text" autocomplete="off" />
-            </label>
-
-            <div class="field">
-              <span>参加者</span>
-              <div class="participant-list" id="participantList"></div>
-              <div class="inline-form">
-                <input id="participantName" type="text" placeholder="名前を追加" autocomplete="off" />
-                <button id="addParticipantButton">追加</button>
+            <div class="home-summary">
+              <div class="home-person">
+                <span>PLAYER</span>
+                <strong id="homeParticipantName">あなた</strong>
+              </div>
+              <div class="summary-metrics">
+                <div class="metric-card urgent">
+                  <span>未入力大会</span>
+                  <strong id="homeMissingTournamentCount">0</strong>
+                </div>
+                <div class="metric-card">
+                  <span>今月 / 全期間 pt</span>
+                  <strong><span id="homeMonthScore">0</span> / <span id="homeTotalScore">0</span></strong>
+                </div>
               </div>
             </div>
 
-            <div class="field">
-              <span>ルールプリセット</span>
-              <div class="template-grid" id="templateGrid"></div>
+            <div class="section-heading compact-heading">
+              <div>
+                <h3>受付中の大会</h3>
+                <p>締切が近い大会はカード内で目立つように表示します。</p>
+              </div>
+              <span class="pill"><span id="homeOpenCount">0</span>件</span>
             </div>
+            <div class="tournament-list" id="homeTournamentCards"></div>
           </section>
         </section>
 
@@ -69,30 +71,11 @@
             <div class="section-heading">
               <div>
                 <h2>開催中</h2>
-                <p>現在選んでいるルールのカードや候補を、入力前に確認します。</p>
+                <p>現在動いている大会と進行状況を確認します。</p>
               </div>
-              <span class="status-pill">POINT ONLY</span>
+              <span class="status-pill">ACTIVE</span>
             </div>
-            <div class="match-grid">
-              <article class="match-card">
-                <span class="sport-icon" id="matchFeatureIcon" aria-hidden="true"></span>
-                <span class="match-kicker">Current</span>
-                <strong id="matchFeatureTitle">現在のイベント</strong>
-                <small id="matchFeatureMeta">ルールを選択すると内容が更新されます</small>
-              </article>
-              <article class="match-card sub-card">
-                <span class="sport-icon sport-icon-odds" aria-hidden="true">◎</span>
-                <span class="match-kicker">Odds</span>
-                <strong>候補・オッズ編集</strong>
-                <small>API取得できない大会も手入力で調整可能</small>
-              </article>
-              <article class="match-card sub-card">
-                <span class="sport-icon sport-icon-members" aria-hidden="true">◉</span>
-                <span class="match-kicker">Members</span>
-                <strong>参加者別予想</strong>
-                <small>確定結果を入れるとランキングへ反映</small>
-              </article>
-            </div>
+            <div class="tournament-list" id="activeTournamentCards"></div>
           </section>
         </section>
 
@@ -161,13 +144,87 @@
             <div class="section-heading">
               <div>
                 <h2>ランキング</h2>
-                <p>確定結果を入力すると順位が自動更新されます。</p>
+                <p>期間を切り替えてポイントを確認します。</p>
               </div>
               <button id="saveButton" class="primary-button">LOCK IN</button>
             </div>
 
+            <div class="ranking-tabs" id="rankingTabs" aria-label="ランキング期間">
+              <button class="is-active" type="button">全期間</button>
+              <button type="button">今月</button>
+              <button type="button">年初来</button>
+              <button type="button">直近1年間</button>
+              <button type="button">カスタム期間</button>
+              <button type="button">大会別</button>
+            </div>
             <div class="scoreboard" id="scoreboard"></div>
             <div class="insight-band" id="insightBand"></div>
+          </section>
+        </section>
+
+        <section class="app-page" id="settings" data-page="settings" aria-label="設定">
+          <section class="league-panel" aria-label="設定">
+            <div class="section-heading">
+              <div>
+                <h2>設定</h2>
+                <p>クラブ、参加者、大会、ルールを管理します。</p>
+              </div>
+              <button id="resetButton" class="ghost-button">初期化</button>
+            </div>
+
+            <label class="field">
+              <span>クラブ名</span>
+              <input id="leagueName" type="text" autocomplete="off" />
+            </label>
+
+            <div class="field">
+              <span>参加者</span>
+              <div class="participant-list" id="participantList"></div>
+              <div class="inline-form">
+                <input id="participantName" type="text" placeholder="名前を追加" autocomplete="off" />
+                <button id="addParticipantButton">追加</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span>ルールプリセット</span>
+              <div class="template-grid" id="templateGrid"></div>
+            </div>
+
+            <div class="settings-grid" aria-label="管理メニュー">
+              <article class="setting-card">
+                <span>大会追加</span>
+                <strong>開催する大会を作成</strong>
+                <small>ルールプリセットを選んで新しい予想テーブルを開始します。</small>
+                <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
+              </article>
+              <article class="setting-card">
+                <span>候補 / カード / オッズ</span>
+                <strong>大会内容を編集</strong>
+                <small>高校野球、格闘技、W杯などの候補名や倍率を手入力で調整します。</small>
+                <a class="ghost-link" href="#prediction">編集へ</a>
+              </article>
+              <article class="setting-card">
+                <span>結果入力</span>
+                <strong>管理者が結果を入力</strong>
+                <small>入力者の1票を含め、必要承認数に達すると結果確定にします。</small>
+                <a class="ghost-link" href="#archive">結果を見る</a>
+              </article>
+              <article class="setting-card">
+                <span>結果承認</span>
+                <strong id="approvalRuleText">承認数を計算中</strong>
+                <small>2人なら管理者のみ、4人なら2人、15人なら8人で確定。</small>
+              </article>
+              <article class="setting-card">
+                <span>表示モード</span>
+                <strong>ダーク / デイ</strong>
+                <small>普段は黒基調、確認用に白基調へ切り替えられます。</small>
+                <button class="theme-toggle" id="themeToggle" type="button" aria-label="表示モードを切り替える">
+                  <span class="theme-toggle-option is-active" data-theme-label="dark">ダーク</span>
+                  <span class="theme-toggle-option" data-theme-label="day">デイ</span>
+                </button>
+              </article>
+            </div>
           </section>
         </section>
       </main>
@@ -181,17 +238,17 @@
           <span class="nav-icon" aria-hidden="true">●</span>
           <span>開催中</span>
         </a>
-        <a href="#prediction" data-nav-page="prediction">
-          <span class="nav-icon" aria-hidden="true">✎</span>
-          <span>予想入力</span>
+        <a href="#ranking" data-nav-page="ranking">
+          <span class="nav-icon" aria-hidden="true">#</span>
+          <span>ランキング</span>
         </a>
         <a href="#archive" data-nav-page="archive">
           <span class="nav-icon" aria-hidden="true">□</span>
           <span>アーカイブ</span>
         </a>
-        <a href="#ranking" data-nav-page="ranking">
-          <span class="nav-icon" aria-hidden="true">#</span>
-          <span>ランキング</span>
+        <a href="#settings" data-nav-page="settings">
+          <span class="nav-icon" aria-hidden="true">⚙</span>
+          <span>設定</span>
         </a>
       </nav>
     </div>
