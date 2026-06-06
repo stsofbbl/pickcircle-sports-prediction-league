@@ -47,6 +47,7 @@ const defaultState = {
   leagueName: "G-UNIT 予想リーグ",
   participants: ["和田", "拓洋", "銀次", "いの"],
   activeTemplate: "worldCup",
+  approvalPolicy: "half",
   event: null,
 };
 
@@ -66,6 +67,7 @@ const els = {
   homeTournamentCards: document.querySelector("#homeTournamentCards"),
   activeTournamentCards: document.querySelector("#activeTournamentCards"),
   approvalRuleText: document.querySelector("#approvalRuleText"),
+  approvalPolicyGroup: document.querySelector("#approvalPolicyGroup"),
   leagueName: document.querySelector("#leagueName"),
   participantList: document.querySelector("#participantList"),
   participantName: document.querySelector("#participantName"),
@@ -78,6 +80,7 @@ const els = {
   settingsNewEventButton: document.querySelector("#settingsNewEventButton"),
   saveButton: document.querySelector("#saveButton"),
   rankingTabs: document.querySelector("#rankingTabs"),
+  rankingFilterPanel: document.querySelector("#rankingFilterPanel"),
   resetButton: document.querySelector("#resetButton"),
   scoreboard: document.querySelector("#scoreboard"),
   insightBand: document.querySelector("#insightBand"),
@@ -231,6 +234,7 @@ function renderDashboard() {
   if (els.homeMonthScore) els.homeMonthScore.textContent = formatScore(myScore);
   if (els.homeTotalScore) els.homeTotalScore.textContent = formatScore(myScore);
   if (els.approvalRuleText) els.approvalRuleText.textContent = `結果確定には${approvalRequired}人の承認が必要`;
+  renderApprovalPolicy();
 
   if (!els.homeTournamentCards) return;
   els.homeTournamentCards.innerHTML = tournamentCardMarkup({
@@ -254,8 +258,7 @@ function renderActiveTournaments() {
       missingCount: missingPredictionCount(currentParticipantName()),
       showDeadline: true,
     }),
-    statusPreviewCardMarkup("締切済み", "入力は終了。結果入力待ちの状態です。", "locked"),
-    statusPreviewCardMarkup("結果入力待ち", "管理者が結果を入れ、参加者の承認を待ちます。", "pending"),
+    resultWaitCardMarkup(),
   ].join("");
 }
 
@@ -306,6 +309,29 @@ function statusPreviewCardMarkup(status, text, statusClass) {
   `;
 }
 
+function resultWaitCardMarkup() {
+  const sport = sportMeta(state.event?.templateId);
+  return `
+    <article class="tournament-card muted-card">
+      <div class="tournament-main">
+        <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
+        <div>
+          <span class="match-kicker">締切後</span>
+          <strong>結果待ち</strong>
+          <small>締切後は管理者の結果入力と参加者の承認に進みます。</small>
+        </div>
+      </div>
+      <div class="tournament-chips">
+        <span class="status-label pending">結果待ち</span>
+      </div>
+      <div class="tournament-actions">
+        <a class="primary-link" href="#archive">結果入力</a>
+        <a class="ghost-link" href="#archive">結果承認</a>
+      </div>
+    </article>
+  `;
+}
+
 function currentParticipantName() {
   return state.participants[0] || "あなた";
 }
@@ -317,7 +343,17 @@ function candidateCountForCurrentEvent() {
 }
 
 function requiredApprovalCount() {
+  if (state.approvalPolicy === "admin") return 1;
+  if (state.approvalPolicy === "unanimous") return Math.max(1, state.participants.length);
   return Math.max(1, Math.ceil(state.participants.length / 2));
+}
+
+function renderApprovalPolicy() {
+  if (!els.approvalPolicyGroup) return;
+  const policy = state.approvalPolicy || "half";
+  els.approvalPolicyGroup.querySelectorAll("[data-approval-policy]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.approvalPolicy === policy);
+  });
 }
 
 function missingPredictionCount(name) {
@@ -1516,6 +1552,21 @@ els.navLinks.forEach((link) => {
 els.rankingTabs?.querySelectorAll("button").forEach((button) => {
   button.addEventListener("click", () => {
     els.rankingTabs.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
+    const label = button.textContent.trim();
+    const shouldShowPanel = label === "カスタム期間" || label === "大会別";
+    if (els.rankingFilterPanel) {
+      els.rankingFilterPanel.hidden = !shouldShowPanel;
+      els.rankingFilterPanel.querySelectorAll("[data-ranking-filter]").forEach((panel) => {
+        panel.hidden = panel.dataset.rankingFilter !== label;
+      });
+    }
+  });
+});
+
+els.approvalPolicyGroup?.querySelectorAll("[data-approval-policy]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.approvalPolicy = button.dataset.approvalPolicy;
+    render();
   });
 });
 

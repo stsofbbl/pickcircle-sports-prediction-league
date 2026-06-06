@@ -1059,6 +1059,11 @@ dialog::backdrop {
     flex-direction: column;
   }
 
+  .compact-heading {
+    align-items: center;
+    flex-direction: row;
+  }
+
   .topbar {
     align-items: center;
     min-height: 112px;
@@ -1453,8 +1458,14 @@ body[data-theme="day"] .metric-card {
 
 .metric-card strong {
   font-family: var(--mono);
-  font-size: 27px;
+  font-size: 34px;
   line-height: 1;
+}
+
+.metric-card strong span {
+  color: inherit;
+  font: inherit;
+  text-transform: none;
 }
 
 .metric-card.urgent {
@@ -1463,7 +1474,12 @@ body[data-theme="day"] .metric-card {
 
 .compact-heading {
   align-items: end;
+  justify-content: space-between;
   margin-bottom: 10px;
+}
+
+.compact-heading > div {
+  flex: 1;
 }
 
 .compact-heading h3 {
@@ -1631,6 +1647,32 @@ body[data-theme="day"] .tournament-card {
   color: var(--app-text);
 }
 
+.ranking-filter-panel {
+  margin: -2px 0 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.24);
+  padding: 12px;
+}
+
+body[data-theme="day"] .ranking-filter-panel {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ranking-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ranking-filter-event {
+  grid-template-columns: 1fr;
+}
+
+.ranking-filter[hidden] {
+  display: none;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1663,6 +1705,112 @@ body[data-theme="day"] .setting-card {
 
 .setting-card .theme-toggle {
   width: fit-content;
+}
+
+.settings-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-section {
+  border: 1px solid var(--app-line);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 48%),
+    rgba(0, 0, 0, 0.22);
+  padding: 14px;
+}
+
+body[data-theme="day"] .settings-section {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.settings-section-head {
+  margin-bottom: 12px;
+}
+
+.settings-section-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.field-note {
+  display: block;
+  margin-top: -4px;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.settings-action-list {
+  display: grid;
+  gap: 8px;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+}
+
+body[data-theme="day"] .setting-row {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.setting-row span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--app-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.setting-row strong {
+  display: block;
+  font-size: 14px;
+}
+
+.setting-row .primary-button,
+.setting-row .ghost-link {
+  min-width: 108px;
+  white-space: nowrap;
+}
+
+.approval-segment {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 10px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.24);
+  padding: 4px;
+}
+
+body[data-theme="day"] .approval-segment {
+  background: rgba(20, 21, 26, 0.04);
+}
+
+.approval-segment button {
+  min-height: 38px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--app-muted);
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.approval-segment button.is-active {
+  background: var(--soap-pink);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 .results-panel,

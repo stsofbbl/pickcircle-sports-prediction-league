@@ -58,7 +58,6 @@
             <div class="section-heading compact-heading">
               <div>
                 <h3>受付中の大会</h3>
-                <p>締切が近い大会はカード内で目立つように表示します。</p>
               </div>
               <span class="pill"><span id="homeOpenCount">0</span>件</span>
             </div>
@@ -71,7 +70,6 @@
             <div class="section-heading">
               <div>
                 <h2>開催中</h2>
-                <p>現在動いている大会と進行状況を確認します。</p>
               </div>
               <span class="status-pill">ACTIVE</span>
             </div>
@@ -157,6 +155,28 @@
               <button type="button">カスタム期間</button>
               <button type="button">大会別</button>
             </div>
+            <div class="ranking-filter-panel" id="rankingFilterPanel" hidden>
+              <div class="ranking-filter ranking-filter-custom" data-ranking-filter="カスタム期間">
+                <label class="field compact-field">
+                  <span>開始日</span>
+                  <input type="date" />
+                </label>
+                <label class="field compact-field">
+                  <span>終了日</span>
+                  <input type="date" />
+                </label>
+              </div>
+              <div class="ranking-filter ranking-filter-event" data-ranking-filter="大会別">
+                <label class="field compact-field">
+                  <span>大会</span>
+                  <select>
+                    <option>W杯2026予想王</option>
+                    <option>5.2ボクシング予想</option>
+                    <option>WBC順位予想</option>
+                  </select>
+                </label>
+              </div>
+            </div>
             <div class="scoreboard" id="scoreboard"></div>
             <div class="insight-band" id="insightBand"></div>
           </section>
@@ -172,58 +192,88 @@
               <button id="resetButton" class="ghost-button">初期化</button>
             </div>
 
-            <label class="field">
-              <span>クラブ名</span>
-              <input id="leagueName" type="text" autocomplete="off" />
-            </label>
+            <div class="settings-stack">
+              <section class="settings-section" aria-label="クラブ設定">
+                <div class="settings-section-head">
+                  <h3>クラブ設定</h3>
+                </div>
+                <label class="field">
+                  <span>クラブ名</span>
+                  <input id="leagueName" type="text" autocomplete="off" />
+                </label>
+                <div class="field">
+                  <span>参加者</span>
+                  <div class="participant-list" id="participantList"></div>
+                  <div class="inline-form">
+                    <input id="participantName" type="text" placeholder="名前を追加" autocomplete="off" />
+                    <button id="addParticipantButton">追加</button>
+                  </div>
+                </div>
+              </section>
 
-            <div class="field">
-              <span>参加者</span>
-              <div class="participant-list" id="participantList"></div>
-              <div class="inline-form">
-                <input id="participantName" type="text" placeholder="名前を追加" autocomplete="off" />
-                <button id="addParticipantButton">追加</button>
-              </div>
-            </div>
+              <section class="settings-section" aria-label="大会設定">
+                <div class="settings-section-head">
+                  <h3>大会設定</h3>
+                </div>
+                <div class="field">
+                  <span>ルールプリセット</span>
+                  <small class="field-note">競技ごとの予想形式の型</small>
+                  <div class="template-grid" id="templateGrid"></div>
+                </div>
+                <div class="settings-action-list">
+                  <article class="setting-row">
+                    <div>
+                      <span>大会追加</span>
+                      <strong>開催する大会を作成</strong>
+                    </div>
+                    <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
+                  </article>
+                  <article class="setting-row">
+                    <div>
+                      <span>候補 / カード / オッズ</span>
+                      <strong>大会内容を編集</strong>
+                    </div>
+                    <a class="ghost-link" href="#prediction">編集へ</a>
+                  </article>
+                </div>
+              </section>
 
-            <div class="field">
-              <span>ルールプリセット</span>
-              <div class="template-grid" id="templateGrid"></div>
-            </div>
+              <section class="settings-section" aria-label="結果確定ルール">
+                <div class="settings-section-head">
+                  <h3>結果確定ルール</h3>
+                </div>
+                <div class="approval-segment" id="approvalPolicyGroup" aria-label="結果確定条件">
+                  <button class="is-active" type="button" data-approval-policy="half">半数で確定</button>
+                  <button type="button" data-approval-policy="admin">管理者のみ</button>
+                  <button type="button" data-approval-policy="unanimous">全員承認</button>
+                </div>
+                <div class="settings-action-list">
+                  <article class="setting-row">
+                    <div>
+                      <span>結果入力</span>
+                      <strong>管理者が結果を入力</strong>
+                    </div>
+                    <a class="ghost-link" href="#archive">結果入力</a>
+                  </article>
+                  <article class="setting-row">
+                    <div>
+                      <span>結果承認</span>
+                      <strong id="approvalRuleText">承認数を計算中</strong>
+                    </div>
+                    <a class="ghost-link" href="#archive">承認へ</a>
+                  </article>
+                </div>
+              </section>
 
-            <div class="settings-grid" aria-label="管理メニュー">
-              <article class="setting-card">
-                <span>大会追加</span>
-                <strong>開催する大会を作成</strong>
-                <small>ルールプリセットを選んで新しい予想テーブルを開始します。</small>
-                <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
-              </article>
-              <article class="setting-card">
-                <span>候補 / カード / オッズ</span>
-                <strong>大会内容を編集</strong>
-                <small>高校野球、格闘技、W杯などの候補名や倍率を手入力で調整します。</small>
-                <a class="ghost-link" href="#prediction">編集へ</a>
-              </article>
-              <article class="setting-card">
-                <span>結果入力</span>
-                <strong>管理者が結果を入力</strong>
-                <small>入力者の1票を含め、必要承認数に達すると結果確定にします。</small>
-                <a class="ghost-link" href="#archive">結果を見る</a>
-              </article>
-              <article class="setting-card">
-                <span>結果承認</span>
-                <strong id="approvalRuleText">承認数を計算中</strong>
-                <small>2人なら管理者のみ、4人なら2人、15人なら8人で確定。</small>
-              </article>
-              <article class="setting-card">
-                <span>表示モード</span>
-                <strong>ダーク / デイ</strong>
-                <small>普段は黒基調、確認用に白基調へ切り替えられます。</small>
+              <section class="settings-section" aria-label="表示モード">
+                <div class="settings-section-head">
+                  <h3>表示モード</h3>
+                </div>
                 <button class="theme-toggle" id="themeToggle" type="button" aria-label="表示モードを切り替える">
                   <span class="theme-toggle-option is-active" data-theme-label="dark">ダーク</span>
                   <span class="theme-toggle-option" data-theme-label="day">デイ</span>
                 </button>
-              </article>
+              </section>
             </div>
           </section>
         </section>
