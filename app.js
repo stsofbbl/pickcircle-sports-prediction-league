@@ -1075,9 +1075,9 @@ function scoreboardInsight(rows) {
   const topNames = rows.filter((row) => row.score === topScore).map((row) => row.name);
   const nextDifferent = rows.find((row) => row.score < topScore);
   if (topNames.length > 1) {
-    return `現在は${topNames.join("、")}が同点トップです。 このアプリはポイント記録用で、決済・送金・リアルマネーベット機能は含めていません。`;
+    return `現在は${topNames.join("、")}が同点トップです。 このアプリはポイント記録用で、決済・送金・リアルマネーを扱う機能は含めていません。`;
   }
-  return `${topNames[0]}が現在トップ。${nextDifferent ? `2位との差は${formatScore(topScore - nextDifferent.score)}ptです。` : ""} このアプリはポイント記録用で、決済・送金・リアルマネーベット機能は含めていません。`;
+  return `${topNames[0]}が現在トップ。${nextDifferent ? `2位との差は${formatScore(topScore - nextDifferent.score)}ptです。` : ""} このアプリはポイント記録用で、決済・送金・リアルマネーを扱う機能は含めていません。`;
 }
 
 function calculateScores() {
