@@ -3,6 +3,7 @@ const STORAGE_KEY = "yoso-league-state-v1";
 const templates = {
   rankingOdds: {
     id: "rankingOdds",
+    sport: "baseball",
     name: "順位予想",
     subtitle: "WBC型: 順位ポイントにオッズを掛ける",
     eventName: "WBC順位予想",
@@ -12,6 +13,7 @@ const templates = {
   },
   draft: {
     id: "draft",
+    sport: "baseball",
     name: "ドラフト",
     subtitle: "選抜型: 指名したチームの到達順位で加点",
     eventName: "選抜ドラフト",
@@ -20,6 +22,7 @@ const templates = {
   },
   fightCard: {
     id: "fightCard",
+    sport: "boxing",
     name: "ファイトカード",
     subtitle: "ボクシング型: 勝敗・決着方法・ラウンド帯",
     eventName: "5.2ボクシング予想",
@@ -31,6 +34,7 @@ const templates = {
   },
   worldCup: {
     id: "worldCup",
+    sport: "soccer",
     name: "W杯3フェーズ",
     subtitle: "GL、決勝T、決勝スコアを合算",
     eventName: "W杯2026予想王",
@@ -49,6 +53,10 @@ const defaultState = {
 let state = loadState();
 
 const els = {
+  pages: [...document.querySelectorAll("[data-page]")],
+  navLinks: [...document.querySelectorAll("[data-nav-page]")],
+  themeToggle: document.querySelector("#themeToggle"),
+  themeOptions: [...document.querySelectorAll("[data-theme-label]")],
   leagueName: document.querySelector("#leagueName"),
   participantList: document.querySelector("#participantList"),
   participantName: document.querySelector("#participantName"),
@@ -62,11 +70,12 @@ const els = {
   resetButton: document.querySelector("#resetButton"),
   scoreboard: document.querySelector("#scoreboard"),
   insightBand: document.querySelector("#insightBand"),
-  exportButton: document.querySelector("#exportButton"),
-  exportDialog: document.querySelector("#exportDialog"),
-  exportText: document.querySelector("#exportText"),
+  exportButton: { addEventListener() {} },
+  exportDialog: { showModal() {} },
+  exportText: { value: "" },
   confirmDialog: document.querySelector("#confirmDialog"),
   confirmSaveButton: document.querySelector("#confirmSaveButton"),
+  matchFeatureIcon: document.querySelector("#matchFeatureIcon"),
   matchFeatureTitle: document.querySelector("#matchFeatureTitle"),
   matchFeatureMeta: document.querySelector("#matchFeatureMeta"),
   historyEventName: document.querySelector("#historyEventName"),
@@ -92,6 +101,57 @@ function createDefaultState() {
 
 function persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+const PAGE_IDS = new Set(["home", "active", "prediction", "archive", "ranking"]);
+const THEME_KEY = "yoso-theme";
+
+function currentPageId() {
+  const id = window.location.hash.replace("#", "") || "home";
+  if (id === "matches" || id === "results" || id === "history") return "archive";
+  return PAGE_IDS.has(id) ? id : "home";
+}
+
+function renderPage() {
+  const pageId = currentPageId();
+  els.pages.forEach((page) => page.classList.toggle("is-active", page.dataset.page === pageId));
+  els.navLinks.forEach((link) => {
+    const isActive = link.dataset.navPage === pageId;
+    link.classList.toggle("is-active", isActive);
+    if (isActive) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "day" ? "day" : "dark";
+  document.body.dataset.theme = nextTheme;
+  localStorage.setItem(THEME_KEY, nextTheme);
+  els.themeOptions.forEach((option) => {
+    option.classList.toggle("is-active", option.dataset.themeLabel === nextTheme);
+  });
+}
+
+function sportMeta(templateId) {
+  const sport = templates[templateId]?.sport || inferSport(state.event?.name || "");
+  const map = {
+    soccer: { label: "サッカー", icon: "⚽" },
+    baseball: { label: "野球", icon: "⚾" },
+    boxing: { label: "ボクシング", icon: "🥊" },
+    basketball: { label: "バスケ", icon: "🏀" },
+    combat: { label: "格闘技", icon: "🥊" },
+    other: { label: "スポーツ", icon: "◌" },
+  };
+  return map[sport] || map.other;
+}
+
+function inferSport(text) {
+  if (/W杯|サッカー|soccer|football/i.test(text)) return "soccer";
+  if (/WBC|野球|甲子園|baseball/i.test(text)) return "baseball";
+  if (/ボクシング|井上|KO|ラウンド|boxing|fight/i.test(text)) return "boxing";
+  if (/バスケ|NBA|basket/i.test(text)) return "basketball";
+  return "other";
 }
 
 function createEvent(templateId, participants) {
@@ -139,6 +199,7 @@ function render() {
   renderEvent();
   renderScores();
   renderShellMeta();
+  renderPage();
   persist();
 }
 
@@ -1226,6 +1287,26 @@ function escapeAttr(value) {
   return escapeHtml(value);
 }
 
+function renderShellMeta() {
+  const sport = sportMeta(state.event?.templateId);
+  if (els.matchFeatureIcon) {
+    els.matchFeatureIcon.textContent = sport.icon;
+    els.matchFeatureIcon.setAttribute("aria-label", sport.label);
+  }
+  if (els.matchFeatureTitle) els.matchFeatureTitle.textContent = state.event?.name || "現在のイベント";
+  if (els.matchFeatureMeta) {
+    const template = templates[state.event?.templateId];
+    const count = state.event?.templateId === "fightCard"
+      ? getMarkets().length
+      : state.event?.templateId === "worldCup"
+        ? getCountries().length
+        : getTeams().length;
+    els.matchFeatureMeta.textContent = `${sport.label} / ${template?.name || "ルール"} / ${count}件の候補`;
+  }
+  if (els.historyEventName) els.historyEventName.textContent = state.event?.name || "未保存";
+  if (els.resultEventName) els.resultEventName.textContent = state.event?.name || "未設定";
+}
+
 els.leagueName.addEventListener("input", () => {
   state.leagueName = els.leagueName.value;
   persist();
@@ -1281,4 +1362,17 @@ els.exportButton.addEventListener("click", () => {
   els.exportDialog.showModal();
 });
 
+els.navLinks.forEach((link) => {
+  link.addEventListener("click", () => {
+    requestAnimationFrame(renderPage);
+  });
+});
+
+window.addEventListener("hashchange", renderPage);
+
+els.themeToggle?.addEventListener("click", () => {
+  applyTheme(document.body.dataset.theme === "day" ? "dark" : "day");
+});
+
+applyTheme(localStorage.getItem(THEME_KEY) || "dark");
 render();

@@ -10,158 +10,186 @@
     <title>YOSO</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body data-theme="dark">
     <div class="app-shell">
-      <header class="topbar" id="home">
+      <header class="topbar">
         <a class="brand-home" href="#home" aria-label="ホームへ戻る">
           <span class="brand-mark" aria-hidden="true">
-            <img src="./assets/yoso-club-logo.png" alt="" />
+            <img src="./assets/yoso-club-app-icon.png" alt="" />
           </span>
           <span class="brand-lockup">
-            <span class="brand-kicker">Private prediction lounge</span>
             <span class="brand-wordmark">YOSO</span>
           </span>
         </a>
-        <button class="icon-button" id="exportButton" title="データを書き出す" aria-label="データを書き出す">
-          ⇩
+
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="表示モードを切り替える">
+          <span class="theme-toggle-option is-active" data-theme-label="dark">ダーク</span>
+          <span class="theme-toggle-option" data-theme-label="day">デイ</span>
         </button>
       </header>
 
-      <nav class="screen-nav" aria-label="画面ナビゲーション">
-        <a href="#home">ホーム</a>
-        <a href="#matches">今日の試合</a>
-        <a href="#prediction">予想入力</a>
-        <a href="#results">結果表示</a>
-        <a href="#history">履歴</a>
-        <a href="#ranking">ランキング</a>
-      </nav>
-
-      <section class="match-strip" id="matches" aria-label="今日の試合一覧">
-        <div class="section-heading">
-          <div>
-            <h2>今日の試合一覧</h2>
-            <p>現在選んでいるルールのカードや候補を、入力前にざっと確認します。</p>
-          </div>
-          <span class="status-pill">Members only</span>
-        </div>
-        <div class="match-grid">
-          <article class="match-card">
-            <span class="match-kicker">Table one</span>
-            <strong id="matchFeatureTitle">現在のイベント</strong>
-            <small id="matchFeatureMeta">ルールを選択すると内容が更新されます</small>
-          </article>
-          <article class="match-card sub-card">
-            <span class="match-kicker">Line board</span>
-            <strong>候補・オッズ編集</strong>
-            <small>API取得できない大会も手入力で調整可能</small>
-          </article>
-          <article class="match-card sub-card">
-            <span class="match-kicker">Seats</span>
-            <strong>参加者別予想</strong>
-            <small>確定結果を入れるとランキングへ反映</small>
-          </article>
-        </div>
-      </section>
-
-      <main class="workspace">
-        <section class="league-panel" aria-label="リーグ設定">
-          <div class="section-heading">
-            <div>
-              <h2>リーグ</h2>
-              <p>仲間内の参加者、ルール、イベントを設定します。</p>
+      <main class="app-pages">
+        <section class="app-page home-page" id="home" data-page="home" aria-label="ホーム">
+          <section class="league-panel" aria-label="リーグ設定">
+            <div class="section-heading">
+              <div>
+                <h2>ホーム</h2>
+                <p>リーグ、参加者、ルールを管理します。</p>
+              </div>
+              <button id="resetButton" class="ghost-button">初期化</button>
             </div>
-            <button id="resetButton" class="ghost-button">初期化</button>
-          </div>
 
-          <label class="field">
-            <span>リーグ名</span>
-            <input id="leagueName" type="text" autocomplete="off" />
-          </label>
+            <label class="field">
+              <span>リーグ名</span>
+              <input id="leagueName" type="text" autocomplete="off" />
+            </label>
 
-          <div class="field">
-            <span>参加者</span>
-            <div class="participant-list" id="participantList"></div>
-            <div class="inline-form">
-              <input id="participantName" type="text" placeholder="名前を追加" autocomplete="off" />
-              <button id="addParticipantButton">追加</button>
+            <div class="field">
+              <span>参加者</span>
+              <div class="participant-list" id="participantList"></div>
+              <div class="inline-form">
+                <input id="participantName" type="text" placeholder="名前を追加" autocomplete="off" />
+                <button id="addParticipantButton">追加</button>
+              </div>
             </div>
-          </div>
 
-          <div class="field">
-            <span>ルールプリセット</span>
-            <div class="template-grid" id="templateGrid"></div>
-          </div>
+            <div class="field">
+              <span>ルールプリセット</span>
+              <div class="template-grid" id="templateGrid"></div>
+            </div>
+          </section>
         </section>
 
-        <section class="event-panel" id="prediction" aria-label="予想入力画面">
-          <div class="section-heading">
-            <div>
-              <h2 id="eventTitle">イベント</h2>
-              <p id="eventSubtitle">プリセットを選ぶと入力欄が切り替わります。</p>
+        <section class="app-page" id="active" data-page="active" aria-label="開催中">
+          <section class="match-strip" aria-label="開催中の試合一覧">
+            <div class="section-heading">
+              <div>
+                <h2>開催中</h2>
+                <p>現在選んでいるルールのカードや候補を、入力前に確認します。</p>
+              </div>
+              <span class="status-pill">POINT ONLY</span>
             </div>
-            <button id="newEventButton" class="primary-button">NEW TABLE</button>
-          </div>
-
-          <div class="event-form" id="eventForm"></div>
+            <div class="match-grid">
+              <article class="match-card">
+                <span class="sport-icon" id="matchFeatureIcon" aria-hidden="true"></span>
+                <span class="match-kicker">Current</span>
+                <strong id="matchFeatureTitle">現在のイベント</strong>
+                <small id="matchFeatureMeta">ルールを選択すると内容が更新されます</small>
+              </article>
+              <article class="match-card sub-card">
+                <span class="sport-icon sport-icon-odds" aria-hidden="true">◎</span>
+                <span class="match-kicker">Odds</span>
+                <strong>候補・オッズ編集</strong>
+                <small>API取得できない大会も手入力で調整可能</small>
+              </article>
+              <article class="match-card sub-card">
+                <span class="sport-icon sport-icon-members" aria-hidden="true">◉</span>
+                <span class="match-kicker">Members</span>
+                <strong>参加者別予想</strong>
+                <small>確定結果を入れるとランキングへ反映</small>
+              </article>
+            </div>
+          </section>
         </section>
 
-        <section class="results-panel" id="results" aria-label="結果表示画面">
-          <div class="section-heading">
-            <div>
-              <h2>結果表示</h2>
-              <p>確定した結果と、現在のテーブル状況を静かに確認します。</p>
+        <section class="app-page" id="prediction" data-page="prediction" aria-label="予想入力">
+          <section class="event-panel" aria-label="予想入力画面">
+            <div class="section-heading">
+              <div>
+                <h2 id="eventTitle">イベント</h2>
+                <p id="eventSubtitle">プリセットを選ぶと入力欄が切り替わります。</p>
+              </div>
+              <button id="newEventButton" class="primary-button">NEW TABLE</button>
             </div>
-            <span class="status-pill">Settlement</span>
-          </div>
-          <div class="result-board">
-            <div class="result-card">
-              <span>Current table</span>
-              <strong id="resultEventName">未設定</strong>
-              <small>確定結果の入力状況に応じてランキングが動きます</small>
-            </div>
-            <div class="result-card result-card-accent">
-              <span>House note</span>
-              <strong>POINT ONLY</strong>
-              <small>決済・送金・リアルマネー機能はありません</small>
-            </div>
-          </div>
+
+            <div class="event-form" id="eventForm"></div>
+          </section>
         </section>
 
-        <section class="history-panel" id="history" aria-label="履歴画面">
-          <div class="section-heading">
-            <div>
-              <h2>履歴</h2>
-              <p>ローカル保存中のイベント状態を確認できます。</p>
+        <section class="app-page" id="archive" data-page="archive" aria-label="アーカイブ">
+          <section class="results-panel" id="results" aria-label="結果表示画面">
+            <div class="section-heading">
+              <div>
+                <h2>アーカイブ</h2>
+                <p>確定した結果と保存中のイベント状態を確認します。</p>
+              </div>
+              <span class="status-pill">ARCHIVE</span>
             </div>
-            <span class="status-pill">History</span>
-          </div>
-          <div class="history-list">
-            <div class="history-row">
-              <span>最新保存</span>
-              <strong id="historyEventName">未保存</strong>
-              <small>この端末のブラウザ内に保存されます</small>
+            <div class="result-board">
+              <div class="result-card">
+                <span>Current table</span>
+                <strong id="resultEventName">未設定</strong>
+                <small>確定結果の入力状況に応じてランキングが動きます</small>
+              </div>
+              <div class="result-card result-card-accent">
+                <span>House note</span>
+                <strong>POINT ONLY</strong>
+                <small>決済・送金・リアルマネーを扱う機能はありません</small>
+              </div>
             </div>
-            <div class="history-row">
-              <span>安全メモ</span>
-              <strong>ポイント記録専用</strong>
-              <small>決済、送金、リアルマネー機能はありません</small>
+          </section>
+
+          <section class="history-panel" id="history" aria-label="履歴画面">
+            <div class="section-heading">
+              <div>
+                <h2>履歴</h2>
+                <p>ローカル保存中のイベント状態を確認できます。</p>
+              </div>
+              <span class="status-pill">History</span>
             </div>
-          </div>
+            <div class="history-list">
+              <div class="history-row">
+                <span>最新保存</span>
+                <strong id="historyEventName">未保存</strong>
+                <small>この端末のブラウザ内に保存されます</small>
+              </div>
+              <div class="history-row">
+                <span>安全メモ</span>
+                <strong>ポイント記録専用</strong>
+                <small>決済・送金・リアルマネーを扱う機能はありません</small>
+              </div>
+            </div>
+          </section>
         </section>
 
-        <section class="score-panel" id="ranking" aria-label="ランキング画面">
-          <div class="section-heading">
-            <div>
-              <h2>ランキング</h2>
-              <p>確定結果を入力すると順位が自動更新されます。</p>
+        <section class="app-page" id="ranking" data-page="ranking" aria-label="ランキング">
+          <section class="score-panel" aria-label="ランキング画面">
+            <div class="section-heading">
+              <div>
+                <h2>ランキング</h2>
+                <p>確定結果を入力すると順位が自動更新されます。</p>
+              </div>
+              <button id="saveButton" class="primary-button">LOCK IN</button>
             </div>
-            <button id="saveButton" class="primary-button">LOCK IN</button>
-          </div>
 
-          <div class="scoreboard" id="scoreboard"></div>
-          <div class="insight-band" id="insightBand"></div>
+            <div class="scoreboard" id="scoreboard"></div>
+            <div class="insight-band" id="insightBand"></div>
+          </section>
         </section>
       </main>
+
+      <nav class="bottom-nav" aria-label="画面ナビゲーション">
+        <a href="#home" data-nav-page="home">
+          <span class="nav-icon" aria-hidden="true">⌂</span>
+          <span>ホーム</span>
+        </a>
+        <a href="#active" data-nav-page="active">
+          <span class="nav-icon" aria-hidden="true">●</span>
+          <span>開催中</span>
+        </a>
+        <a href="#prediction" data-nav-page="prediction">
+          <span class="nav-icon" aria-hidden="true">✎</span>
+          <span>予想入力</span>
+        </a>
+        <a href="#archive" data-nav-page="archive">
+          <span class="nav-icon" aria-hidden="true">□</span>
+          <span>アーカイブ</span>
+        </a>
+        <a href="#ranking" data-nav-page="ranking">
+          <span class="nav-icon" aria-hidden="true">#</span>
+          <span>ランキング</span>
+        </a>
+      </nav>
     </div>
 
     <dialog id="confirmDialog" class="confirm-dialog">
@@ -173,17 +201,6 @@
           <button class="ghost-button" value="cancel">戻る</button>
           <button class="primary-button" id="confirmSaveButton" value="confirm">CONFIRM</button>
         </div>
-      </form>
-    </dialog>
-
-    <dialog id="exportDialog">
-      <form method="dialog">
-        <div class="dialog-head">
-          <h2>エクスポート</h2>
-          <button class="icon-button" value="close" aria-label="閉じる">×</button>
-        </div>
-        <textarea id="exportText" readonly></textarea>
-        <button class="primary-button" value="close">閉じる</button>
       </form>
     </dialog>
 

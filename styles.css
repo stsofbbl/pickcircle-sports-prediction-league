@@ -1094,3 +1094,464 @@ dialog::backdrop {
     font-size: 20px;
   }
 }
+
+/* YOSO soap app shell: bottom-tab pages, restrained pink accents. */
+:root {
+  --soap-pink: #ff4fa3;
+  --soap-hot: #ff2f94;
+  --soap-light: #ffd5eb;
+  --app-bg: #050507;
+  --app-surface: #111115;
+  --app-surface-2: #18181e;
+  --app-text: #f7f7fb;
+  --app-muted: #a5a7b1;
+  --app-line: rgba(255, 255, 255, 0.12);
+  --app-line-strong: rgba(255, 79, 163, 0.36);
+}
+
+body {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 50% -10%, rgba(255, 79, 163, 0.16), transparent 35%),
+    linear-gradient(180deg, #09090c 0%, var(--app-bg) 48%, #020203 100%);
+  color: var(--app-text);
+}
+
+body[data-theme="day"] {
+  --app-bg: #f7f8fb;
+  --app-surface: #ffffff;
+  --app-surface-2: #f1f2f6;
+  --app-text: #14151a;
+  --app-muted: #676a75;
+  --app-line: rgba(14, 15, 18, 0.12);
+  background:
+    radial-gradient(ellipse at 50% -12%, rgba(255, 79, 163, 0.18), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #f7f8fb 56%, #eef0f6 100%);
+}
+
+body::before {
+  opacity: 0.12;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.08), transparent 2px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+}
+
+body[data-theme="day"]::before,
+body[data-theme="day"]::after {
+  opacity: 0.05;
+}
+
+.app-shell {
+  z-index: 1;
+  min-height: 100vh;
+  padding: 14px 14px 112px;
+}
+
+body::after {
+  display: none;
+}
+
+.topbar {
+  min-height: 84px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border-color: var(--app-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent),
+    var(--app-surface);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="day"] .topbar {
+  box-shadow: 0 18px 46px rgba(20, 21, 26, 0.1);
+}
+
+.topbar::before,
+.topbar::after {
+  display: none;
+}
+
+.brand-mark {
+  width: 60px;
+  height: 60px;
+  border: 0;
+  border-radius: 17px;
+  background: var(--soap-pink);
+  box-shadow:
+    0 16px 34px rgba(255, 47, 148, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.brand-wordmark {
+  color: var(--app-text);
+  font-size: clamp(40px, 11vw, 60px);
+  text-shadow:
+    0 2px 0 rgba(255, 79, 163, 0.36),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+body[data-theme="day"] .brand-wordmark {
+  text-shadow: 0 2px 0 rgba(255, 79, 163, 0.25);
+}
+
+.theme-toggle {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  min-height: 38px;
+  padding: 3px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--app-muted);
+}
+
+body[data-theme="day"] .theme-toggle {
+  background: rgba(20, 21, 26, 0.04);
+}
+
+.theme-toggle-option {
+  display: grid;
+  place-items: center;
+  min-width: 48px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.theme-toggle-option.is-active {
+  background: var(--soap-pink);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.app-pages {
+  display: block;
+}
+
+.app-page {
+  display: none;
+  animation: pageIn 180ms ease-out;
+}
+
+.app-page.is-active {
+  display: block;
+}
+
+@keyframes pageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.league-panel,
+.match-strip,
+.event-panel,
+.results-panel,
+.history-panel,
+.score-panel,
+.match-card,
+.result-card,
+.history-row,
+.score-row,
+.template-card,
+.market-editor,
+.odds-summary,
+.insight-band {
+  border-color: var(--app-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 42%),
+    var(--app-surface);
+  color: var(--app-text);
+}
+
+body[data-theme="day"] .league-panel,
+body[data-theme="day"] .match-strip,
+body[data-theme="day"] .event-panel,
+body[data-theme="day"] .results-panel,
+body[data-theme="day"] .history-panel,
+body[data-theme="day"] .score-panel,
+body[data-theme="day"] .match-card,
+body[data-theme="day"] .match-card.sub-card,
+body[data-theme="day"] .result-card,
+body[data-theme="day"] .history-row,
+body[data-theme="day"] .score-row,
+body[data-theme="day"] .template-card,
+body[data-theme="day"] .market-editor,
+body[data-theme="day"] .odds-summary,
+body[data-theme="day"] .insight-band {
+  box-shadow: 0 18px 46px rgba(20, 21, 26, 0.08);
+}
+
+body[data-theme="day"] .match-card.sub-card {
+  background:
+    linear-gradient(180deg, rgba(255, 79, 163, 0.035), transparent 45%),
+    #ffffff;
+}
+
+.league-panel {
+  position: static;
+  top: auto;
+}
+
+.results-panel,
+.history-panel,
+.score-panel {
+  grid-column: auto;
+}
+
+.history-panel {
+  margin-top: 14px;
+}
+
+.section-heading p,
+.match-card small,
+.history-row span,
+.history-row small,
+.score-meta span,
+.field > span,
+.sub-label,
+.odds-summary small {
+  color: var(--app-muted);
+}
+
+.match-kicker,
+.status-pill,
+.bulk-import summary,
+.market-title-field > span {
+  color: var(--soap-pink);
+}
+
+input,
+select,
+textarea {
+  border-color: var(--app-line);
+  background: rgba(0, 0, 0, 0.38);
+  color: var(--app-text);
+}
+
+body[data-theme="day"] input,
+body[data-theme="day"] select,
+body[data-theme="day"] textarea {
+  background: #fff;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--soap-pink);
+  box-shadow: 0 0 0 3px rgba(255, 79, 163, 0.12);
+}
+
+.primary-button {
+  border: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 30% 0%, rgba(255, 255, 255, 0.34), transparent 40%),
+    linear-gradient(180deg, #ff8ac4, var(--soap-pink) 52%, #e0187a);
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  box-shadow: 0 18px 36px rgba(255, 47, 148, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+.event-panel h2,
+.league-panel h2,
+.match-strip h2,
+.results-panel h2,
+.history-panel h2,
+.score-panel h2,
+.field,
+.entry-block,
+.event-form {
+  color: var(--app-text);
+}
+
+.event-panel .section-heading p {
+  color: var(--app-muted);
+}
+
+.ghost-button,
+.inline-form button {
+  border-color: var(--app-line);
+  background: var(--app-surface-2);
+  color: var(--app-text);
+}
+
+.template-card.active {
+  border-color: var(--app-line-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 79, 163, 0.13), transparent 50%),
+    var(--app-surface);
+}
+
+.match-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.match-card {
+  position: relative;
+  min-height: 138px;
+  overflow: hidden;
+}
+
+.match-card:first-child {
+  grid-column: 1 / -1;
+}
+
+.sport-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: 6px;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--app-text);
+  font-size: 25px;
+  line-height: 1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme="day"] .sport-icon {
+  background: #fff;
+}
+
+.sport-icon-odds,
+.sport-icon-members {
+  color: var(--app-text);
+  font-family: var(--mono);
+}
+
+.score-value,
+.result-card strong {
+  color: var(--app-text);
+}
+
+.score-row-leader {
+  border-color: var(--app-line-strong);
+  background:
+    linear-gradient(90deg, rgba(255, 79, 163, 0.1), transparent 55%),
+    var(--app-surface);
+}
+
+.rank {
+  background: var(--app-surface-2);
+  color: var(--app-text);
+}
+
+.rank-gold {
+  background: linear-gradient(145deg, #ffe5f2, var(--soap-pink));
+  color: #350018;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  z-index: 20;
+  display: grid;
+  width: min(560px, calc(100% - 20px));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  transform: translateX(-50%);
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: rgba(2, 2, 4, 0.82);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
+  backdrop-filter: blur(18px);
+}
+
+body[data-theme="day"] .bottom-nav {
+  border-color: rgba(20, 21, 26, 0.1);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 20px 50px rgba(20, 21, 26, 0.14);
+}
+
+.bottom-nav a {
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  place-items: center;
+  gap: 2px;
+  padding: 7px 3px;
+  border-radius: 18px;
+  color: var(--app-muted);
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.bottom-nav a.is-active {
+  background:
+    radial-gradient(ellipse at 32% 0%, rgba(255, 255, 255, 0.5), transparent 42%),
+    linear-gradient(180deg, #ff96cc 0%, var(--soap-pink) 54%, #dd1677 100%);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(255, 47, 148, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.nav-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.screen-nav {
+  display: none;
+}
+
+@media (min-width: 860px) {
+  .app-shell {
+    width: min(760px, 100%);
+  }
+}
+
+@media (max-width: 520px) {
+  .app-shell {
+    padding: 12px 12px 102px;
+  }
+
+  .topbar {
+    min-height: 78px;
+  }
+
+  .brand-mark {
+    width: 54px;
+    height: 54px;
+  }
+
+  .brand-wordmark {
+    font-size: 42px;
+  }
+
+  .theme-toggle-option {
+    min-width: 38px;
+    font-size: 10px;
+  }
+
+  .match-grid,
+  .result-board {
+    grid-template-columns: 1fr;
+  }
+
+  .match-card:first-child {
+    grid-column: auto;
+  }
+
+  .bottom-nav {
+    bottom: 10px;
+    border-radius: 21px;
+  }
+
+  .bottom-nav a {
+    min-height: 54px;
+    border-radius: 16px;
+    font-size: 9px;
+  }
+}
