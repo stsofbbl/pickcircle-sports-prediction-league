@@ -1,0 +1,18 @@
+{
+  "name": "YOSO",
+  "short_name": "YOSO",
+  "description": "身内用スポーツ予想リーグをポイント制で管理するアプリ",
+  "start_url": "./index.html#home",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#050507",
+  "theme_color": "#050507",
+  "icons": [
+    {
+      "src": "./assets/yoso-app-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
