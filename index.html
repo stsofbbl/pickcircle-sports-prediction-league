@@ -65,15 +65,82 @@
           </section>
         </section>
 
-        <section class="app-page" id="active" data-page="active" aria-label="開催中">
-          <section class="match-strip" aria-label="開催中の試合一覧">
+        <section class="app-page" id="active" data-page="active" aria-label="大会編集">
+          <section class="match-strip" aria-label="大会編集">
             <div class="section-heading">
               <div>
-                <h2>開催中</h2>
+                <h2>大会編集</h2>
               </div>
-              <span class="status-pill">ACTIVE</span>
+              <span class="status-pill">TOURNAMENTS</span>
             </div>
             <div class="tournament-list" id="activeTournamentCards"></div>
+          </section>
+
+          <section class="settings-section" aria-label="大会設定">
+            <div class="settings-section-head">
+              <h3>大会設定</h3>
+            </div>
+            <div class="field">
+              <span>ルールプリセット</span>
+              <small class="field-note">競技ごとの予想形式の型</small>
+              <details class="preset-details" open>
+                <summary class="preset-summary">プリセット一覧</summary>
+                <div class="preset-description" id="presetDescription"></div>
+                <div class="template-grid" id="templateGrid"></div>
+              </details>
+            </div>
+            <div class="settings-action-list">
+              <div class="event-create-form" aria-label="大会追加フォーム">
+                <label class="field compact-field">
+                  <span>大会名</span>
+                  <input id="newTournamentName" type="text" placeholder="例: 夏の甲子園2026" autocomplete="off" />
+                </label>
+                <label class="field compact-field">
+                  <span>競技</span>
+                  <select id="newTournamentSport">
+                    <option value="baseball">野球</option>
+                    <option value="soccer">サッカー</option>
+                    <option value="boxing">ボクシング</option>
+                    <option value="basketball">バスケ</option>
+                    <option value="other">その他</option>
+                  </select>
+                </label>
+                <label class="field compact-field">
+                  <span>予想形式</span>
+                  <select id="newTournamentTemplate"></select>
+                </label>
+                <label class="field compact-field">
+                  <span>締切</span>
+                  <input id="newTournamentDeadline" type="datetime-local" />
+                </label>
+                <label class="field compact-field">
+                  <span>ステータス</span>
+                  <select id="newTournamentStatus">
+                    <option value="open">予想受付中</option>
+                    <option value="resultWait">結果待ち</option>
+                    <option value="archive">アーカイブ</option>
+                  </select>
+                </label>
+              </div>
+              <article class="setting-row">
+                <div>
+                  <span>大会追加</span>
+                  <strong>開催する大会を作成</strong>
+                </div>
+                <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
+              </article>
+              <article class="setting-row">
+                <div>
+                  <span>候補 / カード / オッズ</span>
+                  <strong>大会内容を編集</strong>
+                </div>
+                <a class="ghost-link" href="#prediction">編集へ</a>
+              </article>
+            </div>
+            <div class="field tournament-manage-field">
+              <span>大会一覧</span>
+              <div class="tournament-manage-list" id="tournamentManageList"></div>
+            </div>
           </section>
         </section>
 
@@ -91,7 +158,7 @@
           </section>
         </section>
 
-        <section class="app-page" id="archive" data-page="archive" aria-label="アーカイブ">
+        <section class="app-page" id="archive" data-page="active" aria-label="アーカイブ">
           <section class="results-panel" id="results" aria-label="結果表示画面">
             <div class="section-heading">
               <div>
@@ -213,69 +280,6 @@
                 </div>
               </section>
 
-              <section class="settings-section" aria-label="大会設定">
-                <div class="settings-section-head">
-                  <h3>大会設定</h3>
-                </div>
-                <div class="field">
-                  <span>ルールプリセット</span>
-                  <small class="field-note">競技ごとの予想形式の型</small>
-                  <div class="template-grid" id="templateGrid"></div>
-                </div>
-                <div class="settings-action-list">
-                  <div class="event-create-form" aria-label="大会追加フォーム">
-                    <label class="field compact-field">
-                      <span>大会名</span>
-                      <input id="newTournamentName" type="text" placeholder="例: 夏の甲子園2026" autocomplete="off" />
-                    </label>
-                    <label class="field compact-field">
-                      <span>競技</span>
-                      <select id="newTournamentSport">
-                        <option value="baseball">野球</option>
-                        <option value="soccer">サッカー</option>
-                        <option value="boxing">ボクシング</option>
-                        <option value="basketball">バスケ</option>
-                        <option value="other">その他</option>
-                      </select>
-                    </label>
-                    <label class="field compact-field">
-                      <span>予想形式</span>
-                      <select id="newTournamentTemplate"></select>
-                    </label>
-                    <label class="field compact-field">
-                      <span>締切</span>
-                      <input id="newTournamentDeadline" type="datetime-local" />
-                    </label>
-                    <label class="field compact-field">
-                      <span>ステータス</span>
-                      <select id="newTournamentStatus">
-                        <option value="open">予想受付中</option>
-                        <option value="resultWait">結果待ち</option>
-                        <option value="archive">アーカイブ</option>
-                      </select>
-                    </label>
-                  </div>
-                  <article class="setting-row">
-                    <div>
-                      <span>大会追加</span>
-                      <strong>開催する大会を作成</strong>
-                    </div>
-                    <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
-                  </article>
-                  <article class="setting-row">
-                    <div>
-                      <span>候補 / カード / オッズ</span>
-                      <strong>大会内容を編集</strong>
-                    </div>
-                    <a class="ghost-link" href="#prediction">編集へ</a>
-                  </article>
-                </div>
-                <div class="field tournament-manage-field">
-                  <span>大会一覧</span>
-                  <div class="tournament-manage-list" id="tournamentManageList"></div>
-                </div>
-              </section>
-
               <section class="settings-section" aria-label="結果確定ルール">
                 <div class="settings-section-head">
                   <h3>結果確定ルール</h3>
@@ -291,14 +295,14 @@
                       <span>結果入力</span>
                       <strong>管理者が結果を入力</strong>
                     </div>
-                    <a class="ghost-link" href="#archive">結果入力</a>
+                    <a class="ghost-link" href="#active">結果入力</a>
                   </article>
                   <article class="setting-row">
                     <div>
                       <span>結果承認</span>
                       <strong id="approvalRuleText">承認数を計算中</strong>
                     </div>
-                    <a class="ghost-link" href="#archive">承認へ</a>
+                    <a class="ghost-link" href="#active">承認へ</a>
                   </article>
                 </div>
               </section>
@@ -322,17 +326,17 @@
           <span class="nav-icon" aria-hidden="true">⌂</span>
           <span>ホーム</span>
         </a>
-        <a href="#active" data-nav-page="active">
-          <span class="nav-icon" aria-hidden="true">●</span>
-          <span>開催中</span>
+        <a href="#prediction" data-nav-page="prediction">
+          <span class="nav-icon" aria-hidden="true">◇</span>
+          <span>YOSO</span>
         </a>
         <a href="#ranking" data-nav-page="ranking">
           <span class="nav-icon" aria-hidden="true">#</span>
           <span>ランキング</span>
         </a>
-        <a href="#archive" data-nav-page="archive">
+        <a href="#active" data-nav-page="active">
           <span class="nav-icon" aria-hidden="true">□</span>
-          <span>アーカイブ</span>
+          <span>大会編集</span>
         </a>
         <a href="#settings" data-nav-page="settings">
           <span class="nav-icon" aria-hidden="true">⚙</span>

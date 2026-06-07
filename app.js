@@ -86,6 +86,17 @@ const templates = {
   },
 };
 
+const presetRuleDescriptions = {
+  rankingOdds: "優勝、準優勝、ベスト4などの順位を予想する型です。WBC、甲子園、W杯の上位予想に向いています。",
+  playoff: "クライマックスシリーズやプレーオフの勝ち抜け、シリーズ勝者、注目枠を予想する型です。",
+  draft: "参加者がチームや選手を指名し、到達成績に応じてポイントを獲得する型です。",
+  fightCard: "格闘技やボクシングの対戦カードごとに、勝者、KO、判定などを予想する型です。",
+  scoreBonus: "決勝スコア、総得点、KOラウンドなど、単独のボーナス項目を予想する型です。",
+  worldCup: "グループ、決勝トーナメント、順位、表彰などをまとめて扱う大型大会向けの型です。",
+  groupStage: "W杯などでグループ突破、順位、到達結果を中心に予想する型です。",
+  composite: "複数の予想形式を組み合わせる大型大会向けの型です。W杯2026予想王のような大会に向いています。",
+};
+
 const defaultState = {
   leagueName: "G-UNIT 予想リーグ",
   participants: ["和田", "拓洋", "銀次", "いの"],
@@ -120,6 +131,7 @@ const els = {
   participantName: document.querySelector("#participantName"),
   addParticipantButton: document.querySelector("#addParticipantButton"),
   templateGrid: document.querySelector("#templateGrid"),
+  presetDescription: document.querySelector("#presetDescription"),
   eventTitle: document.querySelector("#eventTitle"),
   eventSubtitle: document.querySelector("#eventSubtitle"),
   eventForm: document.querySelector("#eventForm"),
@@ -216,12 +228,12 @@ function syncActiveEvent() {
   state.activeTemplate = state.event.templateId;
 }
 
-const PAGE_IDS = new Set(["home", "active", "prediction", "archive", "ranking", "settings"]);
+const PAGE_IDS = new Set(["home", "active", "prediction", "ranking", "settings"]);
 const THEME_KEY = "yoso-theme";
 
 function currentPageId() {
   const id = window.location.hash.replace("#", "") || "home";
-  if (id === "matches" || id === "results" || id === "history") return "archive";
+  if (id === "matches" || id === "archive" || id === "results" || id === "history") return "active";
   return PAGE_IDS.has(id) ? id : "home";
 }
 
@@ -320,6 +332,7 @@ function render() {
   if (els.leagueName) els.leagueName.value = state.leagueName;
   renderParticipants();
   renderTemplates();
+  renderPresetDescription();
   renderTournamentCreateOptions();
   renderEvent();
   renderScores();
@@ -403,7 +416,7 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
       </div>
       <div class="tournament-actions">
         <a class="primary-link" href="#prediction" data-event-action="predict" data-event-id="${escapeAttr(event.id)}">${escapeHtml(actionLabel)}</a>
-        <a class="ghost-link" href="#settings" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会設定</a>
+        <a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>
       </div>
     </article>
   `;
@@ -444,8 +457,8 @@ function resultWaitCardMarkup(event) {
         <span class="status-label pending">結果待ち</span>
       </div>
       <div class="tournament-actions">
-        <a class="primary-link" href="#archive" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
-        <a class="ghost-link" href="#archive" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
+        <a class="primary-link" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+        <a class="ghost-link" href="#active" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
       </div>
     </article>
   `;
@@ -478,9 +491,16 @@ function candidateCountForCurrentEvent() {
 
 function candidateCountForEvent(event) {
   const base = baseTemplateId(event?.templateId);
-  if (base === "fightCard") return (event.config?.markets || templates.fightCard.markets).length;
-  if (base === "worldCup") return (event.config?.countries || templates.worldCup.countries).length;
-  return (event.config?.teams || templates[base]?.teams || []).length;
+  if (base === "fightCard") {
+    const markets = Array.isArray(event.config?.markets) ? event.config.markets : templates.fightCard.markets;
+    return markets.length;
+  }
+  if (base === "worldCup") {
+    const countries = Array.isArray(event.config?.countries) ? event.config.countries : templates.worldCup.countries;
+    return countries.length;
+  }
+  const teams = Array.isArray(event.config?.teams) ? event.config.teams : templates[base]?.teams || [];
+  return teams.length;
 }
 
 function requiredApprovalCount() {
@@ -606,6 +626,7 @@ function renderTournamentManageList() {
             <button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
             <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
             <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>
+            <button type="button" class="danger-action" data-event-delete data-event-id="${escapeAttr(event.id)}">削除</button>
           </div>
         </article>
       `;
@@ -649,6 +670,15 @@ function renderTemplates() {
     });
     els.templateGrid.append(button);
   });
+}
+
+function renderPresetDescription() {
+  if (!els.presetDescription) return;
+  const template = templates[state.activeTemplate] || templates.worldCup;
+  els.presetDescription.innerHTML = `
+    <strong>${escapeHtml(template.name)}</strong>
+    <span>${escapeHtml(presetRuleDescriptions[template.id] || template.subtitle || "")}</span>
+  `;
 }
 
 function renderEvent() {
@@ -863,8 +893,7 @@ function bindGenericInputs() {
   els.eventForm.querySelectorAll("[data-list-row]").forEach((input) => {
     input.addEventListener("change", () => {
       const [key, indexRaw] = input.dataset.listRow.split(":");
-      ensureConfig();
-      state.event.config[key] ||= [];
+      ensureEditableList(key);
       state.event.config[key][Number(indexRaw)] = input.value.trim();
       state.event.config[key] = state.event.config[key].filter(Boolean);
       render();
@@ -872,18 +901,16 @@ function bindGenericInputs() {
   });
   els.eventForm.querySelectorAll("[data-list-add]").forEach((button) => {
     button.addEventListener("click", () => {
-      ensureConfig();
-      state.event.config[button.dataset.listAdd] ||= [];
-      state.event.config[button.dataset.listAdd].push("");
+      const list = ensureEditableList(button.dataset.listAdd);
+      list.push("");
       render();
     });
   });
   els.eventForm.querySelectorAll("[data-list-remove]").forEach((button) => {
     button.addEventListener("click", () => {
       const [key, indexRaw] = button.dataset.listRemove.split(":");
-      ensureConfig();
-      state.event.config[key] ||= [];
-      state.event.config[key].splice(Number(indexRaw), 1);
+      const list = ensureEditableList(key);
+      list.splice(Number(indexRaw), 1);
       render();
     });
   });
@@ -1229,7 +1256,7 @@ function editableListBlock(title, key, items, addLabel) {
         <button class="ghost-button small-button" type="button" data-list-add="${escapeAttr(key)}">＋ ${escapeHtml(addLabel)}</button>
       </div>
       <div class="edit-list">
-        ${(items.length ? items : [""]).map((item, index) => `
+        ${items.map((item, index) => `
           <div class="edit-row">
             <label class="field compact-field">
               <span>候補名</span>
@@ -1336,21 +1363,30 @@ function oddsToolsBlock(title, keys) {
 function getTeams() {
   ensureConfig();
   const base = baseTemplateId(state.event.templateId);
-  return state.event.config.teams?.length ? state.event.config.teams : templates[state.event.templateId].teams || templates[base]?.teams || [];
+  return Array.isArray(state.event.config.teams) ? state.event.config.teams : templates[state.event.templateId].teams || templates[base]?.teams || [];
 }
 
 function getCountries() {
   ensureConfig();
-  return state.event.config.countries?.length ? state.event.config.countries : templates[state.event.templateId].countries || templates.worldCup.countries;
+  return Array.isArray(state.event.config.countries) ? state.event.config.countries : templates[state.event.templateId].countries || templates.worldCup.countries;
 }
 
 function getMarkets() {
   ensureConfig();
-  return state.event.config.markets?.length ? state.event.config.markets : templates[state.event.templateId].markets || templates.fightCard.markets;
+  return Array.isArray(state.event.config.markets) ? state.event.config.markets : templates[state.event.templateId].markets || templates.fightCard.markets;
 }
 
 function ensureConfig() {
   if (!state.event.config) state.event.config = createConfig(state.event.templateId);
+}
+
+function ensureEditableList(key) {
+  ensureConfig();
+  if (Array.isArray(state.event.config[key])) return state.event.config[key];
+  if (key === "countries") state.event.config[key] = [...getCountries()];
+  else if (key === "teams") state.event.config[key] = [...getTeams()];
+  else state.event.config[key] = [];
+  return state.event.config[key];
 }
 
 function parseLines(value) {
@@ -1804,6 +1840,21 @@ els.navLinks.forEach((link) => {
 });
 
 document.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-event-delete]");
+  if (deleteButton) {
+    const eventId = deleteButton.dataset.eventId;
+    const target = (state.events || []).find((candidate) => candidate.id === eventId);
+    if (!target) return;
+    if ((state.events || []).length <= 1) {
+      alert("最後の大会は削除できません。");
+      return;
+    }
+    if (!confirm(`「${target.name}」を削除しますか？`)) return;
+    state.events = state.events.filter((candidate) => candidate.id !== eventId);
+    if (state.activeEventId === eventId) setActiveEvent(state.events[0]?.id);
+    render();
+    return;
+  }
   const statusButton = event.target.closest("[data-event-status]");
   if (statusButton) {
     const item = (state.events || []).find((candidate) => candidate.id === statusButton.dataset.eventId);

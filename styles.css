@@ -1285,6 +1285,10 @@ body[data-theme="day"] .theme-toggle {
   display: block;
 }
 
+.app-page.is-active > section + section {
+  margin-top: 14px;
+}
+
 @keyframes pageIn {
   from {
     opacity: 0;
@@ -1742,6 +1746,49 @@ body[data-theme="day"] .settings-section {
   line-height: 1.5;
 }
 
+.preset-details {
+  margin-top: 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+}
+
+body[data-theme="day"] .preset-details {
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.preset-summary {
+  cursor: pointer;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.preset-description {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 10px;
+}
+
+body[data-theme="day"] .preset-description {
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.preset-description strong {
+  font-size: 14px;
+}
+
+.preset-description span {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .settings-action-list {
   display: grid;
   gap: 8px;
@@ -1875,7 +1922,7 @@ body[data-theme="day"] .tournament-manage-row {
 
 .tournament-manage-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1887,6 +1934,11 @@ body[data-theme="day"] .tournament-manage-row {
   color: var(--app-text);
   padding: 0 8px;
   font-size: 11px;
+}
+
+.tournament-manage-actions .danger-action {
+  border-color: rgba(176, 0, 32, 0.45);
+  color: #ffd7df;
 }
 
 .results-panel,
@@ -2134,6 +2186,10 @@ body[data-theme="day"] .bottom-nav {
 
   .match-card:first-child {
     grid-column: auto;
+  }
+
+  .tournament-manage-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .bottom-nav {
