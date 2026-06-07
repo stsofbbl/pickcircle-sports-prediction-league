@@ -112,6 +112,7 @@ const els = {
   homeTournamentCards: document.querySelector("#homeTournamentCards"),
   activeTournamentCards: document.querySelector("#activeTournamentCards"),
   archiveList: document.querySelector("#archiveList"),
+  tournamentManageList: document.querySelector("#tournamentManageList"),
   approvalRuleText: document.querySelector("#approvalRuleText"),
   approvalPolicyGroup: document.querySelector("#approvalPolicyGroup"),
   leagueName: document.querySelector("#leagueName"),
@@ -325,6 +326,7 @@ function render() {
   renderDashboard();
   renderActiveTournaments();
   renderArchive();
+  renderTournamentManageList();
   renderRankingEventOptions();
   renderShellMeta();
   renderPage();
@@ -584,6 +586,37 @@ function renderArchive() {
       </div>
     `).join("")
     : `<div class="history-row"><strong>アーカイブ済みの大会はまだありません</strong><small>結果確定後の大会がここに入ります。</small></div>`;
+}
+
+function renderTournamentManageList() {
+  if (!els.tournamentManageList) return;
+  const events = state.events || [];
+  els.tournamentManageList.innerHTML = events.length
+    ? events.map((event) => {
+      const isActive = event.id === state.activeEventId;
+      return `
+        <article class="tournament-manage-row ${isActive ? "is-active" : ""}">
+          <div>
+            <span>${escapeHtml(statusLabel(event.status))} / ${escapeHtml(templates[event.templateId]?.name || "ルール")}</span>
+            <strong>${escapeHtml(event.name)}</strong>
+            <small>${escapeHtml(sportMeta(event.templateId).label)}${event.deadline ? ` / 締切 ${escapeHtml(formatDeadline(event.deadline))}` : ""}</small>
+          </div>
+          <div class="tournament-manage-actions">
+            <button type="button" data-event-manage="select" data-event-id="${escapeAttr(event.id)}">選択</button>
+            <button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
+            <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
+            <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : emptyTournamentMarkup("大会はまだありません");
+}
+
+function statusLabel(status) {
+  if (status === "resultWait") return "結果待ち";
+  if (status === "archive") return "アーカイブ";
+  return "予想受付中";
 }
 
 function renderParticipants() {
@@ -1771,6 +1804,21 @@ els.navLinks.forEach((link) => {
 });
 
 document.addEventListener("click", (event) => {
+  const statusButton = event.target.closest("[data-event-status]");
+  if (statusButton) {
+    const item = (state.events || []).find((candidate) => candidate.id === statusButton.dataset.eventId);
+    if (!item) return;
+    item.status = statusButton.dataset.eventStatus;
+    if (state.event?.id === item.id) state.event = item;
+    render();
+    return;
+  }
+  const manageButton = event.target.closest("[data-event-manage]");
+  if (manageButton) {
+    setActiveEvent(manageButton.dataset.eventId);
+    render();
+    return;
+  }
   const trigger = event.target.closest("[data-event-id]");
   if (!trigger) return;
   setActiveEvent(trigger.dataset.eventId);
