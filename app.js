@@ -11,6 +11,17 @@ const templates = {
     resultLabels: ["1位", "2位", "3位", "4位"],
     basePoints: [10, 7, 5, 3],
   },
+  playoff: {
+    id: "playoff",
+    sourceTemplate: "rankingOdds",
+    sport: "baseball",
+    name: "プレーオフ型",
+    subtitle: "CS・プレーオフ型: 勝ち抜け/シリーズ勝者を予想",
+    eventName: "プレーオフ予想",
+    teams: ["1位チーム", "2位チーム", "3位チーム", "ワイルドカード"],
+    resultLabels: ["勝者", "準優勝", "ベスト4", "注目枠"],
+    basePoints: [10, 7, 5, 3],
+  },
   draft: {
     id: "draft",
     sport: "baseball",
@@ -32,6 +43,18 @@ const templates = {
       { id: "bonus", label: "KOラウンド帯", options: ["なし", "1-3R", "4-6R", "7-9R", "10-12R"] },
     ],
   },
+  scoreBonus: {
+    id: "scoreBonus",
+    sourceTemplate: "fightCard",
+    sport: "other",
+    name: "スコアボーナス型",
+    subtitle: "決勝スコア・総得点・KOラウンドなどの単独ボーナス",
+    eventName: "スコアボーナス予想",
+    markets: [
+      { id: "score", label: "スコア/得点ボーナス", options: ["完全一致", "近似", "高得点", "低得点"] },
+      { id: "method", label: "決着/結果ボーナス", options: ["通常決着", "延長", "KO", "判定"] },
+    ],
+  },
   worldCup: {
     id: "worldCup",
     sport: "soccer",
@@ -41,6 +64,26 @@ const templates = {
     groups: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"],
     countries: ["ブラジル", "フランス", "日本", "アルゼンチン", "イングランド", "スペイン", "ドイツ", "アメリカ", "ポルトガル", "メキシコ", "モロッコ", "ナイジェリア"],
   },
+  groupStage: {
+    id: "groupStage",
+    sourceTemplate: "worldCup",
+    sport: "soccer",
+    name: "グループ突破型",
+    subtitle: "W杯型: グループ突破・順位・到達結果を予想",
+    eventName: "グループ突破予想",
+    groups: ["A", "B", "C", "D"],
+    countries: ["日本", "ブラジル", "フランス", "アルゼンチン", "スペイン", "ドイツ", "アメリカ", "メキシコ"],
+  },
+  composite: {
+    id: "composite",
+    sourceTemplate: "worldCup",
+    sport: "soccer",
+    name: "複合型",
+    subtitle: "大型大会型: 複数の予想形式を組み合わせる",
+    eventName: "複合ルール大会",
+    groups: ["A", "B", "C", "D"],
+    countries: ["日本", "ブラジル", "フランス", "アルゼンチン", "スペイン", "ドイツ", "アメリカ", "メキシコ"],
+  },
 };
 
 const defaultState = {
@@ -48,6 +91,8 @@ const defaultState = {
   participants: ["和田", "拓洋", "銀次", "いの"],
   activeTemplate: "worldCup",
   approvalPolicy: "half",
+  activeEventId: null,
+  events: null,
   event: null,
 };
 
@@ -66,6 +111,7 @@ const els = {
   homeTotalScore: document.querySelector("#homeTotalScore"),
   homeTournamentCards: document.querySelector("#homeTournamentCards"),
   activeTournamentCards: document.querySelector("#activeTournamentCards"),
+  archiveList: document.querySelector("#archiveList"),
   approvalRuleText: document.querySelector("#approvalRuleText"),
   approvalPolicyGroup: document.querySelector("#approvalPolicyGroup"),
   leagueName: document.querySelector("#leagueName"),
@@ -78,9 +124,15 @@ const els = {
   eventForm: document.querySelector("#eventForm"),
   newEventButton: document.querySelector("#newEventButton"),
   settingsNewEventButton: document.querySelector("#settingsNewEventButton"),
+  newTournamentName: document.querySelector("#newTournamentName"),
+  newTournamentSport: document.querySelector("#newTournamentSport"),
+  newTournamentTemplate: document.querySelector("#newTournamentTemplate"),
+  newTournamentDeadline: document.querySelector("#newTournamentDeadline"),
+  newTournamentStatus: document.querySelector("#newTournamentStatus"),
   saveButton: document.querySelector("#saveButton"),
   rankingTabs: document.querySelector("#rankingTabs"),
   rankingFilterPanel: document.querySelector("#rankingFilterPanel"),
+  rankingEventSelect: document.querySelector("#rankingEventSelect"),
   resetButton: document.querySelector("#resetButton"),
   scoreboard: document.querySelector("#scoreboard"),
   insightBand: document.querySelector("#insightBand"),
@@ -101,7 +153,7 @@ function loadState() {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return createDefaultState();
     const parsed = JSON.parse(stored);
-    return { ...createDefaultState(), ...parsed };
+    return normalizeState({ ...createDefaultState(), ...parsed });
   } catch {
     return createDefaultState();
   }
@@ -109,12 +161,58 @@ function loadState() {
 
 function createDefaultState() {
   const base = structuredClone(defaultState);
-  base.event = createEvent(base.activeTemplate, base.participants);
+  const event = createEvent(base.activeTemplate, base.participants, { name: templates.worldCup.eventName });
+  base.events = [event];
+  base.activeEventId = event.id;
+  base.event = event;
   return base;
 }
 
+function normalizeState(nextState) {
+  let events = Array.isArray(nextState.events) && nextState.events.length
+    ? nextState.events
+    : [nextState.event || createEvent(nextState.activeTemplate || "worldCup", nextState.participants || [])];
+  events = events.map((event) => normalizeEvent(event, nextState));
+  const activeEventId = events.some((event) => event.id === nextState.activeEventId)
+    ? nextState.activeEventId
+    : events[0].id;
+  const event = events.find((item) => item.id === activeEventId) || events[0];
+  return { ...nextState, events, activeEventId, event, activeTemplate: event.templateId };
+}
+
+function normalizeEvent(event, sourceState = state) {
+  const templateId = templates[event?.templateId] ? event.templateId : sourceState.activeTemplate || "worldCup";
+  const normalized = {
+    ...createEvent(templateId, sourceState.participants || defaultState.participants),
+    ...event,
+    templateId,
+  };
+  normalized.status ||= "open";
+  normalized.deadline ||= "";
+  normalized.sport ||= templates[templateId]?.sport || "other";
+  normalized.approvalPolicy ||= sourceState.approvalPolicy || "half";
+  normalized.config ||= createConfig(templateId);
+  normalized.results ||= createResults(templateId);
+  normalized.predictions ||= {};
+  (sourceState.participants || defaultState.participants).forEach((name) => {
+    normalized.predictions[name] ||= createPrediction(templateId);
+  });
+  return normalized;
+}
+
 function persist() {
+  syncActiveEvent();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function syncActiveEvent() {
+  if (!state.event) return;
+  state.events ||= [];
+  const index = state.events.findIndex((event) => event.id === state.event.id);
+  if (index >= 0) state.events[index] = state.event;
+  else state.events.push(state.event);
+  state.activeEventId = state.event.id;
+  state.activeTemplate = state.event.templateId;
 }
 
 const PAGE_IDS = new Set(["home", "active", "prediction", "archive", "ranking", "settings"]);
@@ -168,41 +266,52 @@ function inferSport(text) {
   return "other";
 }
 
-function createEvent(templateId, participants) {
+function createEvent(templateId, participants, overrides = {}) {
   const template = templates[templateId];
   const predictions = Object.fromEntries(participants.map((name) => [name, createPrediction(templateId)]));
   return {
     id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
     templateId,
-    name: template.eventName,
+    name: overrides.name || template.eventName,
+    sport: overrides.sport || template.sport || "other",
+    status: overrides.status || "open",
+    deadline: overrides.deadline || "",
+    approvalPolicy: overrides.approvalPolicy || defaultState.approvalPolicy,
     config: createConfig(templateId),
     predictions,
     results: createResults(templateId),
   };
 }
 
+function baseTemplateId(templateId = state.event?.templateId) {
+  return templates[templateId]?.sourceTemplate || templateId;
+}
+
 function createConfig(templateId) {
   const template = templates[templateId];
-  if (templateId === "rankingOdds") return { teams: [...template.teams], oddsBook: {} };
-  if (templateId === "draft") return { teams: [...template.teams], oddsBook: {} };
-  if (templateId === "fightCard") return { markets: structuredClone(template.markets), oddsBook: {} };
-  if (templateId === "worldCup") return { countries: [...template.countries], oddsBook: {} };
+  const base = baseTemplateId(templateId);
+  if (base === "rankingOdds") return { teams: [...(template.teams || templates.rankingOdds.teams)], oddsBook: {} };
+  if (base === "draft") return { teams: [...(template.teams || templates.draft.teams)], oddsBook: {} };
+  if (base === "fightCard") return { markets: structuredClone(template.markets || templates.fightCard.markets), oddsBook: {} };
+  if (base === "worldCup") return { countries: [...(template.countries || templates.worldCup.countries)], oddsBook: {} };
   return {};
 }
 
 function createPrediction(templateId) {
-  if (templateId === "rankingOdds") return { picks: ["", "", "", ""], odds: [1, 1, 1, 1] };
-  if (templateId === "draft") return { teams: ["", ""], bonusScore: "" };
-  if (templateId === "fightCard") return { picks: {}, odds: {} };
-  if (templateId === "worldCup") return { gl: {}, third: "", top4: ["", "", "", ""], futures: [], awards: {} };
+  const base = baseTemplateId(templateId);
+  if (base === "rankingOdds") return { picks: ["", "", "", ""], odds: [1, 1, 1, 1] };
+  if (base === "draft") return { teams: ["", ""], bonusScore: "" };
+  if (base === "fightCard") return { picks: {}, odds: {} };
+  if (base === "worldCup") return { gl: {}, third: "", top4: ["", "", "", ""], futures: [], awards: {} };
   return {};
 }
 
 function createResults(templateId) {
-  if (templateId === "rankingOdds") return { finalTop4: ["", "", "", ""] };
-  if (templateId === "draft") return { finishes: {}, scoreBonusWinner: "" };
-  if (templateId === "fightCard") return { winners: {}, bonusWinner: "" };
-  if (templateId === "worldCup") return { gl: {}, thirdQualified: "", top4: ["", "", "", ""], futures: {}, awards: {}, finalScoreWinner: "", exactScore: false };
+  const base = baseTemplateId(templateId);
+  if (base === "rankingOdds") return { finalTop4: ["", "", "", ""] };
+  if (base === "draft") return { finishes: {}, scoreBonusWinner: "" };
+  if (base === "fightCard") return { winners: {}, bonusWinner: "" };
+  if (base === "worldCup") return { gl: {}, thirdQualified: "", top4: ["", "", "", ""], futures: {}, awards: {}, finalScoreWinner: "", exactScore: false };
   return {};
 }
 
@@ -210,10 +319,13 @@ function render() {
   if (els.leagueName) els.leagueName.value = state.leagueName;
   renderParticipants();
   renderTemplates();
+  renderTournamentCreateOptions();
   renderEvent();
   renderScores();
   renderDashboard();
   renderActiveTournaments();
+  renderArchive();
+  renderRankingEventOptions();
   renderShellMeta();
   renderPage();
   persist();
@@ -223,49 +335,54 @@ function renderDashboard() {
   const participant = currentParticipantName();
   const scores = calculateScores();
   const myScore = scores.find((row) => row.name === participant)?.score || 0;
-  const missingCount = missingPredictionCount(participant);
-  const hasMissing = missingCount > 0;
+  const openEvents = eventsByStatus("open");
+  const missingTournamentCount = openEvents.filter((event) => missingPredictionCountForEvent(event, participant) > 0).length;
   const approvalRequired = requiredApprovalCount();
 
   if (els.homeClubLine) els.homeClubLine.textContent = `${state.leagueName} / ${state.participants.length}人参加中`;
   if (els.homeParticipantName) els.homeParticipantName.textContent = participant;
-  if (els.homeOpenCount) els.homeOpenCount.textContent = state.event ? "1" : "0";
-  if (els.homeMissingTournamentCount) els.homeMissingTournamentCount.textContent = hasMissing ? "1" : "0";
+  if (els.homeOpenCount) els.homeOpenCount.textContent = openEvents.length;
+  if (els.homeMissingTournamentCount) els.homeMissingTournamentCount.textContent = missingTournamentCount;
   if (els.homeMonthScore) els.homeMonthScore.textContent = formatScore(myScore);
   if (els.homeTotalScore) els.homeTotalScore.textContent = formatScore(myScore);
   if (els.approvalRuleText) els.approvalRuleText.textContent = `結果確定には${approvalRequired}人の承認が必要`;
   renderApprovalPolicy();
 
   if (!els.homeTournamentCards) return;
-  els.homeTournamentCards.innerHTML = tournamentCardMarkup({
-    variant: "home",
-    status: "予想受付中",
-    statusClass: "open",
-    actionLabel: hasMissing ? "予想する" : "入力内容を見る",
-    missingCount,
-    showDeadline: true,
-  });
+  els.homeTournamentCards.innerHTML = openEvents.length
+    ? openEvents.map((event) => {
+      const missingCount = missingPredictionCountForEvent(event, participant);
+      return tournamentCardMarkup(event, {
+        status: "予想受付中",
+        statusClass: "open",
+        actionLabel: missingCount > 0 ? "予想する" : "入力内容を見る",
+        missingCount,
+        showDeadline: true,
+      });
+    }).join("")
+    : emptyTournamentMarkup("受付中の大会はありません");
 }
 
 function renderActiveTournaments() {
   if (!els.activeTournamentCards) return;
-  els.activeTournamentCards.innerHTML = [
-    tournamentCardMarkup({
-      variant: "active",
-      status: "予想受付中",
-      statusClass: "open",
-      actionLabel: "予想へ",
-      missingCount: missingPredictionCount(currentParticipantName()),
-      showDeadline: true,
-    }),
-    resultWaitCardMarkup(),
-  ].join("");
+  const activeEvents = eventsByStatus("open", "resultWait");
+  els.activeTournamentCards.innerHTML = activeEvents.length
+    ? activeEvents.map((event) => event.status === "resultWait"
+      ? resultWaitCardMarkup(event)
+      : tournamentCardMarkup(event, {
+        status: "予想受付中",
+        statusClass: "open",
+        actionLabel: "予想へ",
+        missingCount: missingPredictionCountForEvent(event, currentParticipantName()),
+        showDeadline: true,
+      })).join("")
+    : emptyTournamentMarkup("開催中の大会はありません");
 }
 
-function tournamentCardMarkup({ status, statusClass, actionLabel, missingCount, showDeadline }) {
-  const sport = sportMeta(state.event?.templateId);
-  const template = templates[state.event?.templateId];
-  const candidateCount = candidateCountForCurrentEvent();
+function tournamentCardMarkup(event, { status, statusClass, actionLabel, missingCount, showDeadline }) {
+  const sport = sportMeta(event.templateId);
+  const template = templates[event.templateId];
+  const candidateCount = candidateCountForEvent(event);
   const missingText = missingCount > 0 ? `未入力 ${missingCount}項目` : "入力済み";
   return `
     <article class="tournament-card">
@@ -273,8 +390,8 @@ function tournamentCardMarkup({ status, statusClass, actionLabel, missingCount, 
         <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
         <div>
           <span class="match-kicker">${escapeHtml(sport.label)} / ${escapeHtml(template?.name || "ルール")}</span>
-          <strong>${escapeHtml(state.event?.name || "現在の大会")}</strong>
-          <small>${escapeHtml(candidateCount)}件の候補 / ${escapeHtml(state.participants.length)}人参加</small>
+          <strong>${escapeHtml(event.name || "現在の大会")}</strong>
+          <small>${escapeHtml(candidateCount)}件の候補 / ${escapeHtml(state.participants.length)}人参加${event.deadline ? ` / 締切 ${escapeHtml(formatDeadline(event.deadline))}` : ""}</small>
         </div>
       </div>
       <div class="tournament-chips">
@@ -283,8 +400,8 @@ function tournamentCardMarkup({ status, statusClass, actionLabel, missingCount, 
         <span class="missing-chip ${missingCount > 0 ? "has-missing" : ""}">${escapeHtml(missingText)}</span>
       </div>
       <div class="tournament-actions">
-        <a class="primary-link" href="#prediction">${escapeHtml(actionLabel)}</a>
-        <a class="ghost-link" href="#settings">大会設定</a>
+        <a class="primary-link" href="#prediction" data-event-action="predict" data-event-id="${escapeAttr(event.id)}">${escapeHtml(actionLabel)}</a>
+        <a class="ghost-link" href="#settings" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会設定</a>
       </div>
     </article>
   `;
@@ -309,15 +426,15 @@ function statusPreviewCardMarkup(status, text, statusClass) {
   `;
 }
 
-function resultWaitCardMarkup() {
-  const sport = sportMeta(state.event?.templateId);
+function resultWaitCardMarkup(event) {
+  const sport = sportMeta(event.templateId);
   return `
     <article class="tournament-card muted-card">
       <div class="tournament-main">
         <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
         <div>
           <span class="match-kicker">締切後</span>
-          <strong>結果待ち</strong>
+          <strong>${escapeHtml(event.name || "結果待ち")}</strong>
           <small>締切後は管理者の結果入力と参加者の承認に進みます。</small>
         </div>
       </div>
@@ -325,53 +442,148 @@ function resultWaitCardMarkup() {
         <span class="status-label pending">結果待ち</span>
       </div>
       <div class="tournament-actions">
-        <a class="primary-link" href="#archive">結果入力</a>
-        <a class="ghost-link" href="#archive">結果承認</a>
+        <a class="primary-link" href="#archive" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+        <a class="ghost-link" href="#archive" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
       </div>
     </article>
   `;
+}
+
+function emptyTournamentMarkup(message) {
+  return `<div class="history-row"><strong>${escapeHtml(message)}</strong><small>設定から大会を追加できます。</small></div>`;
 }
 
 function currentParticipantName() {
   return state.participants[0] || "あなた";
 }
 
+function eventsByStatus(...statuses) {
+  const allowed = new Set(statuses);
+  return (state.events || []).filter((event) => allowed.has(event.status || "open"));
+}
+
+function setActiveEvent(eventId) {
+  const event = (state.events || []).find((item) => item.id === eventId);
+  if (!event) return;
+  state.event = event;
+  state.activeEventId = event.id;
+  state.activeTemplate = event.templateId;
+}
+
 function candidateCountForCurrentEvent() {
-  if (state.event?.templateId === "fightCard") return getMarkets().length;
-  if (state.event?.templateId === "worldCup") return getCountries().length;
-  return getTeams().length;
+  return candidateCountForEvent(state.event);
+}
+
+function candidateCountForEvent(event) {
+  const base = baseTemplateId(event?.templateId);
+  if (base === "fightCard") return (event.config?.markets || templates.fightCard.markets).length;
+  if (base === "worldCup") return (event.config?.countries || templates.worldCup.countries).length;
+  return (event.config?.teams || templates[base]?.teams || []).length;
 }
 
 function requiredApprovalCount() {
-  if (state.approvalPolicy === "admin") return 1;
-  if (state.approvalPolicy === "unanimous") return Math.max(1, state.participants.length);
+  const policy = state.event?.approvalPolicy || state.approvalPolicy;
+  if (policy === "admin") return 1;
+  if (policy === "unanimous") return Math.max(1, state.participants.length);
   return Math.max(1, Math.ceil(state.participants.length / 2));
 }
 
 function renderApprovalPolicy() {
   if (!els.approvalPolicyGroup) return;
-  const policy = state.approvalPolicy || "half";
+  const policy = state.event?.approvalPolicy || state.approvalPolicy || "half";
   els.approvalPolicyGroup.querySelectorAll("[data-approval-policy]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.approvalPolicy === policy);
   });
 }
 
 function missingPredictionCount(name) {
-  ensurePrediction(name);
-  const prediction = state.event.predictions[name];
-  if (state.event.templateId === "rankingOdds") {
+  return missingPredictionCountForEvent(state.event, name);
+}
+
+function missingPredictionCountForEvent(event, name) {
+  ensurePredictionForEvent(event, name);
+  const prediction = event.predictions[name];
+  const base = baseTemplateId(event.templateId);
+  if (base === "rankingOdds") {
     return prediction.picks.filter((pick) => !pick).length;
   }
-  if (state.event.templateId === "draft") {
+  if (base === "draft") {
     return prediction.teams.filter((team) => !team).length;
   }
-  if (state.event.templateId === "fightCard") {
-    return getMarkets().filter((market) => !prediction.picks[market.id]).length;
+  if (base === "fightCard") {
+    return (event.config?.markets || templates.fightCard.markets).filter((market) => !prediction.picks[market.id]).length;
   }
-  if (state.event.templateId === "worldCup") {
+  if (base === "worldCup") {
     return prediction.top4.filter((country) => !country).length;
   }
   return 0;
+}
+
+function ensurePredictionForEvent(event, name) {
+  event.predictions ||= {};
+  if (!event.predictions[name]) event.predictions[name] = createPrediction(event.templateId);
+}
+
+function formatDeadline(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function renderTournamentCreateOptions() {
+  if (!els.newTournamentTemplate) return;
+  const currentValue = els.newTournamentTemplate.value || state.activeTemplate;
+  els.newTournamentTemplate.innerHTML = Object.values(templates).map((template) => (
+    `<option value="${escapeAttr(template.id)}" ${template.id === currentValue ? "selected" : ""}>${escapeHtml(template.name)}</option>`
+  )).join("");
+}
+
+function createTournamentFromSettings({ fallbackName } = {}) {
+  const templateId = els.newTournamentTemplate?.value || state.activeTemplate || "rankingOdds";
+  const template = templates[templateId] || templates.rankingOdds;
+  const name = els.newTournamentName?.value.trim() || fallbackName || template.eventName;
+  const event = createEvent(templateId, state.participants, {
+    name,
+    sport: els.newTournamentSport?.value || template.sport || "other",
+    deadline: els.newTournamentDeadline?.value || "",
+    status: els.newTournamentStatus?.value || "open",
+    approvalPolicy: state.approvalPolicy || "half",
+  });
+  return event;
+}
+
+function addAndSelectEvent(event) {
+  state.events ||= [];
+  state.events.push(event);
+  setActiveEvent(event.id);
+  if (els.newTournamentName) els.newTournamentName.value = "";
+}
+
+function renderRankingEventOptions() {
+  if (!els.rankingEventSelect) return;
+  const currentValue = els.rankingEventSelect.value;
+  els.rankingEventSelect.innerHTML = [
+    `<option value="">全大会</option>`,
+    ...(state.events || []).map((event) => `<option value="${escapeAttr(event.id)}">${escapeHtml(event.name)}</option>`),
+  ].join("");
+  if ([...els.rankingEventSelect.options].some((option) => option.value === currentValue)) {
+    els.rankingEventSelect.value = currentValue;
+  }
+}
+
+function renderArchive() {
+  if (!els.archiveList) return;
+  const archived = eventsByStatus("archive");
+  els.archiveList.innerHTML = archived.length
+    ? archived.map((event) => `
+      <div class="history-row">
+        <span>${escapeHtml(sportMeta(event.templateId).label)} / ${escapeHtml(templates[event.templateId]?.name || "ルール")}</span>
+        <strong>${escapeHtml(event.name)}</strong>
+        <small>参加者 ${state.participants.length}人 / 大会別ランキングと振り返り用に保存</small>
+      </div>
+    `).join("")
+    : `<div class="history-row"><strong>アーカイブ済みの大会はまだありません</strong><small>結果確定後の大会がここに入ります。</small></div>`;
 }
 
 function renderParticipants() {
@@ -383,7 +595,7 @@ function renderParticipants() {
     chip.innerHTML = `<span>${escapeHtml(name)}</span><button type="button" aria-label="${escapeHtml(name)}を削除">×</button>`;
     chip.querySelector("button").addEventListener("click", () => {
       state.participants = state.participants.filter((item) => item !== name);
-      delete state.event.predictions[name];
+      (state.events || []).forEach((event) => delete event.predictions?.[name]);
       render();
     });
     els.participantList.append(chip);
@@ -399,7 +611,7 @@ function renderTemplates() {
     button.innerHTML = `<strong>${template.name}</strong><span>${template.subtitle}</span>`;
     button.addEventListener("click", () => {
       state.activeTemplate = template.id;
-      state.event = createEvent(template.id, state.participants);
+      if (els.newTournamentTemplate) els.newTournamentTemplate.value = template.id;
       render();
     });
     els.templateGrid.append(button);
@@ -410,14 +622,15 @@ function renderEvent() {
   const template = templates[state.event.templateId];
   els.eventTitle.textContent = state.event.name;
   els.eventSubtitle.textContent = template.subtitle;
-  if (template.id === "rankingOdds") renderRankingOddsForm();
-  if (template.id === "draft") renderDraftForm();
-  if (template.id === "fightCard") renderFightForm();
-  if (template.id === "worldCup") renderWorldCupForm();
+  const base = baseTemplateId(template.id);
+  if (base === "rankingOdds") renderRankingOddsForm();
+  if (base === "draft") renderDraftForm();
+  if (base === "fightCard") renderFightForm();
+  if (base === "worldCup") renderWorldCupForm();
 }
 
 function renderRankingOddsForm() {
-  const template = templates.rankingOdds;
+  const template = { ...templates.rankingOdds, ...templates[state.event.templateId] };
   const teams = getTeams();
   els.eventForm.innerHTML = `
     <div class="form-grid">
@@ -457,7 +670,7 @@ function participantRankingBlock(name, template, teams) {
 }
 
 function renderDraftForm() {
-  const template = templates.draft;
+  const template = { ...templates.draft, ...templates[state.event.templateId] };
   const teams = getTeams();
   els.eventForm.innerHTML = `
     <div class="form-grid">
@@ -545,7 +758,7 @@ function participantFightBlock(name, markets) {
 }
 
 function renderWorldCupForm() {
-  const template = templates.worldCup;
+  const template = { ...templates.worldCup, ...templates[state.event.templateId] };
   const countries = getCountries();
   els.eventForm.innerHTML = `
     <div class="form-grid">
@@ -899,9 +1112,10 @@ function renderShellMeta() {
   if (els.matchFeatureTitle) els.matchFeatureTitle.textContent = state.event?.name || "現在のイベント";
   if (els.matchFeatureMeta) {
     const template = templates[state.event?.templateId];
-    const count = state.event?.templateId === "fightCard"
+    const base = baseTemplateId(state.event?.templateId);
+    const count = base === "fightCard"
       ? getMarkets().length
-      : state.event?.templateId === "worldCup"
+      : base === "worldCup"
         ? getCountries().length
         : getTeams().length;
     els.matchFeatureMeta.textContent = `${template?.name || "ルール"} / ${count}件の候補`;
@@ -1088,17 +1302,18 @@ function oddsToolsBlock(title, keys) {
 
 function getTeams() {
   ensureConfig();
-  return state.event.config.teams?.length ? state.event.config.teams : templates[state.event.templateId].teams;
+  const base = baseTemplateId(state.event.templateId);
+  return state.event.config.teams?.length ? state.event.config.teams : templates[state.event.templateId].teams || templates[base]?.teams || [];
 }
 
 function getCountries() {
   ensureConfig();
-  return state.event.config.countries?.length ? state.event.config.countries : templates.worldCup.countries;
+  return state.event.config.countries?.length ? state.event.config.countries : templates[state.event.templateId].countries || templates.worldCup.countries;
 }
 
 function getMarkets() {
   ensureConfig();
-  return state.event.config.markets?.length ? state.event.config.markets : templates.fightCard.markets;
+  return state.event.config.markets?.length ? state.event.config.markets : templates[state.event.templateId].markets || templates.fightCard.markets;
 }
 
 function ensureConfig() {
@@ -1199,7 +1414,7 @@ function uniqueMarketId() {
 
 function generatePopularityOdds() {
   ensureConfig();
-  const templateId = state.event.templateId;
+  const templateId = baseTemplateId(state.event.templateId);
   const counts = new Map();
   const add = (key) => {
     if (!key) return;
@@ -1245,7 +1460,7 @@ function buildPopularityOdds(keys, counts) {
 
 function applyOddsBookToPredictions() {
   ensureConfig();
-  const templateId = state.event.templateId;
+  const templateId = baseTemplateId(state.event.templateId);
   if (templateId === "rankingOdds") {
     state.participants.forEach((name) => {
       const prediction = state.event.predictions[name];
@@ -1319,7 +1534,7 @@ function scoreboardInsight(rows) {
 function calculateScores() {
   return state.participants.map((name) => {
     ensurePrediction(name);
-    const templateId = state.event.templateId;
+    const templateId = baseTemplateId(state.event.templateId);
     let score = 0;
     let detail = "";
     if (templateId === "rankingOdds") {
@@ -1471,9 +1686,10 @@ function renderShellMeta() {
   if (els.matchFeatureTitle) els.matchFeatureTitle.textContent = state.event?.name || "現在のイベント";
   if (els.matchFeatureMeta) {
     const template = templates[state.event?.templateId];
-    const count = state.event?.templateId === "fightCard"
+    const base = baseTemplateId(state.event?.templateId);
+    const count = base === "fightCard"
       ? getMarkets().length
-      : state.event?.templateId === "worldCup"
+      : base === "worldCup"
         ? getCountries().length
         : getTeams().length;
     els.matchFeatureMeta.textContent = `${sport.label} / ${template?.name || "ルール"} / ${count}件の候補`;
@@ -1491,7 +1707,10 @@ els.addParticipantButton?.addEventListener("click", () => {
   const name = els.participantName.value.trim();
   if (!name || state.participants.includes(name)) return;
   state.participants.push(name);
-  state.event.predictions[name] = createPrediction(state.event.templateId);
+  (state.events || []).forEach((event) => {
+    event.predictions ||= {};
+    event.predictions[name] = createPrediction(event.templateId);
+  });
   els.participantName.value = "";
   render();
 });
@@ -1501,12 +1720,14 @@ els.participantName?.addEventListener("keydown", (event) => {
 });
 
 els.newEventButton?.addEventListener("click", () => {
-  state.event = createEvent(state.activeTemplate, state.participants);
+  const event = createTournamentFromSettings({ fallbackName: templates[state.activeTemplate]?.eventName });
+  addAndSelectEvent(event);
   render();
 });
 
 els.settingsNewEventButton?.addEventListener("click", () => {
-  state.event = createEvent(state.activeTemplate, state.participants);
+  const event = createTournamentFromSettings();
+  addAndSelectEvent(event);
   window.location.hash = "prediction";
   render();
 });
@@ -1549,6 +1770,13 @@ els.navLinks.forEach((link) => {
   });
 });
 
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest("[data-event-id]");
+  if (!trigger) return;
+  setActiveEvent(trigger.dataset.eventId);
+  render();
+});
+
 els.rankingTabs?.querySelectorAll("button").forEach((button) => {
   button.addEventListener("click", () => {
     els.rankingTabs.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
@@ -1566,6 +1794,7 @@ els.rankingTabs?.querySelectorAll("button").forEach((button) => {
 els.approvalPolicyGroup?.querySelectorAll("[data-approval-policy]").forEach((button) => {
   button.addEventListener("click", () => {
     state.approvalPolicy = button.dataset.approvalPolicy;
+    if (state.event) state.event.approvalPolicy = button.dataset.approvalPolicy;
     render();
   });
 });

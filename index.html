@@ -112,6 +112,7 @@
                 <small>決済・送金・リアルマネーを扱う機能はありません</small>
               </div>
             </div>
+            <div class="archive-list" id="archiveList"></div>
           </section>
 
           <section class="history-panel" id="history" aria-label="履歴画面">
@@ -169,7 +170,8 @@
               <div class="ranking-filter ranking-filter-event" data-ranking-filter="大会別">
                 <label class="field compact-field">
                   <span>大会</span>
-                  <select>
+                  <select id="rankingEventSelect">
+                    <option value="">全大会</option>
                     <option>W杯2026予想王</option>
                     <option>5.2ボクシング予想</option>
                     <option>WBC順位予想</option>
@@ -221,6 +223,38 @@
                   <div class="template-grid" id="templateGrid"></div>
                 </div>
                 <div class="settings-action-list">
+                  <div class="event-create-form" aria-label="大会追加フォーム">
+                    <label class="field compact-field">
+                      <span>大会名</span>
+                      <input id="newTournamentName" type="text" placeholder="例: 夏の甲子園2026" autocomplete="off" />
+                    </label>
+                    <label class="field compact-field">
+                      <span>競技</span>
+                      <select id="newTournamentSport">
+                        <option value="baseball">野球</option>
+                        <option value="soccer">サッカー</option>
+                        <option value="boxing">ボクシング</option>
+                        <option value="basketball">バスケ</option>
+                        <option value="other">その他</option>
+                      </select>
+                    </label>
+                    <label class="field compact-field">
+                      <span>予想形式</span>
+                      <select id="newTournamentTemplate"></select>
+                    </label>
+                    <label class="field compact-field">
+                      <span>締切</span>
+                      <input id="newTournamentDeadline" type="datetime-local" />
+                    </label>
+                    <label class="field compact-field">
+                      <span>ステータス</span>
+                      <select id="newTournamentStatus">
+                        <option value="open">予想受付中</option>
+                        <option value="resultWait">結果待ち</option>
+                        <option value="archive">アーカイブ</option>
+                      </select>
+                    </label>
+                  </div>
                   <article class="setting-row">
                     <div>
                       <span>大会追加</span>
