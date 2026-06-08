@@ -161,6 +161,7 @@ const els = {
   homeMissingTournamentCount: document.querySelector("#homeMissingTournamentCount"),
   homeMonthScore: document.querySelector("#homeMonthScore"),
   homeTotalScore: document.querySelector("#homeTotalScore"),
+  homeReadinessPanel: document.querySelector("#homeReadinessPanel"),
   homeTournamentCards: document.querySelector("#homeTournamentCards"),
   activeTournamentCards: document.querySelector("#activeTournamentCards"),
   archiveList: document.querySelector("#archiveList"),
@@ -892,6 +893,7 @@ function renderDashboard() {
   if (els.homeMonthScore) els.homeMonthScore.textContent = formatScore(myScore);
   if (els.homeTotalScore) els.homeTotalScore.textContent = formatScore(myScore);
   if (els.approvalRuleText) els.approvalRuleText.textContent = `結果確定には${approvalRequired}人の承認が必要`;
+  renderHomeReadinessPanel({ participant, myScore, missingTournamentCount, openEvents });
   renderApprovalPolicy();
 
   if (!els.homeTournamentCards) return;
@@ -907,6 +909,40 @@ function renderDashboard() {
       });
     }).join("")
     : emptyTournamentMarkup("受付中の大会はありません");
+}
+
+function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount, openEvents }) {
+  if (!els.homeReadinessPanel) return;
+  const activeEvent = openEvents[0] || state.event;
+  const storageLabel = "この端末";
+  const syncLabel = "Sheets準備中";
+  els.homeReadinessPanel.innerHTML = `
+    <article class="readiness-card primary-readiness">
+      <div>
+        <span class="match-kicker">NEXT ACTION</span>
+        <strong>${missingTournamentCount > 0 ? "未入力のYOSOがあります" : "入力はひとまず完了"}</strong>
+        <small>${escapeHtml(participant)} / ${escapeHtml(activeEvent?.name || "大会未設定")}</small>
+      </div>
+      <a class="primary-link" href="${missingTournamentCount > 0 ? "#prediction" : "#ranking"}">${missingTournamentCount > 0 ? "YOSOへ" : "ランキングへ"}</a>
+    </article>
+    <div class="readiness-grid">
+      <article class="readiness-card">
+        <span>保存先</span>
+        <strong>${escapeHtml(storageLabel)}</strong>
+        <small>${escapeHtml(syncLabel)}</small>
+      </article>
+      <article class="readiness-card">
+        <span>公開URL</span>
+        <strong>GitHub Pages</strong>
+        <small>スマホ確認OK</small>
+      </article>
+      <article class="readiness-card">
+        <span>自分のpt</span>
+        <strong>${formatScore(myScore)}</strong>
+        <small>確定済みフェーズを反映</small>
+      </article>
+    </div>
+  `;
 }
 
 function renderActiveTournaments() {

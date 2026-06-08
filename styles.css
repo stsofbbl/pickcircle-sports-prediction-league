@@ -1424,6 +1424,14 @@ dialog::backdrop {
   .wc-progress-meter span {
     text-align: left;
   }
+
+  .readiness-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .primary-readiness {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 520px) {
@@ -1829,6 +1837,59 @@ body[data-theme="day"] .home-person {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.home-readiness {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.readiness-card {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.052), transparent),
+    rgba(0, 0, 0, 0.24);
+  padding: 12px;
+}
+
+.primary-readiness {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-color: var(--app-line-strong);
+}
+
+.readiness-card span,
+.readiness-card small {
+  color: var(--app-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.readiness-card span {
+  font-family: var(--mono);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.readiness-card strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+body[data-theme="day"] .readiness-card {
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .metric-card {
