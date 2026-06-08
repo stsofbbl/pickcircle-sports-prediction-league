@@ -197,6 +197,21 @@ body.auth-locked .app-shell {
   gap: 12px;
 }
 
+.auth-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.auth-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--soap-pink);
+}
+
 .auth-screen[data-mode="login"] .auth-register-only {
   display: none;
 }
@@ -228,6 +243,24 @@ body.auth-locked .app-shell {
   color: var(--ink);
   font-size: 13px;
   font-weight: 900;
+}
+
+.account-settings-grid,
+.account-password-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.account-remember-row {
+  align-self: end;
+  min-height: 44px;
+}
+
+.account-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .topbar,
@@ -1354,6 +1387,8 @@ dialog::backdrop {
 
   .prediction-grid,
   .form-grid,
+  .account-settings-grid,
+  .account-password-grid,
   .market-row,
   .draft-row,
   .phase-row,

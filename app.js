@@ -2,6 +2,8 @@ const STORAGE_KEY = "yoso-league-state-v1";
 const AUTH_USERS_KEY = "yoso-auth-users-v1";
 const AUTH_SESSION_KEY = "yoso-auth-session-v1";
 const AUTH_PBKDF2_ITERATIONS = 120000;
+const AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES = 10080;
+const AUTH_ACTIVITY_THROTTLE_MS = 30000;
 
 const templates = {
   rankingOdds: {
@@ -135,11 +137,24 @@ const els = {
   authUsername: document.querySelector("#authUsername"),
   authDisplayName: document.querySelector("#authDisplayName"),
   authPassword: document.querySelector("#authPassword"),
+  authRemember: document.querySelector("#authRemember"),
   authSubmitButton: document.querySelector("#authSubmitButton"),
   authMessage: document.querySelector("#authMessage"),
   accountChip: document.querySelector("#accountChip"),
   accountName: document.querySelector("#accountName"),
   logoutButton: document.querySelector("#logoutButton"),
+  accountUsername: document.querySelector("#accountUsername"),
+  accountRole: document.querySelector("#accountRole"),
+  accountDisplayNameInput: document.querySelector("#accountDisplayNameInput"),
+  accountEmailInput: document.querySelector("#accountEmailInput"),
+  accountIdleTimeout: document.querySelector("#accountIdleTimeout"),
+  accountRememberDefault: document.querySelector("#accountRememberDefault"),
+  accountCurrentPassword: document.querySelector("#accountCurrentPassword"),
+  accountNewPassword: document.querySelector("#accountNewPassword"),
+  accountSaveButton: document.querySelector("#accountSaveButton"),
+  accountPasswordButton: document.querySelector("#accountPasswordButton"),
+  settingsLogoutButton: document.querySelector("#settingsLogoutButton"),
+  accountMessage: document.querySelector("#accountMessage"),
   homeClubLine: document.querySelector("#homeClubLine"),
   homeParticipantName: document.querySelector("#homeParticipantName"),
   homeOpenCount: document.querySelector("#homeOpenCount"),
@@ -201,6 +216,7 @@ function loadState() {
 
 let authSession = loadAuthSession();
 let authMode = "login";
+let lastAuthActivityWrite = 0;
 
 function loadAuthUsers() {
   try {
@@ -218,22 +234,69 @@ function saveAuthUsers(users) {
 
 function loadAuthSession() {
   try {
-    const stored = localStorage.getItem(AUTH_SESSION_KEY);
-    return stored ? JSON.parse(stored) : null;
+    const sessionStored = sessionStorage.getItem(AUTH_SESSION_KEY);
+    const localStored = localStorage.getItem(AUTH_SESSION_KEY);
+    const session = sessionStored ? { ...JSON.parse(sessionStored), remember: false } : localStored ? { ...JSON.parse(localStored), remember: true } : null;
+    if (!session || isAuthSessionExpired(session)) {
+      clearAuthSessionStorage();
+      return null;
+    }
+    return session;
   } catch {
+    clearAuthSessionStorage();
     return null;
   }
 }
 
-function saveAuthSession(session) {
+function saveAuthSession(session, remember = session?.remember) {
   authSession = session;
-  if (session) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
-  else localStorage.removeItem(AUTH_SESSION_KEY);
+  clearAuthSessionStorage();
+  if (!session) return;
+  const nextSession = {
+    ...session,
+    remember: Boolean(remember),
+    lastActiveAt: session.lastActiveAt || new Date().toISOString(),
+  };
+  authSession = nextSession;
+  const target = nextSession.remember ? localStorage : sessionStorage;
+  target.setItem(AUTH_SESSION_KEY, JSON.stringify(nextSession));
 }
 
 function currentAuthUser() {
   if (!authSession?.userId) return null;
+  if (isAuthSessionExpired(authSession)) {
+    saveAuthSession(null);
+    return null;
+  }
   return loadAuthUsers().find((user) => user.id === authSession.userId) || null;
+}
+
+function clearAuthSessionStorage() {
+  localStorage.removeItem(AUTH_SESSION_KEY);
+  sessionStorage.removeItem(AUTH_SESSION_KEY);
+}
+
+function isAuthSessionExpired(session) {
+  if (!session?.userId) return true;
+  const user = loadAuthUsers().find((candidate) => candidate.id === session.userId);
+  const timeout = Number(user?.idleTimeoutMinutes ?? AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES);
+  if (!timeout) return false;
+  const lastActive = Date.parse(session.lastActiveAt || session.signedInAt || 0);
+  if (!lastActive) return true;
+  return Date.now() - lastActive > timeout * 60 * 1000;
+}
+
+function touchAuthSession(force = false) {
+  if (!authSession?.userId) return;
+  if (!force && Date.now() - lastAuthActivityWrite < AUTH_ACTIVITY_THROTTLE_MS) return;
+  lastAuthActivityWrite = Date.now();
+  saveAuthSession({ ...authSession, lastActiveAt: new Date().toISOString() }, authSession.remember);
+}
+
+function enforceAuthTimeout() {
+  if (!authSession?.userId || !isAuthSessionExpired(authSession)) return;
+  saveAuthSession(null);
+  renderAuthState();
 }
 
 function renderAuthState() {
@@ -247,6 +310,7 @@ function renderAuthState() {
     return;
   }
   ensureParticipantForAuth(user);
+  renderAccountSettings(user);
 }
 
 function setAuthMode(mode) {
@@ -255,7 +319,19 @@ function setAuthMode(mode) {
   if (els.authScreen) els.authScreen.dataset.mode = authMode;
   if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? "登録して入る" : "ログイン";
   if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  if (els.authRemember && authMode === "register") els.authRemember.checked = true;
   setAuthMessage("");
+}
+
+function renderAccountSettings(user = currentAuthUser()) {
+  if (!user) return;
+  if (els.accountUsername) els.accountUsername.value = user.username || "";
+  if (els.accountRole) els.accountRole.value = user.role === "admin" ? "Admin" : "member";
+  if (els.accountDisplayNameInput) els.accountDisplayNameInput.value = user.displayName || "";
+  if (els.accountEmailInput) els.accountEmailInput.value = user.email || "";
+  if (els.accountIdleTimeout) els.accountIdleTimeout.value = String(user.idleTimeoutMinutes ?? AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES);
+  if (els.accountRememberDefault) els.accountRememberDefault.checked = user.rememberDefault !== false;
+  if (els.authRemember) els.authRemember.checked = user.rememberDefault !== false;
 }
 
 function setAuthMessage(message) {
@@ -271,11 +347,12 @@ async function handleAuthSubmit(event) {
   const username = normalizeUsername(els.authUsername?.value || "");
   const displayName = (els.authDisplayName?.value || "").trim();
   const password = els.authPassword?.value || "";
-  if (authMode === "register") await registerAuthUser(username, displayName, password);
-  else await loginAuthUser(username, password);
+  const remember = Boolean(els.authRemember?.checked);
+  if (authMode === "register") await registerAuthUser(username, displayName, password, remember);
+  else await loginAuthUser(username, password, remember);
 }
 
-async function registerAuthUser(username, displayName, password) {
+async function registerAuthUser(username, displayName, password, remember = true) {
   const users = loadAuthUsers();
   if (username.length < 3) {
     setAuthMessage("ユーザーIDは3文字以上で入力してください。");
@@ -299,21 +376,24 @@ async function registerAuthUser(username, displayName, password) {
     id: crypto.randomUUID ? crypto.randomUUID() : `user-${Date.now()}`,
     username,
     displayName,
+    email: "",
     role: users.length ? "member" : "admin",
+    idleTimeoutMinutes: AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES,
+    rememberDefault: remember,
     salt,
     passwordHash,
     createdAt: new Date().toISOString(),
   };
   users.push(user);
   saveAuthUsers(users);
-  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString() });
+  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString(), lastActiveAt: new Date().toISOString() }, remember);
   if (els.authPassword) els.authPassword.value = "";
   ensureParticipantForAuth(user);
   renderAuthState();
   render();
 }
 
-async function loginAuthUser(username, password) {
+async function loginAuthUser(username, password, remember = true) {
   const user = loadAuthUsers().find((candidate) => candidate.username === username);
   if (!user) {
     setAuthMessage("ユーザーIDまたはパスワードが違います。");
@@ -324,7 +404,9 @@ async function loginAuthUser(username, password) {
     setAuthMessage("ユーザーIDまたはパスワードが違います。");
     return;
   }
-  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString() });
+  user.rememberDefault = remember;
+  saveUpdatedAuthUser(user);
+  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString(), lastActiveAt: new Date().toISOString() }, remember);
   if (els.authPassword) els.authPassword.value = "";
   ensureParticipantForAuth(user);
   renderAuthState();
@@ -334,6 +416,93 @@ async function loginAuthUser(username, password) {
 function logoutAuthUser() {
   saveAuthSession(null);
   renderAuthState();
+}
+
+function saveUpdatedAuthUser(nextUser) {
+  const users = loadAuthUsers();
+  const index = users.findIndex((user) => user.id === nextUser.id);
+  if (index === -1) return false;
+  users[index] = { ...users[index], ...nextUser, updatedAt: new Date().toISOString() };
+  saveAuthUsers(users);
+  return true;
+}
+
+function handleAccountSave() {
+  const user = currentAuthUser();
+  if (!user) return;
+  const nextDisplayName = (els.accountDisplayNameInput?.value || "").trim();
+  const nextEmail = (els.accountEmailInput?.value || "").trim();
+  const nextTimeout = Number(els.accountIdleTimeout?.value ?? AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES);
+  const rememberDefault = Boolean(els.accountRememberDefault?.checked);
+  if (!nextDisplayName) {
+    setAccountMessage("表示名を入力してください。");
+    return;
+  }
+  const users = loadAuthUsers();
+  if (users.some((candidate) => candidate.id !== user.id && candidate.displayName === nextDisplayName)) {
+    setAccountMessage("その表示名は別ユーザーが使っています。");
+    return;
+  }
+  const previousDisplayName = user.displayName;
+  const nextUser = {
+    ...user,
+    displayName: nextDisplayName,
+    email: nextEmail,
+    idleTimeoutMinutes: Number.isFinite(nextTimeout) ? nextTimeout : AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES,
+    rememberDefault,
+  };
+  saveUpdatedAuthUser(nextUser);
+  if (previousDisplayName !== nextDisplayName) renameParticipant(previousDisplayName, nextDisplayName);
+  saveAuthSession({ ...authSession, lastActiveAt: new Date().toISOString() }, authSession?.remember);
+  renderAuthState();
+  render();
+  setAccountMessage("アカウント情報を保存しました。");
+}
+
+async function handlePasswordChange() {
+  const user = currentAuthUser();
+  if (!user) return;
+  const currentPassword = els.accountCurrentPassword?.value || "";
+  const newPassword = els.accountNewPassword?.value || "";
+  if (newPassword.length < 6) {
+    setAccountMessage("新しいパスワードは6文字以上で入力してください。");
+    return;
+  }
+  const currentHash = await derivePasswordHash(currentPassword, user.salt);
+  if (currentHash !== user.passwordHash) {
+    setAccountMessage("現在のパスワードが違います。");
+    return;
+  }
+  const salt = randomBase64(16);
+  const passwordHash = await derivePasswordHash(newPassword, salt);
+  saveUpdatedAuthUser({ ...user, salt, passwordHash });
+  if (els.accountCurrentPassword) els.accountCurrentPassword.value = "";
+  if (els.accountNewPassword) els.accountNewPassword.value = "";
+  setAccountMessage("パスワードを変更しました。");
+}
+
+function setAccountMessage(message) {
+  if (els.accountMessage) els.accountMessage.textContent = message;
+}
+
+function renameParticipant(previousName, nextName) {
+  if (!previousName || !nextName || previousName === nextName) return;
+  state.participants = state.participants.map((name) => (name === previousName ? nextName : name));
+  if (!state.participants.includes(nextName)) state.participants.push(nextName);
+  (state.events || []).forEach((event) => {
+    event.predictions ||= {};
+    if (event.predictions[previousName] && !event.predictions[nextName]) {
+      event.predictions[nextName] = event.predictions[previousName];
+    }
+    delete event.predictions[previousName];
+    if (event.resultFlow?.submittedBy === previousName) event.resultFlow.submittedBy = nextName;
+    if (event.resultFlow?.approvals?.[previousName] !== undefined) {
+      event.resultFlow.approvals[nextName] = event.resultFlow.approvals[previousName];
+      delete event.resultFlow.approvals[previousName];
+    }
+    if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, nextName);
+  });
+  persist();
 }
 
 function ensureParticipantForAuth(user) {
@@ -3072,6 +3241,14 @@ els.authModeButtons?.forEach((button) => {
 
 els.authForm?.addEventListener("submit", handleAuthSubmit);
 els.logoutButton?.addEventListener("click", logoutAuthUser);
+els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
+els.accountSaveButton?.addEventListener("click", handleAccountSave);
+els.accountPasswordButton?.addEventListener("click", handlePasswordChange);
+
+["click", "input", "keydown", "touchstart"].forEach((eventName) => {
+  document.addEventListener(eventName, () => touchAuthSession(), { passive: true });
+});
+setInterval(enforceAuthTimeout, 60000);
 
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
 renderAuthState();

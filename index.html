@@ -43,6 +43,10 @@
             <span>パスワード</span>
             <input id="authPassword" type="password" autocomplete="current-password" required />
           </label>
+          <label class="auth-check">
+            <input id="authRemember" type="checkbox" checked />
+            <span>ログイン状態を保持する</span>
+          </label>
           <button class="primary-button" id="authSubmitButton" type="submit">ログイン</button>
           <p class="auth-message" id="authMessage" role="status"></p>
         </form>
@@ -285,6 +289,69 @@
             </div>
 
             <div class="settings-stack">
+              <section class="settings-section" aria-label="アカウント情報">
+                <div class="settings-section-head">
+                  <h3>アカウント情報</h3>
+                </div>
+                <div class="account-settings-grid">
+                  <label class="field">
+                    <span>ユーザーID</span>
+                    <input id="accountUsername" type="text" disabled />
+                  </label>
+                  <label class="field">
+                    <span>権限</span>
+                    <input id="accountRole" type="text" disabled />
+                  </label>
+                  <label class="field">
+                    <span>表示名</span>
+                    <input id="accountDisplayNameInput" type="text" autocomplete="name" />
+                  </label>
+                  <label class="field">
+                    <span>メールアドレス</span>
+                    <input id="accountEmailInput" type="email" autocomplete="email" placeholder="name@example.com" />
+                  </label>
+                  <label class="field">
+                    <span>自動ログアウト</span>
+                    <select id="accountIdleTimeout">
+                      <option value="30">30分</option>
+                      <option value="60">1時間</option>
+                      <option value="1440">24時間</option>
+                      <option value="10080">7日</option>
+                      <option value="43200">30日</option>
+                      <option value="0">無効</option>
+                    </select>
+                  </label>
+                  <label class="auth-check account-remember-row">
+                    <input id="accountRememberDefault" type="checkbox" />
+                    <span>次回ログイン時も保持を標準にする</span>
+                  </label>
+                </div>
+                <div class="settings-action-list">
+                  <article class="setting-row">
+                    <div>
+                      <span>パスワード変更</span>
+                      <strong>現在のパスワードを確認して更新します</strong>
+                    </div>
+                  </article>
+                  <div class="account-password-grid">
+                    <label class="field compact-field">
+                      <span>現在のパスワード</span>
+                      <input id="accountCurrentPassword" type="password" autocomplete="current-password" />
+                    </label>
+                    <label class="field compact-field">
+                      <span>新しいパスワード</span>
+                      <input id="accountNewPassword" type="password" autocomplete="new-password" />
+                    </label>
+                  </div>
+                  <div class="account-action-row">
+                    <button class="primary-button" id="accountSaveButton" type="button">アカウント保存</button>
+                    <button class="ghost-button" id="accountPasswordButton" type="button">パスワード変更</button>
+                    <button class="ghost-button" id="settingsLogoutButton" type="button">ログアウト</button>
+                  </div>
+                  <p class="auth-message" id="accountMessage" role="status"></p>
+                </div>
+              </section>
+
               <section class="settings-section" aria-label="クラブ設定">
                 <div class="settings-section-head">
                   <h3>クラブ設定</h3>
