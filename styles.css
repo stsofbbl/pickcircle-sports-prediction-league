@@ -119,7 +119,7 @@ h3 {
   position: relative;
   width: min(1180px, 100%);
   margin: 0 auto;
-  padding: 18px;
+  padding: 18px 18px 112px;
 }
 
 .topbar,
@@ -618,6 +618,87 @@ input[type="number"],
   margin-top: 14px;
 }
 
+.wc-phase-guide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.wc-phase-guide strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.wc-progress-meter {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.wc-progress-meter span {
+  text-align: right;
+}
+
+.wc-progress-meter div {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(238, 232, 224, 0.12);
+}
+
+.wc-progress-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.wc-public-row {
+  align-items: start;
+}
+
+.wc-public-row span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.wc-seed-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wc-seed-preview div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(238, 232, 224, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wc-seed-preview strong {
+  font-size: 12px;
+}
+
+.wc-seed-preview span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .worldcup-rule-strip span,
 .wc-participant-head span,
 .wc-group-head span {
@@ -908,7 +989,20 @@ input[type="number"],
 }
 
 .phase-row {
-  grid-template-columns: 1.1fr 0.8fr 0.8fr 0.7fr;
+  grid-template-columns: 32px 1.1fr 0.8fr 0.8fr 0.7fr;
+}
+
+.wc-row-index {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .result-board,
@@ -1179,11 +1273,19 @@ dialog::backdrop {
     width: 38px;
     height: 44px;
   }
+
+  .wc-phase-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .wc-progress-meter span {
+    text-align: left;
+  }
 }
 
 @media (max-width: 520px) {
   .app-shell {
-    padding: 12px;
+    padding: 12px 12px 112px;
   }
 
   .topbar,
