@@ -1,13 +1,16 @@
 const STORAGE_KEY = "yoso-league-state-v1";
+const AUTH_USERS_KEY = "yoso-auth-users-v1";
+const AUTH_SESSION_KEY = "yoso-auth-session-v1";
+const AUTH_PBKDF2_ITERATIONS = 120000;
 
 const templates = {
   rankingOdds: {
     id: "rankingOdds",
     sport: "baseball",
     name: "順位予想",
-    subtitle: "WBC型: 順位ポイントにオッズを掛ける",
+    subtitle: "WBC型: 順位予想にオッズを掛ける",
     eventName: "WBC順位予想",
-    teams: ["日本", "アメリカ", "ドミニカ", "プエルトリコ", "ベネズエラ", "イタリア"],
+    teams: ["日本", "アメリカ", "ドミニカ共和国", "プエルトリコ", "ベネズエラ", "イタリア"],
     resultLabels: ["1位", "2位", "3位", "4位"],
     basePoints: [10, 7, 5, 3],
   },
@@ -15,8 +18,8 @@ const templates = {
     id: "playoff",
     sourceTemplate: "rankingOdds",
     sport: "baseball",
-    name: "プレーオフ型",
-    subtitle: "CS・プレーオフ型: 勝ち抜け/シリーズ勝者を予想",
+    name: "プレーオフ予想",
+    subtitle: "CS・プレーオフ型: 勝ち抜け、シリーズ勝者、注目枠を予想",
     eventName: "プレーオフ予想",
     teams: ["1位チーム", "2位チーム", "3位チーム", "ワイルドカード"],
     resultLabels: ["勝者", "準優勝", "ベスト4", "注目枠"],
@@ -26,20 +29,20 @@ const templates = {
     id: "draft",
     sport: "baseball",
     name: "ドラフト",
-    subtitle: "選抜型: 指名したチームの到達順位で加点",
+    subtitle: "選択型: 指名したチームの到達結果で加点",
     eventName: "選抜ドラフト",
-    teams: ["大阪桐蔭", "山梨学院", "八戸光星", "中京大中京", "花咲徳栄", "英明", "智弁学園", "専大松戸"],
+    teams: ["大阪桐蔭", "山梨学院", "八戸学院光星", "中京大中京", "花巻東", "英明", "智弁学園", "専大松戸"],
     finishPoints: { champion: 100, runnerUp: 70, semifinal: 40, quarterfinal: 10 },
   },
   fightCard: {
     id: "fightCard",
     sport: "boxing",
     name: "ファイトカード",
-    subtitle: "ボクシング型: 勝敗・決着方法・ラウンド帯",
+    subtitle: "ボクシング型: 勝者、決着方法、ラウンド帯を予想",
     eventName: "5.2ボクシング予想",
     markets: [
       { id: "fight1", label: "井上尚弥 vs 中谷潤人", options: ["井上尚弥 勝利", "中谷潤人 勝利", "井上尚弥 KO", "中谷潤人 KO", "判定"] },
-      { id: "fight2", label: "井上拓真 vs 井岡一翔", options: ["井上拓真 勝利", "井岡一翔 勝利", "井上拓真 KO", "井岡一翔 KO", "判定"] },
+      { id: "fight2", label: "井上拓真 vs 田中恒成", options: ["井上拓真 勝利", "田中恒成 勝利", "井上拓真 KO", "田中恒成 KO", "判定"] },
       { id: "bonus", label: "KOラウンド帯", options: ["なし", "1-3R", "4-6R", "7-9R", "10-12R"] },
     ],
   },
@@ -48,7 +51,7 @@ const templates = {
     sourceTemplate: "fightCard",
     sport: "other",
     name: "スコアボーナス型",
-    subtitle: "決勝スコア・総得点・KOラウンドなどの単独ボーナス",
+    subtitle: "決勝スコア、総得点、KOラウンドなどの単独ボーナス",
     eventName: "スコアボーナス予想",
     markets: [
       { id: "score", label: "スコア/得点ボーナス", options: ["完全一致", "近似", "高得点", "低得点"] },
@@ -59,17 +62,30 @@ const templates = {
     id: "worldCup",
     sport: "soccer",
     name: "W杯3フェーズ",
-    subtitle: "GL、決勝T、決勝スコアを合算",
+    subtitle: "GL、決勝T、決勝スコアを段階ごとに予想",
     eventName: "W杯2026予想王",
     groups: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"],
-    countries: ["ブラジル", "フランス", "日本", "アルゼンチン", "イングランド", "スペイン", "ドイツ", "アメリカ", "ポルトガル", "メキシコ", "モロッコ", "ナイジェリア"],
+    countries: [
+      "日本", "ブラジル", "フランス", "アルゼンチン",
+      "イングランド", "スペイン", "ドイツ", "ポルトガル",
+      "イタリア", "オランダ", "ベルギー", "クロアチア",
+      "アメリカ", "カナダ", "メキシコ", "ウルグアイ",
+      "コロンビア", "チリ", "エクアドル", "パラグアイ",
+      "韓国", "オーストラリア", "イラン", "サウジアラビア",
+      "カタール", "UAE", "イラク", "ウズベキスタン",
+      "モロッコ", "ナイジェリア", "セネガル", "エジプト",
+      "カメルーン", "ガーナ", "南アフリカ", "コートジボワール",
+      "スイス", "デンマーク", "スウェーデン", "ノルウェー",
+      "ポーランド", "セルビア", "トルコ", "ギリシャ",
+      "ウェールズ", "スコットランド", "アイルランド", "ニュージーランド",
+    ],
   },
   groupStage: {
     id: "groupStage",
     sourceTemplate: "worldCup",
     sport: "soccer",
     name: "グループ突破型",
-    subtitle: "W杯型: グループ突破・順位・到達結果を予想",
+    subtitle: "W杯型: グループ突破、順位、到達結果を中心に予想",
     eventName: "グループ突破予想",
     groups: ["A", "B", "C", "D"],
     countries: ["日本", "ブラジル", "フランス", "アルゼンチン", "スペイン", "ドイツ", "アメリカ", "メキシコ"],
@@ -79,7 +95,7 @@ const templates = {
     sourceTemplate: "worldCup",
     sport: "soccer",
     name: "複合型",
-    subtitle: "大型大会型: 複数の予想形式を組み合わせる",
+    subtitle: "大型大会向け: 複数の予想形式を組み合わせる",
     eventName: "複合ルール大会",
     groups: ["A", "B", "C", "D"],
     countries: ["日本", "ブラジル", "フランス", "アルゼンチン", "スペイン", "ドイツ", "アメリカ", "メキシコ"],
@@ -89,24 +105,23 @@ const templates = {
 const presetRuleDescriptions = {
   rankingOdds: "優勝、準優勝、ベスト4などの順位を予想する型です。WBC、甲子園、W杯の上位予想に向いています。",
   playoff: "クライマックスシリーズやプレーオフの勝ち抜け、シリーズ勝者、注目枠を予想する型です。",
-  draft: "参加者がチームや選手を指名し、到達成績に応じてポイントを獲得する型です。",
+  draft: "参加者がチームや選手を指名し、到達成績に応じてポイントを得る型です。",
   fightCard: "格闘技やボクシングの対戦カードごとに、勝者、KO、判定などを予想する型です。",
   scoreBonus: "決勝スコア、総得点、KOラウンドなど、単独のボーナス項目を予想する型です。",
-  worldCup: "グループ、決勝トーナメント、順位、表彰などをまとめて扱う大型大会向けの型です。",
+  worldCup: "W杯2026専用の3フェーズ型です。第1回GL、第2回決勝T、第3回決勝スコアを段階ごとに扱います。",
   groupStage: "W杯などでグループ突破、順位、到達結果を中心に予想する型です。",
   composite: "複数の予想形式を組み合わせる大型大会向けの型です。W杯2026予想王のような大会に向いています。",
 };
 
 const defaultState = {
   leagueName: "G-UNIT 予想リーグ",
-  participants: ["和田", "拓洋", "銀次", "いの"],
+  participants: ["和田", "担当A", "担当B", "ゲスト"],
   activeTemplate: "worldCup",
   approvalPolicy: "half",
   activeEventId: null,
   events: null,
   event: null,
 };
-
 let state = loadState();
 
 const els = {
@@ -114,6 +129,17 @@ const els = {
   navLinks: [...document.querySelectorAll("[data-nav-page]")],
   themeToggle: document.querySelector("#themeToggle"),
   themeOptions: [...document.querySelectorAll("[data-theme-label]")],
+  authScreen: document.querySelector("#authScreen"),
+  authForm: document.querySelector("#authForm"),
+  authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
+  authUsername: document.querySelector("#authUsername"),
+  authDisplayName: document.querySelector("#authDisplayName"),
+  authPassword: document.querySelector("#authPassword"),
+  authSubmitButton: document.querySelector("#authSubmitButton"),
+  authMessage: document.querySelector("#authMessage"),
+  accountChip: document.querySelector("#accountChip"),
+  accountName: document.querySelector("#accountName"),
+  logoutButton: document.querySelector("#logoutButton"),
   homeClubLine: document.querySelector("#homeClubLine"),
   homeParticipantName: document.querySelector("#homeParticipantName"),
   homeOpenCount: document.querySelector("#homeOpenCount"),
@@ -130,6 +156,8 @@ const els = {
   participantList: document.querySelector("#participantList"),
   participantName: document.querySelector("#participantName"),
   addParticipantButton: document.querySelector("#addParticipantButton"),
+  presetDetails: document.querySelector("#presetDetails"),
+  presetSummary: document.querySelector("#presetSummary"),
   templateGrid: document.querySelector("#templateGrid"),
   presetDescription: document.querySelector("#presetDescription"),
   eventTitle: document.querySelector("#eventTitle"),
@@ -141,7 +169,6 @@ const els = {
   newTournamentSport: document.querySelector("#newTournamentSport"),
   newTournamentTemplate: document.querySelector("#newTournamentTemplate"),
   newTournamentDeadline: document.querySelector("#newTournamentDeadline"),
-  newTournamentStatus: document.querySelector("#newTournamentStatus"),
   saveButton: document.querySelector("#saveButton"),
   rankingTabs: document.querySelector("#rankingTabs"),
   rankingFilterPanel: document.querySelector("#rankingFilterPanel"),
@@ -170,6 +197,197 @@ function loadState() {
   } catch {
     return createDefaultState();
   }
+}
+
+let authSession = loadAuthSession();
+let authMode = "login";
+
+function loadAuthUsers() {
+  try {
+    const stored = localStorage.getItem(AUTH_USERS_KEY);
+    const users = stored ? JSON.parse(stored) : [];
+    return Array.isArray(users) ? users : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAuthUsers(users) {
+  localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
+}
+
+function loadAuthSession() {
+  try {
+    const stored = localStorage.getItem(AUTH_SESSION_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveAuthSession(session) {
+  authSession = session;
+  if (session) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+  else localStorage.removeItem(AUTH_SESSION_KEY);
+}
+
+function currentAuthUser() {
+  if (!authSession?.userId) return null;
+  return loadAuthUsers().find((user) => user.id === authSession.userId) || null;
+}
+
+function renderAuthState() {
+  const user = currentAuthUser();
+  document.body.classList.toggle("auth-locked", !user);
+  if (els.authScreen) els.authScreen.hidden = Boolean(user);
+  if (els.accountChip) els.accountChip.hidden = !user;
+  if (els.accountName) els.accountName.textContent = user ? `${user.displayName}${user.role === "admin" ? " / Admin" : ""}` : "";
+  if (!user) {
+    setAuthMode(loadAuthUsers().length ? "login" : "register");
+    return;
+  }
+  ensureParticipantForAuth(user);
+}
+
+function setAuthMode(mode) {
+  authMode = mode === "register" ? "register" : "login";
+  els.authModeButtons?.forEach((button) => button.classList.toggle("is-active", button.dataset.authMode === authMode));
+  if (els.authScreen) els.authScreen.dataset.mode = authMode;
+  if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? "登録して入る" : "ログイン";
+  if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  setAuthMessage("");
+}
+
+function setAuthMessage(message) {
+  if (els.authMessage) els.authMessage.textContent = message;
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  if (!crypto?.subtle) {
+    setAuthMessage("このブラウザではWeb Crypto APIが使えないため登録できません。");
+    return;
+  }
+  const username = normalizeUsername(els.authUsername?.value || "");
+  const displayName = (els.authDisplayName?.value || "").trim();
+  const password = els.authPassword?.value || "";
+  if (authMode === "register") await registerAuthUser(username, displayName, password);
+  else await loginAuthUser(username, password);
+}
+
+async function registerAuthUser(username, displayName, password) {
+  const users = loadAuthUsers();
+  if (username.length < 3) {
+    setAuthMessage("ユーザーIDは3文字以上で入力してください。");
+    return;
+  }
+  if (!displayName) {
+    setAuthMessage("表示名を入力してください。");
+    return;
+  }
+  if (password.length < 6) {
+    setAuthMessage("パスワードは6文字以上で入力してください。");
+    return;
+  }
+  if (users.some((user) => user.username === username)) {
+    setAuthMessage("このユーザーIDは登録済みです。");
+    return;
+  }
+  const salt = randomBase64(16);
+  const passwordHash = await derivePasswordHash(password, salt);
+  const user = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `user-${Date.now()}`,
+    username,
+    displayName,
+    role: users.length ? "member" : "admin",
+    salt,
+    passwordHash,
+    createdAt: new Date().toISOString(),
+  };
+  users.push(user);
+  saveAuthUsers(users);
+  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString() });
+  if (els.authPassword) els.authPassword.value = "";
+  ensureParticipantForAuth(user);
+  renderAuthState();
+  render();
+}
+
+async function loginAuthUser(username, password) {
+  const user = loadAuthUsers().find((candidate) => candidate.username === username);
+  if (!user) {
+    setAuthMessage("ユーザーIDまたはパスワードが違います。");
+    return;
+  }
+  const passwordHash = await derivePasswordHash(password, user.salt);
+  if (passwordHash !== user.passwordHash) {
+    setAuthMessage("ユーザーIDまたはパスワードが違います。");
+    return;
+  }
+  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString() });
+  if (els.authPassword) els.authPassword.value = "";
+  ensureParticipantForAuth(user);
+  renderAuthState();
+  render();
+}
+
+function logoutAuthUser() {
+  saveAuthSession(null);
+  renderAuthState();
+}
+
+function ensureParticipantForAuth(user) {
+  if (!user?.displayName || state.participants.includes(user.displayName)) return;
+  state.participants.push(user.displayName);
+  (state.events || []).forEach((event) => {
+    event.predictions ||= {};
+    event.predictions[user.displayName] = createPrediction(event.templateId);
+    if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, user.displayName);
+  });
+  persist();
+}
+
+function normalizeUsername(value) {
+  return value.trim().toLowerCase();
+}
+
+async function derivePasswordHash(password, saltBase64) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: base64ToBytes(saltBase64),
+      iterations: AUTH_PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256,
+  );
+  return bytesToBase64(new Uint8Array(bits));
+}
+
+function randomBase64(length) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64(bytes);
+}
+
+function bytesToBase64(bytes) {
+  let value = "";
+  bytes.forEach((byte) => {
+    value += String.fromCharCode(byte);
+  });
+  return btoa(value);
+}
+
+function base64ToBytes(value) {
+  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 }
 
 function createDefaultState() {
@@ -206,11 +424,31 @@ function normalizeEvent(event, sourceState = state) {
   normalized.approvalPolicy ||= sourceState.approvalPolicy || "half";
   normalized.config ||= createConfig(templateId);
   normalized.results ||= createResults(templateId);
+  normalized.resultFlow = normalizeResultFlow(normalized.resultFlow, sourceState.participants || defaultState.participants);
   normalized.predictions ||= {};
   (sourceState.participants || defaultState.participants).forEach((name) => {
     normalized.predictions[name] ||= createPrediction(templateId);
   });
+  normalizeWorldCupEvent(normalized);
   return normalized;
+}
+
+function createResultFlow() {
+  return { status: "none", submittedBy: "", submittedAt: "", approvals: {}, finalizedAt: "" };
+}
+
+function normalizeResultFlow(flow, participants = state.participants || defaultState.participants) {
+  const next = { ...createResultFlow(), ...(flow || {}) };
+  next.status = ["none", "submitted", "finalized"].includes(next.status) ? next.status : "none";
+  next.approvals = typeof next.approvals === "object" && next.approvals ? next.approvals : {};
+  Object.keys(next.approvals).forEach((name) => {
+    if (!participants.includes(name)) delete next.approvals[name];
+  });
+  participants.forEach((name) => {
+    if (next.approvals[name] === undefined) return;
+    if (!next.approvals[name]) delete next.approvals[name];
+  });
+  return next;
 }
 
 function persist() {
@@ -293,6 +531,7 @@ function createEvent(templateId, participants, overrides = {}) {
     config: createConfig(templateId),
     predictions,
     results: createResults(templateId),
+    resultFlow: createResultFlow(),
   };
 }
 
@@ -306,7 +545,10 @@ function createConfig(templateId) {
   if (base === "rankingOdds") return { teams: [...(template.teams || templates.rankingOdds.teams)], oddsBook: {} };
   if (base === "draft") return { teams: [...(template.teams || templates.draft.teams)], oddsBook: {} };
   if (base === "fightCard") return { markets: structuredClone(template.markets || templates.fightCard.markets), oddsBook: {} };
-  if (base === "worldCup") return { countries: [...(template.countries || templates.worldCup.countries)], oddsBook: {} };
+  if (base === "worldCup") {
+    const countries = [...(template.countries || templates.worldCup.countries)];
+    return { countries, groups: createWorldCupGroups(template.groups || templates.worldCup.groups, countries), oddsBook: {} };
+  }
   return {};
 }
 
@@ -315,7 +557,16 @@ function createPrediction(templateId) {
   if (base === "rankingOdds") return { picks: ["", "", "", ""], odds: [1, 1, 1, 1] };
   if (base === "draft") return { teams: ["", ""], bonusScore: "" };
   if (base === "fightCard") return { picks: {}, odds: {} };
-  if (base === "worldCup") return { gl: {}, third: "", top4: ["", "", "", ""], futures: [], awards: {} };
+  if (base === "worldCup") return {
+    glPicks: {},
+    thirdAdvancers: Array(8).fill(""),
+    top4: ["", "", "", ""],
+    futures: Array.from({ length: 10 }, () => ({ country: "", finish: "", odds: 1 })),
+    awards: {},
+    finalScore: { home: "", away: "" },
+    gl: {},
+    third: "",
+  };
   return {};
 }
 
@@ -324,15 +575,126 @@ function createResults(templateId) {
   if (base === "rankingOdds") return { finalTop4: ["", "", "", ""] };
   if (base === "draft") return { finishes: {}, scoreBonusWinner: "" };
   if (base === "fightCard") return { winners: {}, bonusWinner: "" };
-  if (base === "worldCup") return { gl: {}, thirdQualified: "", top4: ["", "", "", ""], futures: {}, awards: {}, finalScoreWinner: "", exactScore: false };
+  if (base === "worldCup") return {
+    gl: {},
+    thirdAdvancers: Array(8).fill(""),
+    thirdQualified: "",
+    top4: ["", "", "", ""],
+    futures: {},
+    awards: {},
+    finalMatch: { home: "", away: "", homeScore: "", awayScore: "" },
+    finalScoreWinner: "",
+    exactScore: false,
+  };
   return {};
 }
 
+function createWorldCupGroups(groupIds = templates.worldCup.groups, countries = []) {
+  return groupIds.map((id, groupIndex) => ({
+    id,
+    teams: Array.from({ length: 4 }, (_, teamIndex) => countries[groupIndex * 4 + teamIndex] || ""),
+  }));
+}
+
+function normalizeWorldCupEvent(event) {
+  if (baseTemplateId(event.templateId) !== "worldCup") return;
+  event.config ||= createConfig(event.templateId);
+  event.config.activePhase ||= "phase1";
+  event.config.phaseStatus = normalizeWorldCupPhaseStatus(event.config.phaseStatus);
+  event.config.countries = Array.isArray(event.config.countries) ? event.config.countries : [...templates.worldCup.countries];
+  if (!Array.isArray(event.config.groups) || !event.config.groups.length) {
+    const template = templates[event.templateId] || templates.worldCup;
+    event.config.groups = createWorldCupGroups(template.groups || templates.worldCup.groups, event.config.countries);
+  }
+  event.config.groups = event.config.groups.map((group, index) => ({
+    id: group.id || String.fromCharCode(65 + index),
+    teams: Array.from({ length: 4 }, (_, teamIndex) => group.teams?.[teamIndex] || ""),
+  }));
+  event.results ||= createResults(event.templateId);
+  event.results.gl ||= {};
+  event.results.thirdAdvancers = normalizeFixedArray(event.results.thirdAdvancers, 8);
+  event.results.top4 = normalizeFixedArray(event.results.top4, 4);
+  event.results.futures ||= {};
+  event.results.awards ||= {};
+  event.results.finalMatch ||= { home: "", away: "", homeScore: "", awayScore: "" };
+  event.config.groups.forEach((group) => {
+    event.results.gl[group.id] = {
+      first: event.results.gl[group.id]?.first || "",
+      second: event.results.gl[group.id]?.second || "",
+    };
+  });
+  Object.keys(event.predictions || {}).forEach((name) => normalizeWorldCupPrediction(event, name));
+}
+
+function normalizeWorldCupPrediction(event, name) {
+  event.predictions ||= {};
+  event.predictions[name] ||= createPrediction(event.templateId);
+  const prediction = event.predictions[name];
+  prediction.glPicks ||= {};
+  prediction.thirdAdvancers = normalizeFixedArray(prediction.thirdAdvancers, 8);
+  prediction.top4 = normalizeFixedArray(prediction.top4, 4);
+  prediction.futures = normalizeWorldCupFutures(prediction.futures);
+  prediction.awards ||= {};
+  prediction.finalScore ||= { home: "", away: "" };
+  (event.config?.groups || []).forEach((group) => {
+    prediction.glPicks[group.id] = {
+      first: prediction.glPicks[group.id]?.first || "",
+      second: prediction.glPicks[group.id]?.second || "",
+    };
+  });
+}
+
+function normalizeWorldCupFutures(value) {
+  const source = Array.isArray(value) ? value : [];
+  return Array.from({ length: 10 }, (_, index) => ({
+    country: source[index]?.country || "",
+    finish: source[index]?.finish || "",
+    odds: Number(source[index]?.odds) || 1,
+  }));
+}
+
+function normalizeWorldCupPhaseStatus(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    phase1: ["open", "resultWait", "finalized"].includes(source.phase1) ? source.phase1 : "open",
+    phase2: ["locked", "open", "resultWait", "finalized"].includes(source.phase2) ? source.phase2 : "locked",
+    phase3: ["locked", "open", "resultWait", "finalized"].includes(source.phase3) ? source.phase3 : "locked",
+  };
+}
+
+function worldCupPhaseStatus(phaseId) {
+  normalizeWorldCupEvent(state.event);
+  return state.event.config.phaseStatus?.[phaseId] || "locked";
+}
+
+const worldCupPhases = [
+  { id: "phase1", label: "第1回 GL予想", caption: "グループ上位2カ国 + 3位突破8カ国" },
+  { id: "phase2", label: "第2回 決勝T予想", caption: "1〜4位、複勝10枠、個人賞" },
+  { id: "phase3", label: "第3回 決勝スコア", caption: "第2回までの暫定ptの5%を使う最終勝負" },
+];
+
+const worldCupAwardMarkets = [
+  { id: "mvp", label: "MVP", points: 50 },
+  { id: "topScorer", label: "得点王", points: 30 },
+  { id: "bestGk", label: "GK賞", points: 30 },
+  { id: "youngPlayer", label: "若手賞", points: 30 },
+  { id: "fairPlay", label: "フェアプレー", points: 30 },
+];
+
+const worldCupFinishOptions = ["champion", "runnerUp", "third", "fourth", "best8", "best16"];
+
+function normalizeFixedArray(value, length) {
+  const source = Array.isArray(value) ? value : [];
+  return Array.from({ length }, (_, index) => source[index] || "");
+}
+
 function render() {
+  updateEventStatuses();
   if (els.leagueName) els.leagueName.value = state.leagueName;
   renderParticipants();
   renderTemplates();
   renderPresetDescription();
+  updatePresetSummary();
   renderTournamentCreateOptions();
   renderEvent();
   renderScores();
@@ -370,7 +732,7 @@ function renderDashboard() {
       return tournamentCardMarkup(event, {
         status: "予想受付中",
         statusClass: "open",
-        actionLabel: missingCount > 0 ? "予想する" : "入力内容を見る",
+        actionLabel: "YOSO",
         missingCount,
         showDeadline: true,
       });
@@ -387,18 +749,20 @@ function renderActiveTournaments() {
       : tournamentCardMarkup(event, {
         status: "予想受付中",
         statusClass: "open",
-        actionLabel: "予想へ",
+        actionLabel: "YOSO",
         missingCount: missingPredictionCountForEvent(event, currentParticipantName()),
         showDeadline: true,
+        showManageActions: true,
       })).join("")
     : emptyTournamentMarkup("開催中の大会はありません");
 }
 
-function tournamentCardMarkup(event, { status, statusClass, actionLabel, missingCount, showDeadline }) {
+function tournamentCardMarkup(event, { status, statusClass, actionLabel, missingCount, showDeadline, showManageActions = false }) {
   const sport = sportMeta(event.templateId);
   const template = templates[event.templateId];
   const candidateCount = candidateCountForEvent(event);
   const missingText = missingCount > 0 ? `未入力 ${missingCount}項目` : "入力済み";
+  const adminOnly = isCurrentUserAdmin() ? "" : "disabled";
   return `
     <article class="tournament-card">
       <div class="tournament-main">
@@ -414,9 +778,14 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
         ${showDeadline ? `<span class="deadline-chip">締切間近</span>` : ""}
         <span class="missing-chip ${missingCount > 0 ? "has-missing" : ""}">${escapeHtml(missingText)}</span>
       </div>
-      <div class="tournament-actions">
+      <div class="tournament-actions ${showManageActions ? "is-manage" : ""}">
         <a class="primary-link" href="#prediction" data-event-action="predict" data-event-id="${escapeAttr(event.id)}">${escapeHtml(actionLabel)}</a>
-        <a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>
+        ${showManageActions
+          ? `
+            <a class="ghost-link admin-action ${adminOnly ? "is-disabled" : ""}" href="#prediction" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+            <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
+          `
+          : `<a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>`}
       </div>
     </article>
   `;
@@ -443,22 +812,25 @@ function statusPreviewCardMarkup(status, text, statusClass) {
 
 function resultWaitCardMarkup(event) {
   const sport = sportMeta(event.templateId);
+  const adminOnly = isCurrentUserAdmin() ? "" : "disabled";
+  const finalized = isResultFinalized(event);
   return `
     <article class="tournament-card muted-card">
       <div class="tournament-main">
         <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
         <div>
-          <span class="match-kicker">締切後</span>
+          <span class="match-kicker">${finalized ? "確定済み" : "締切後"}</span>
           <strong>${escapeHtml(event.name || "結果待ち")}</strong>
-          <small>締切後は管理者の結果入力と参加者の承認に進みます。</small>
+          <small>${finalized ? "結果は確定済みで、ランキングに反映されています。" : "締切後は管理者の結果入力と参加者の承認に進みます。"}</small>
         </div>
       </div>
       <div class="tournament-chips">
-        <span class="status-label pending">結果待ち</span>
+        <span class="status-label ${finalized ? "open" : "pending"}">${finalized ? "結果確定" : "結果待ち"}</span>
       </div>
-      <div class="tournament-actions">
-        <a class="primary-link" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
-        <a class="ghost-link" href="#active" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
+      <div class="tournament-actions is-manage">
+        <a class="primary-link admin-action ${adminOnly || finalized ? "is-disabled" : ""}" href="#prediction" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+        <a class="ghost-link ${finalized ? "is-disabled" : ""}" href="#prediction" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
+        <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
       </div>
     </article>
   `;
@@ -469,12 +841,31 @@ function emptyTournamentMarkup(message) {
 }
 
 function currentParticipantName() {
+  const user = currentAuthUser();
+  if (user?.displayName) return user.displayName;
   return state.participants[0] || "あなた";
+}
+
+function isCurrentUserAdmin() {
+  const user = currentAuthUser();
+  if (user?.role === "admin") return true;
+  return currentParticipantName() === state.participants[0];
 }
 
 function eventsByStatus(...statuses) {
   const allowed = new Set(statuses);
   return (state.events || []).filter((event) => allowed.has(event.status || "open"));
+}
+
+function updateEventStatuses() {
+  (state.events || []).forEach((event) => {
+    if ((event.status || "open") !== "open" || !event.deadline) return;
+    if (tournamentStatusFromDeadline(event.deadline) === "resultWait") event.status = "resultWait";
+  });
+  if (state.event?.id) {
+    const latest = (state.events || []).find((event) => event.id === state.event.id);
+    if (latest) state.event = latest;
+  }
 }
 
 function setActiveEvent(eventId) {
@@ -504,10 +895,55 @@ function candidateCountForEvent(event) {
 }
 
 function requiredApprovalCount() {
-  const policy = state.event?.approvalPolicy || state.approvalPolicy;
+  return requiredApprovalCountForEvent(state.event);
+}
+
+function requiredApprovalCountForEvent(event = state.event) {
+  const policy = event?.approvalPolicy || state.approvalPolicy;
   if (policy === "admin") return 1;
   if (policy === "unanimous") return Math.max(1, state.participants.length);
   return Math.max(1, Math.ceil(state.participants.length / 2));
+}
+
+function approvalCount(event = state.event) {
+  return Object.keys(event?.resultFlow?.approvals || {}).filter((name) => event.resultFlow.approvals[name]).length;
+}
+
+function isResultFinalized(event = state.event) {
+  return event?.resultFlow?.status === "finalized";
+}
+
+function submitResults() {
+  ensureResultFlow();
+  const name = currentParticipantName();
+  state.event.resultFlow.status = "submitted";
+  state.event.resultFlow.submittedBy = name;
+  state.event.resultFlow.submittedAt = new Date().toISOString();
+  state.event.resultFlow.approvals[name] = state.event.resultFlow.submittedAt;
+  finalizeResultsIfReady();
+  render();
+}
+
+function approveResults(name) {
+  ensureResultFlow();
+  const approver = name || currentParticipantName();
+  if (!approver) return;
+  state.event.resultFlow.status = state.event.resultFlow.status === "none" ? "submitted" : state.event.resultFlow.status;
+  state.event.resultFlow.approvals[approver] = new Date().toISOString();
+  finalizeResultsIfReady();
+  render();
+}
+
+function finalizeResultsIfReady() {
+  ensureResultFlow();
+  if (approvalCount(state.event) < requiredApprovalCountForEvent(state.event)) return;
+  state.event.resultFlow.status = "finalized";
+  state.event.resultFlow.finalizedAt ||= new Date().toISOString();
+}
+
+function ensureResultFlow() {
+  if (!state.event.resultFlow) state.event.resultFlow = createResultFlow();
+  state.event.resultFlow = normalizeResultFlow(state.event.resultFlow, state.participants);
 }
 
 function renderApprovalPolicy() {
@@ -536,7 +972,25 @@ function missingPredictionCountForEvent(event, name) {
     return (event.config?.markets || templates.fightCard.markets).filter((market) => !prediction.picks[market.id]).length;
   }
   if (base === "worldCup") {
-    return prediction.top4.filter((country) => !country).length;
+    normalizeWorldCupPrediction(event, name);
+    const phase = event.config?.activePhase || "phase1";
+    const status = event.config?.phaseStatus?.[phase] || "locked";
+    if (status !== "open") return 0;
+    if (phase === "phase2") {
+      const top4Missing = normalizeFixedArray(prediction.top4, 4).filter((country) => !country).length;
+      const futuresMissing = normalizeWorldCupFutures(prediction.futures).filter((future) => !future.country || !future.finish).length;
+      const awardsMissing = worldCupAwardMarkets.filter((award) => !prediction.awards?.[award.id]).length;
+      return top4Missing + futuresMissing + awardsMissing;
+    }
+    if (phase === "phase3") {
+      return prediction.finalScore?.home !== "" && prediction.finalScore?.away !== "" ? 0 : 1;
+    }
+    const groupMissing = (event.config?.groups || []).reduce((total, group) => {
+      const pick = prediction.glPicks?.[group.id] || {};
+      return total + (pick.first ? 0 : 1) + (pick.second ? 0 : 1);
+    }, 0);
+    const thirdMissing = normalizeFixedArray(prediction.thirdAdvancers, 8).filter((country) => !country).length;
+    return groupMissing + thirdMissing;
   }
   return 0;
 }
@@ -544,6 +998,7 @@ function missingPredictionCountForEvent(event, name) {
 function ensurePredictionForEvent(event, name) {
   event.predictions ||= {};
   if (!event.predictions[name]) event.predictions[name] = createPrediction(event.templateId);
+  if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, name);
 }
 
 function formatDeadline(value) {
@@ -569,10 +1024,17 @@ function createTournamentFromSettings({ fallbackName } = {}) {
     name,
     sport: els.newTournamentSport?.value || template.sport || "other",
     deadline: els.newTournamentDeadline?.value || "",
-    status: els.newTournamentStatus?.value || "open",
+    status: tournamentStatusFromDeadline(els.newTournamentDeadline?.value || ""),
     approvalPolicy: state.approvalPolicy || "half",
   });
   return event;
+}
+
+function tournamentStatusFromDeadline(deadline) {
+  if (!deadline) return "open";
+  const time = new Date(deadline).getTime();
+  if (Number.isNaN(time)) return "open";
+  return time <= Date.now() ? "resultWait" : "open";
 }
 
 function addAndSelectEvent(event) {
@@ -681,7 +1143,70 @@ function renderPresetDescription() {
   `;
 }
 
+function resultFlowPanel() {
+  if (baseTemplateId(state.event.templateId) === "worldCup") return "";
+  ensureResultFlow();
+  const flow = state.event.resultFlow;
+  if (state.event.status === "open" && flow.status === "none") return "";
+  const required = requiredApprovalCountForEvent(state.event);
+  const approvedNames = Object.keys(flow.approvals || {}).filter((name) => flow.approvals[name]);
+  const approvedText = approvedNames.length ? approvedNames.join("、") : "まだ承認なし";
+  const isResultWait = state.event.status === "resultWait";
+  const finalized = isResultFinalized(state.event);
+  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized;
+  const canApprove = isResultWait && flow.status === "submitted" && !finalized;
+  const approverOptions = state.participants
+    .filter((name) => !flow.approvals?.[name])
+    .map((name) => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
+    .join("");
+  const statusText = finalized
+    ? "結果確定済み"
+    : flow.status === "submitted"
+      ? `承認待ち ${approvalCount(state.event)} / ${required}`
+      : isResultWait
+        ? "結果入力待ち"
+        : "予想受付中";
+  return `
+    <div class="entry-block result-flow-panel">
+      <div class="result-flow-head">
+        <div>
+          <span class="match-kicker">RESULT FLOW</span>
+          <h3>${escapeHtml(statusText)}</h3>
+          <p class="helper-text">${escapeHtml(resultFlowMessage())}</p>
+        </div>
+        <span class="status-label ${finalized ? "open" : "pending"}">${escapeHtml(flow.status === "none" ? "未提出" : flow.status === "submitted" ? "承認待ち" : "確定")}</span>
+      </div>
+      <div class="result-flow-meta">
+        <span>必要承認: ${required}人</span>
+        <span>承認済み: ${escapeHtml(approvedText)}</span>
+      </div>
+      <div class="result-flow-actions">
+        ${canSubmit ? `<button class="primary-button" type="button" data-result-submit>結果を提出</button>` : ""}
+        ${canApprove && approverOptions ? `
+          <select data-result-approver>${approverOptions}</select>
+          <button class="ghost-button" type="button" data-result-approve>承認する</button>
+        ` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function resultFlowMessage() {
+  if (isResultFinalized(state.event)) return "承認条件を満たしたため、この大会の結果はランキングに反映されています。";
+  if (state.event.status === "resultWait" && state.event.resultFlow?.status === "submitted") {
+    return "結果は提出済みです。必要承認数に達するまでランキングには反映されません。";
+  }
+  if (state.event.status === "resultWait") return "管理者が結果を入力して提出すると、参加者承認へ進みます。";
+  return "予想受付中です。結果はまだランキングに反映されません。";
+}
+
+function updatePresetSummary() {
+  if (!els.presetDetails || !els.presetSummary) return;
+  els.presetSummary.textContent = els.presetDetails.open ? "▼ プリセット一覧を閉じる" : "▶ プリセット一覧を表示";
+}
+
 function renderEvent() {
+  ensureResultFlow();
   const template = templates[state.event.templateId];
   els.eventTitle.textContent = state.event.name;
   els.eventSubtitle.textContent = template.subtitle;
@@ -689,13 +1214,14 @@ function renderEvent() {
   if (base === "rankingOdds") renderRankingOddsForm();
   if (base === "draft") renderDraftForm();
   if (base === "fightCard") renderFightForm();
-  if (base === "worldCup") renderWorldCupForm();
+  if (base === "worldCup") renderWorldCupTournamentForm();
 }
 
 function renderRankingOddsForm() {
   const template = { ...templates.rankingOdds, ...templates[state.event.templateId] };
   const teams = getTeams();
   els.eventForm.innerHTML = `
+    ${resultFlowPanel()}
     <div class="form-grid">
       <label class="field"><span>イベント名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
       ${template.resultLabels.map((label, index) => `
@@ -736,6 +1262,7 @@ function renderDraftForm() {
   const template = { ...templates.draft, ...templates[state.event.templateId] };
   const teams = getTeams();
   els.eventForm.innerHTML = `
+    ${resultFlowPanel()}
     <div class="form-grid">
       <label class="field"><span>イベント名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
       <label class="field"><span>スコア予想ボーナス勝者</span><select data-result-key="scoreBonusWinner">${optionList(["", ...state.participants], state.event.results.scoreBonusWinner)}</select></label>
@@ -776,6 +1303,7 @@ function participantDraftBlock(name, teams) {
 function renderFightForm() {
   const markets = getMarkets();
   els.eventForm.innerHTML = `
+    ${resultFlowPanel()}
     <div class="form-grid">
       <label class="field"><span>イベント名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
       <label class="field"><span>KOラウンドボーナス勝者</span><select data-result-key="bonusWinner">${optionList(["", ...state.participants], state.event.results.bonusWinner)}</select></label>
@@ -820,73 +1348,476 @@ function participantFightBlock(name, markets) {
   `;
 }
 
-function renderWorldCupForm() {
-  const template = { ...templates.worldCup, ...templates[state.event.templateId] };
-  const countries = getCountries();
-  els.eventForm.innerHTML = `
-    <div class="form-grid">
-      <label class="field"><span>イベント名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
-      <label class="field"><span>決勝スコア勝者</span><select data-result-key="finalScoreWinner">${optionList(["", ...state.participants], state.event.results.finalScoreWinner)}</select></label>
-    </div>
-    <div class="entry-block">
-      <h3>大会結果</h3>
-      <div class="prediction-grid">
-        ${[0, 1, 2, 3].map((index) => `
-          <label class="field"><span>${index + 1}位</span><select data-wc-top-result="${index}">${optionList(countries, state.event.results.top4[index])}</select></label>
-        `).join("")}
-      </div>
-      <label class="field"><span>3位突破国メモ</span><input data-path="event.results.thirdQualified" value="${escapeAttr(state.event.results.thirdQualified)}"></label>
-      <label class="field"><span>スコア完全一致</span><select data-result-key="exactScore">${optionList(["false", "true"], String(state.event.results.exactScore))}</select></label>
-    </div>
-    ${editableCountriesBlock(countries)}
-    ${oddsToolsBlock("候補国別オッズ", countries)}
-    <div class="entry-block">
-      <h3>複勝用の到達結果</h3>
-      ${countries.map((country) => `
-        <div class="draft-row">
-          <span class="pill">${escapeHtml(country)}</span>
-          <select data-wc-country-finish="${escapeAttr(country)}">${optionList(["", "best16", "best8", "fourth", "third", "runnerUp", "champion"], state.event.results.futures[country])}</select>
-          <span class="sub-label">${labelForOption(state.event.results.futures[country]) || "未確定"}</span>
-        </div>
-      `).join("")}
-    </div>
-    ${state.participants.map((name) => participantWorldCupBlock(name, countries)).join("")}
-  `;
-  bindGenericInputs();
+function getWorldCupGroups() {
+  normalizeWorldCupEvent(state.event);
+  return state.event.config.groups || [];
 }
 
-function participantWorldCupBlock(name, countries) {
-  ensurePrediction(name);
-  const prediction = state.event.predictions[name];
+function worldCupPhaseOneResultBlock(groups, countries) {
+  if (!["resultWait", "finalized"].includes(worldCupPhaseStatus("phase1"))) return "";
   return `
-    <div class="entry-block">
-      <h3>${escapeHtml(name)}</h3>
-      <div class="prediction-grid">
-        ${[0, 1, 2, 3].map((index) => `
-          <label class="field"><span>単勝 ${index + 1}位</span><select data-wc-top-pick="${escapeAttr(name)}:${index}">${optionList(countries, prediction.top4[index])}</select></label>
+    <div class="entry-block worldcup-results">
+      <h3>実際のグループリーグ結果</h3>
+      <div class="wc-group-grid">
+        ${groups.map((group) => `
+          <div class="wc-group-card">
+            <div class="wc-group-head">
+              <strong>Group ${escapeHtml(group.id)}</strong>
+              <span>${group.teams.filter(Boolean).length || 4} teams</span>
+            </div>
+            ${worldCupTeamList(group)}
+            <label class="field"><span>1位結果</span><select data-wc-gl-result="${escapeAttr(group.id)}:first">${optionList(countryOptionsForGroup(group, countries), state.event.results.gl[group.id]?.first)}</select></label>
+            <label class="field"><span>2位結果</span><select data-wc-gl-result="${escapeAttr(group.id)}:second">${optionList(countryOptionsForGroup(group, countries), state.event.results.gl[group.id]?.second)}</select></label>
+          </div>
         `).join("")}
       </div>
-      <div class="entry-block">
-        <h3>複勝枠</h3>
-        ${Array.from({ length: 5 }).map((_, index) => {
-          const future = prediction.futures[index] || { country: "", finish: "", odds: 1 };
+      <div class="wc-third-section">
+        <h4>3位突破国 8カ国</h4>
+        <div class="wc-third-grid">
+          ${Array.from({ length: 8 }).map((_, index) => `
+            <label class="field"><span>${index + 1}枠</span><select data-wc-third-result="${index}">${optionList(countries, state.event.results.thirdAdvancers[index])}</select></label>
+          `).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function participantWorldCupPhaseOneBlock(name, groups, countries) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  const pickedCount = worldCupPickedCount(prediction, groups);
+  return `
+    <div class="entry-block worldcup-participant">
+      <div class="wc-participant-head">
+        <h3>${escapeHtml(name)}</h3>
+        <span>${pickedCount} / 32 入力済み</span>
+      </div>
+      <div class="wc-group-grid">
+        ${groups.map((group) => {
+          const pick = prediction.glPicks[group.id] || { first: "", second: "" };
+          const options = countryOptionsForGroup(group, countries);
           return `
-            <div class="phase-row">
-              <select data-wc-future-country="${escapeAttr(name)}:${index}">${optionList(countries, future.country)}</select>
-              <select data-wc-future-finish="${escapeAttr(name)}:${index}">${optionList(["", "champion", "runnerUp", "third", "fourth", "best8", "best16"], future.finish)}</select>
-              <input data-wc-future-odds="${escapeAttr(name)}:${index}" type="number" min="0" max="200" step="0.1" value="${future.odds || 1}">
-              <span class="sub-label">上限200倍</span>
+            <div class="wc-group-card">
+              <div class="wc-group-head">
+                <strong>Group ${escapeHtml(group.id)}</strong>
+                <span>上位2カ国</span>
+              </div>
+              ${worldCupTeamList(group)}
+              <label class="field"><span>1位予想</span><select data-wc-gl-pick="${escapeAttr(name)}:${escapeAttr(group.id)}:first">${optionList(options, pick.first)}</select></label>
+              <label class="field"><span>2位予想</span><select data-wc-gl-pick="${escapeAttr(name)}:${escapeAttr(group.id)}:second">${optionList(options, pick.second)}</select></label>
             </div>
           `;
         }).join("")}
       </div>
-      <label class="field"><span>第1回GL得点</span><input data-wc-gl-score="${escapeAttr(name)}" type="number" min="0" step="1" value="${prediction.glScore || 0}"></label>
-      <label class="field"><span>個人賞得点</span><input data-wc-award-score="${escapeAttr(name)}" type="number" min="0" step="1" value="${prediction.awardScore || 0}"></label>
+      <div class="wc-third-section">
+        <div class="wc-participant-head">
+          <h4>3位突破国 8カ国</h4>
+          <span>${prediction.thirdAdvancers.filter(Boolean).length} / 8</span>
+        </div>
+        <div class="wc-third-grid">
+          ${Array.from({ length: 8 }).map((_, index) => `
+            <label class="field"><span>${index + 1}枠</span><select data-wc-third-pick="${escapeAttr(name)}:${index}">${optionList(countries, prediction.thirdAdvancers[index])}</select></label>
+          `).join("")}
+        </div>
+      </div>
     </div>
   `;
 }
 
+function worldCupTeamList(group) {
+  const teams = group.teams.filter(Boolean);
+  if (!teams.length) return `<div class="wc-team-list"><span>参加国未設定</span></div>`;
+  return `<div class="wc-team-list">${teams.map((team) => `<span>${escapeHtml(team)}</span>`).join("")}</div>`;
+}
+
+function countryOptionsForGroup(group, countries) {
+  const groupTeams = group.teams.filter(Boolean);
+  return [...new Set([...groupTeams, ...countries])];
+}
+
+function worldCupPickedCount(prediction, groups) {
+  const groupCount = groups.reduce((total, group) => {
+    const pick = prediction.glPicks?.[group.id] || {};
+    return total + (pick.first ? 1 : 0) + (pick.second ? 1 : 0);
+  }, 0);
+  return groupCount + normalizeFixedArray(prediction.thirdAdvancers, 8).filter(Boolean).length;
+}
+
+function renderWorldCupTournamentForm() {
+  normalizeWorldCupEvent(state.event);
+  const countries = getCountries();
+  const groups = getWorldCupGroups();
+  const activePhase = state.event.config.activePhase || "phase1";
+  const activeStatus = worldCupPhaseStatus(activePhase);
+  const participant = currentParticipantName();
+  const showPublic = ["resultWait", "finalized"].includes(activeStatus);
+  els.eventForm.innerHTML = `
+    ${resultFlowPanel()}
+    <div class="worldcup-phase-panel">
+      <span class="match-kicker">WORLD CUP 2026 / YOSO PRESET</span>
+      <h3>W杯2026 予想王決定戦</h3>
+      <p>この大会は通常の複合型ではなく、第1回・第2回・第3回が点数でつながるW杯専用プリセットです。入力は自分のYOSOだけ、締切後に全員分を公開します。</p>
+      <div class="worldcup-rule-strip">
+        ${worldCupPhases.map((phase) => `<button class="wc-phase-tab ${phase.id === activePhase ? "is-active" : ""}" type="button" data-wc-phase="${phase.id}">${phase.label}<small>${worldCupPhaseStatusLabel(worldCupPhaseStatus(phase.id))}</small></button>`).join("")}
+      </div>
+      ${worldCupPhaseAdminControls()}
+      ${worldCupPhaseGuide(activePhase, activeStatus, participant, groups)}
+    </div>
+    <div class="form-grid">
+      <label class="field"><span>大会名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
+    </div>
+    ${worldCupCountrySeedBlock(countries, groups)}
+    ${activePhase === "phase1" ? worldCupPhaseOneScreen(participant, groups, countries, showPublic) : ""}
+    ${activePhase === "phase2" ? worldCupPhaseTwoScreen(participant, countries, showPublic) : ""}
+    ${activePhase === "phase3" ? worldCupPhaseThreeScreen(participant, countries, showPublic) : ""}
+  `;
+  bindGenericInputs();
+}
+
+function worldCupPhaseGuide(phase, status, participant, groups) {
+  const phaseInfo = worldCupPhases.find((item) => item.id === phase) || worldCupPhases[0];
+  const progress = worldCupPhaseProgress(participant, phase, groups);
+  const actionText = {
+    locked: "このフェーズはまだ入力できません。",
+    open: `${participant} のYOSOを入力できます。`,
+    resultWait: "受付は締切済みです。管理者が結果を入力できます。",
+    finalized: "このフェーズは確定済みです。ランキングに反映されています。",
+  }[status] || "";
+  return `
+    <div class="wc-phase-guide">
+      <div>
+        <span class="match-kicker">${escapeHtml(phaseInfo.caption)}</span>
+        <strong>${escapeHtml(actionText)}</strong>
+      </div>
+      <div class="wc-progress-meter" aria-label="入力進捗">
+        <span>${progress.done} / ${progress.total}</span>
+        <div><i style="width: ${progress.percent}%"></i></div>
+      </div>
+    </div>
+  `;
+}
+
+function worldCupPhaseProgress(name, phase, groups) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  if (phase === "phase1") {
+    const done = worldCupPickedCount(prediction, groups);
+    const total = (groups.length * 2) + 8;
+    return { done, total, percent: progressPercent(done, total) };
+  }
+  if (phase === "phase2") {
+    const top4Done = normalizeFixedArray(prediction.top4, 4).filter(Boolean).length;
+    const futuresDone = normalizeWorldCupFutures(prediction.futures).filter((future) => future.country && future.finish).length;
+    const awardsDone = worldCupAwardMarkets.filter((award) => prediction.awards?.[award.id]).length;
+    const done = top4Done + futuresDone + awardsDone;
+    return { done, total: 19, percent: progressPercent(done, 19) };
+  }
+  const final = prediction.finalScore || {};
+  const done = (final.home !== "" ? 1 : 0) + (final.away !== "" ? 1 : 0);
+  return { done, total: 2, percent: progressPercent(done, 2) };
+}
+
+function progressPercent(done, total) {
+  if (!total) return 0;
+  return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+}
+
+function worldCupCountrySeedBlock(countries, groups) {
+  if (!isCurrentUserAdmin()) return "";
+  const canEditSeeds = worldCupPhaseStatus("phase1") === "open";
+  return `
+    <details class="entry-block wc-seed-editor">
+      <summary class="odds-summary">
+        <span>
+          <strong>出場国とグループ割り</strong>
+          <small>国リストの順番で、AからLまで4カ国ずつ自動配置します。</small>
+        </span>
+      </summary>
+      <div class="odds-tools-body">
+        <div class="block-head">
+          <div>
+            <h3>出場国/候補国</h3>
+            <p class="helper-text">${canEditSeeds ? "確定国が増えたらここを更新します。第1回のグループ表示と予想候補に反映されます。" : "第1回の受付開始後に使った国リストです。締切後は変更できません。"}</p>
+          </div>
+          <button class="ghost-button small-button" type="button" data-list-add="countries" ${canEditSeeds ? "" : "disabled"}>＋国を追加</button>
+        </div>
+        <div class="edit-list">
+          ${countries.map((country, index) => `
+            <div class="edit-row">
+              <label class="field compact-field">
+                <span>${worldCupSeedLabel(index)}</span>
+                <input data-list-row="countries:${index}" value="${escapeAttr(country)}" placeholder="例: 日本" ${canEditSeeds ? "" : "disabled"}>
+              </label>
+              <button class="icon-button danger-button" type="button" data-list-remove="countries:${index}" aria-label="削除" ${canEditSeeds ? "" : "disabled"}>×</button>
+            </div>
+          `).join("")}
+        </div>
+        <div class="wc-seed-preview">
+          ${groups.map((group) => `
+            <div>
+              <strong>Group ${escapeHtml(group.id)}</strong>
+              <span>${group.teams.filter(Boolean).map(escapeHtml).join(" / ") || "未設定"}</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function worldCupSeedLabel(index) {
+  const group = templates.worldCup.groups[Math.floor(index / 4)] || "-";
+  return `Group ${group} ${index % 4 + 1}枠`;
+}
+
+function worldCupPhaseOneScreen(participant, groups, countries, showPublic) {
+  return `
+    ${worldCupPhaseOneResultBlock(groups, countries)}
+    ${participantWorldCupPhaseOneBlock(participant, groups, countries)}
+    ${showPublic ? worldCupPublicPredictions("phase1", groups, countries) : ""}
+  `;
+}
+
+function worldCupPhaseTwoScreen(participant, countries, showPublic) {
+  return `
+    ${worldCupPhaseTwoResultBlock(countries)}
+    ${participantWorldCupPhaseTwoBlock(participant, countries)}
+    ${showPublic ? worldCupPublicPredictions("phase2", [], countries) : ""}
+  `;
+}
+
+function worldCupPhaseThreeScreen(participant, countries, showPublic) {
+  return `
+    ${worldCupPhaseThreeResultBlock(countries)}
+    ${participantWorldCupPhaseThreeBlock(participant)}
+    ${worldCupStakePreview()}
+    ${showPublic ? worldCupPublicPredictions("phase3", [], countries) : ""}
+  `;
+}
+
+function worldCupPhaseAdminControls() {
+  if (!isCurrentUserAdmin()) return "";
+  return `
+    <div class="wc-phase-admin">
+      ${worldCupPhases.map((phase) => `
+        <label class="field compact-field">
+          <span>${phase.label}</span>
+          <select data-wc-phase-status="${phase.id}">
+            ${worldCupPhaseStatusOptions(phase.id).map((status) => `<option value="${status}" ${status === worldCupPhaseStatus(phase.id) ? "selected" : ""}>${worldCupPhaseStatusLabel(status)}</option>`).join("")}
+          </select>
+        </label>
+      `).join("")}
+    </div>
+  `;
+}
+
+function worldCupPhaseStatusOptions(phaseId) {
+  return phaseId === "phase1" ? ["open", "resultWait", "finalized"] : ["locked", "open", "resultWait", "finalized"];
+}
+
+function worldCupPhaseStatusLabel(status) {
+  return { locked: "ロック中", open: "受付中", resultWait: "結果待ち", finalized: "確定済み" }[status] || status;
+}
+
+function worldCupPhaseTwoResultBlock(countries) {
+  if (!["resultWait", "finalized"].includes(worldCupPhaseStatus("phase2"))) return "";
+  return `
+    <div class="entry-block worldcup-results">
+      <h3>第2回 結果入力</h3>
+      <div class="prediction-grid">
+        ${[0, 1, 2, 3].map((index) => `
+          <label class="field"><span>${index + 1}位結果</span><select data-wc-top-result="${index}">${optionList(countries, state.event.results.top4[index])}</select></label>
+        `).join("")}
+      </div>
+      <div class="wc-third-section">
+        <h4>ベスト16以上の到達結果</h4>
+        ${countries.map((country) => `
+          <div class="draft-row">
+            <span class="pill">${escapeHtml(country)}</span>
+            <select data-wc-country-finish="${escapeAttr(country)}">${optionList(["", ...worldCupFinishOptions], state.event.results.futures[country])}</select>
+            <span class="sub-label">${labelForOption(state.event.results.futures[country]) || "未確定"}</span>
+          </div>
+        `).join("")}
+      </div>
+      <div class="wc-third-section">
+        <h4>個人賞受賞国</h4>
+        <div class="wc-third-grid">
+          ${worldCupAwardMarkets.map((award) => `
+            <label class="field"><span>${award.label}</span><select data-wc-award-result="${award.id}">${optionList(countries, state.event.results.awards[award.id])}</select></label>
+          `).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function participantWorldCupPhaseTwoBlock(name, countries) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  return `
+    <div class="entry-block worldcup-participant">
+      <div class="wc-participant-head">
+        <h3>${escapeHtml(name)} のYOSO</h3>
+        <span>第2回</span>
+      </div>
+      <div class="prediction-grid">
+        ${[0, 1, 2, 3].map((index) => `
+          <label class="field"><span>${index + 1}位予想</span><select data-wc-top-pick="${escapeAttr(name)}:${index}">${optionList(countries, prediction.top4[index])}</select></label>
+        `).join("")}
+      </div>
+      <div class="wc-third-section">
+        <h4>複勝枠 10カ国</h4>
+        ${Array.from({ length: 10 }).map((_, index) => {
+          const future = prediction.futures[index] || { country: "", finish: "", odds: 1 };
+          return `
+            <div class="phase-row">
+              <span class="wc-row-index">${index + 1}</span>
+              <select data-wc-future-country="${escapeAttr(name)}:${index}">${optionList(countries, future.country)}</select>
+              <select data-wc-future-finish="${escapeAttr(name)}:${index}">${optionList(["", ...worldCupFinishOptions], future.finish)}</select>
+              <input data-wc-future-odds="${escapeAttr(name)}:${index}" type="number" min="0" max="200" step="0.1" value="${formatOddsInput(future.odds || 1)}">
+              <span class="sub-label">到達点 × オッズ</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+      <div class="wc-third-section">
+        <h4>個人賞受賞国</h4>
+        <div class="wc-third-grid">
+          ${worldCupAwardMarkets.map((award) => `
+            <label class="field"><span>${award.label}</span><select data-wc-award-pick="${escapeAttr(name)}:${award.id}">${optionList(countries, prediction.awards[award.id])}</select></label>
+          `).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function worldCupPhaseThreeResultBlock(countries) {
+  if (!["resultWait", "finalized"].includes(worldCupPhaseStatus("phase3"))) return "";
+  const final = state.event.results.finalMatch || {};
+  return `
+    <div class="entry-block worldcup-results">
+      <h3>第3回 決勝戦結果</h3>
+      <div class="form-grid">
+        <label class="field"><span>決勝 ホーム側</span><select data-wc-final-result="home">${optionList(countries, final.home)}</select></label>
+        <label class="field"><span>決勝 アウェイ側</span><select data-wc-final-result="away">${optionList(countries, final.away)}</select></label>
+        <label class="field"><span>ホーム得点</span><input data-wc-final-result="homeScore" type="number" min="0" step="1" value="${escapeAttr(final.homeScore)}"></label>
+        <label class="field"><span>アウェイ得点</span><input data-wc-final-result="awayScore" type="number" min="0" step="1" value="${escapeAttr(final.awayScore)}"></label>
+      </div>
+    </div>
+  `;
+}
+
+function participantWorldCupPhaseThreeBlock(name) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  return `
+    <div class="entry-block worldcup-participant">
+      <div class="wc-participant-head">
+        <h3>${escapeHtml(name)} のYOSO</h3>
+        <span>第3回 決勝スコア</span>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>決勝 ホーム側得点</span><input data-wc-final-score="${escapeAttr(name)}:home" type="number" min="0" step="1" value="${escapeAttr(prediction.finalScore.home)}"></label>
+        <label class="field"><span>決勝 アウェイ側得点</span><input data-wc-final-score="${escapeAttr(name)}:away" type="number" min="0" step="1" value="${escapeAttr(prediction.finalScore.away)}"></label>
+      </div>
+    </div>
+  `;
+}
+
+function worldCupStakePreview() {
+  const rows = worldCupSettlementRows();
+  const pool = rows.reduce((total, row) => total + row.stake, 0);
+  const final = state.event.results.finalMatch || {};
+  const finalScoreKnown = final.homeScore !== "" && final.awayScore !== "";
+  return `
+    <div class="entry-block worldcup-results">
+      <h3>5%ベット暫定計算</h3>
+      <p class="helper-text">第1回 + 第2回の暫定ptから5%を掛け金として計算します。最終反映は結果確定後です。</p>
+      <div class="history-list">
+        ${rows.map((row) => `
+          <div class="history-row">
+            <span>${escapeHtml(row.name)}</span>
+            <strong>${formatScore(row.base)}pt / 掛け金 ${formatScore(row.stake)}pt</strong>
+            <small>${finalScoreKnown ? (row.exact ? `ピタリ賞込み +${formatScore(row.phase3)}pt` : `${formatScore(row.phase3)}pt`) : "決勝結果待ち"}</small>
+          </div>
+        `).join("")}
+      </div>
+      <div class="insight-band">プール合計 ${formatScore(pool)}pt</div>
+    </div>
+  `;
+}
+
+function worldCupPublicPredictions(phase, groups, countries) {
+  return `
+    <div class="entry-block worldcup-results">
+      <h3>締切後公開: 全員のYOSO</h3>
+      <div class="history-list">
+        ${state.participants.map((name) => `
+          <div class="history-row wc-public-row">
+            <strong>${escapeHtml(name)}</strong>
+            <small>${escapeHtml(worldCupPredictionSummary(name, phase, groups, countries))}</small>
+            <span>${worldCupPredictionDetails(name, phase, groups)}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function worldCupPredictionSummary(name, phase, groups) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  if (phase === "phase1") return `${worldCupPickedCount(prediction, groups)} / ${(groups.length * 2) + 8} 入力済み`;
+  if (phase === "phase2") {
+    const futuresDone = normalizeWorldCupFutures(prediction.futures).filter((future) => future.country && future.finish).length;
+    return `単勝 ${prediction.top4.filter(Boolean).length}/4、複勝 ${futuresDone}/10、個人賞 ${Object.values(prediction.awards || {}).filter(Boolean).length}/5`;
+  }
+  return `決勝スコア ${prediction.finalScore?.home !== "" && prediction.finalScore?.away !== "" ? `${prediction.finalScore.home}-${prediction.finalScore.away}` : "未入力"}`;
+}
+
+function worldCupPredictionDetails(name, phase, groups) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  if (phase === "phase1") {
+    const groupText = groups.map((group) => {
+      const pick = prediction.glPicks?.[group.id] || {};
+      return `${group.id}: ${pick.first || "-"} / ${pick.second || "-"}`;
+    }).join(" | ");
+    const thirdText = normalizeFixedArray(prediction.thirdAdvancers, 8).filter(Boolean).join("、") || "-";
+    return escapeHtml(`${groupText} / 3位突破: ${thirdText}`);
+  }
+  if (phase === "phase2") {
+    const top4Text = normalizeFixedArray(prediction.top4, 4)
+      .map((country, index) => `${index + 1}位 ${country || "-"}`)
+      .join(" / ");
+    const futuresText = normalizeWorldCupFutures(prediction.futures)
+      .filter((future) => future.country || future.finish)
+      .map((future) => `${future.country || "-"} ${labelForOption(future.finish)} x${formatOddsInput(future.odds || 1)}`)
+      .join("、") || "-";
+    const awardsText = worldCupAwardMarkets
+      .map((award) => `${award.label}: ${prediction.awards?.[award.id] || "-"}`)
+      .join(" / ");
+    return escapeHtml(`${top4Text} / 複勝: ${futuresText} / 個人賞: ${awardsText}`);
+  }
+  return escapeHtml(`決勝スコア: ${prediction.finalScore?.home || "-"}-${prediction.finalScore?.away || "-"}`);
+}
+
 function bindGenericInputs() {
+  els.eventForm.querySelectorAll("[data-wc-phase]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.event.config.activePhase = button.dataset.wcPhase;
+      render();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-wc-phase-status]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.event.config.phaseStatus ||= normalizeWorldCupPhaseStatus();
+      state.event.config.phaseStatus[input.dataset.wcPhaseStatus] = input.value;
+      render();
+    });
+  });
   els.eventForm.querySelectorAll("[data-path]").forEach((input) => {
     input.addEventListener("input", () => setByPath(input.dataset.path, coerceValue(input.value)));
   });
@@ -896,6 +1827,7 @@ function bindGenericInputs() {
       ensureEditableList(key);
       state.event.config[key][Number(indexRaw)] = input.value.trim();
       state.event.config[key] = state.event.config[key].filter(Boolean);
+      syncEditableListDependents(key);
       render();
     });
   });
@@ -903,6 +1835,7 @@ function bindGenericInputs() {
     button.addEventListener("click", () => {
       const list = ensureEditableList(button.dataset.listAdd);
       list.push("");
+      syncEditableListDependents(button.dataset.listAdd);
       render();
     });
   });
@@ -911,12 +1844,14 @@ function bindGenericInputs() {
       const [key, indexRaw] = button.dataset.listRemove.split(":");
       const list = ensureEditableList(key);
       list.splice(Number(indexRaw), 1);
+      syncEditableListDependents(key);
       render();
     });
   });
   els.eventForm.querySelectorAll("[data-config-list]").forEach((input) => {
     input.addEventListener("change", () => {
       state.event.config[input.dataset.configList] = parseLines(input.value);
+      syncEditableListDependents(input.dataset.configList);
       render();
     });
   });
@@ -1049,6 +1984,15 @@ function bindGenericInputs() {
       render();
     });
   });
+  els.eventForm.querySelectorAll("[data-result-submit]").forEach((button) => {
+    button.addEventListener("click", submitResults);
+  });
+  els.eventForm.querySelectorAll("[data-result-approve]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const select = button.closest(".result-flow-actions")?.querySelector("[data-result-approver]");
+      approveResults(select?.value || currentParticipantName());
+    });
+  });
   els.eventForm.querySelectorAll("[data-result-index]").forEach((input) => {
     input.addEventListener("change", () => {
       state.event.results.finalTop4[Number(input.dataset.resultIndex)] = input.value;
@@ -1115,9 +2059,41 @@ function bindGenericInputs() {
       renderScoresOnly();
     });
   });
+  els.eventForm.querySelectorAll("[data-wc-gl-result]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [groupId, place] = input.dataset.wcGlResult.split(":");
+      state.event.results.gl[groupId] ||= { first: "", second: "" };
+      state.event.results.gl[groupId][place] = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-wc-third-result]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.event.results.thirdAdvancers[Number(input.dataset.wcThirdResult)] = input.value;
+      renderScoresOnly();
+    });
+  });
   els.eventForm.querySelectorAll("[data-wc-country-finish]").forEach((input) => {
     input.addEventListener("change", () => {
       state.event.results.futures[input.dataset.wcCountryFinish] = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-wc-award-result]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.event.results.awards[input.dataset.wcAwardResult] = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-wc-final-result]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.event.results.finalMatch ||= { home: "", away: "", homeScore: "", awayScore: "" };
+      state.event.results.finalMatch[input.dataset.wcFinalResult] = input.value;
+      renderScoresOnly();
+    });
+    input.addEventListener("change", () => {
+      state.event.results.finalMatch ||= { home: "", away: "", homeScore: "", awayScore: "" };
+      state.event.results.finalMatch[input.dataset.wcFinalResult] = input.value;
       renderScoresOnly();
     });
   });
@@ -1128,9 +2104,43 @@ function bindGenericInputs() {
       renderScoresOnly();
     });
   });
+  els.eventForm.querySelectorAll("[data-wc-gl-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [name, groupId, place] = input.dataset.wcGlPick.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].glPicks[groupId] ||= { first: "", second: "" };
+      state.event.predictions[name].glPicks[groupId][place] = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-wc-third-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [name, index] = input.dataset.wcThirdPick.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].thirdAdvancers[Number(index)] = input.value;
+      renderScoresOnly();
+    });
+  });
   els.eventForm.querySelectorAll("[data-wc-future-country], [data-wc-future-finish], [data-wc-future-odds]").forEach((input) => {
     input.addEventListener("input", updateFutureInput);
     input.addEventListener("change", updateFutureInput);
+  });
+  els.eventForm.querySelectorAll("[data-wc-award-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [name, awardId] = input.dataset.wcAwardPick.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].awards[awardId] = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-wc-final-score]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const [name, side] = input.dataset.wcFinalScore.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].finalScore ||= { home: "", away: "" };
+      state.event.predictions[name].finalScore[side] = input.value;
+      renderScoresOnly();
+    });
   });
   els.eventForm.querySelectorAll("[data-wc-gl-score]").forEach((input) => {
     input.addEventListener("input", () => {
@@ -1143,6 +2153,42 @@ function bindGenericInputs() {
       state.event.predictions[input.dataset.wcAwardScore].awardScore = Number(input.value) || 0;
       renderScoresOnly();
     });
+  });
+  applyResultInputPermissions();
+}
+
+function applyResultInputPermissions() {
+  const canEditResults = state.event.status === "resultWait" && isCurrentUserAdmin() && !isResultFinalized(state.event);
+  const selectors = [
+    "[data-result-index]",
+    "[data-result-key]",
+    "[data-finish]",
+    "[data-market-result]",
+    "[data-wc-top-result]",
+    "[data-wc-gl-result]",
+    "[data-wc-third-result]",
+    "[data-wc-country-finish]",
+    "[data-wc-award-result]",
+    "[data-wc-final-result]",
+    "[data-path='event.results.thirdQualified']",
+  ];
+  els.eventForm.querySelectorAll(selectors.join(",")).forEach((input) => {
+    input.disabled = !canEditResults;
+  });
+  applyWorldCupPhasePermissions();
+}
+
+function applyWorldCupPhasePermissions() {
+  if (baseTemplateId(state.event.templateId) !== "worldCup") return;
+  const activePhase = state.event.config.activePhase || "phase1";
+  const status = worldCupPhaseStatus(activePhase);
+  const canPredict = status === "open";
+  const canEditResults = status === "resultWait" && isCurrentUserAdmin();
+  els.eventForm.querySelectorAll(".worldcup-participant input, .worldcup-participant select").forEach((input) => {
+    input.disabled = !canPredict;
+  });
+  els.eventForm.querySelectorAll(".worldcup-results input, .worldcup-results select").forEach((input) => {
+    input.disabled = !canEditResults;
   });
 }
 
@@ -1389,6 +2435,21 @@ function ensureEditableList(key) {
   return state.event.config[key];
 }
 
+function syncEditableListDependents(key) {
+  if (key !== "countries" || baseTemplateId(state.event.templateId) !== "worldCup") return;
+  syncWorldCupGroupsFromCountries();
+}
+
+function syncWorldCupGroupsFromCountries() {
+  ensureConfig();
+  const countries = getCountries();
+  const groupIds = state.event.config.groups?.length
+    ? state.event.config.groups.map((group) => group.id)
+    : templates.worldCup.groups;
+  state.event.config.groups = createWorldCupGroups(groupIds, countries);
+  normalizeWorldCupEvent(state.event);
+}
+
 function parseLines(value) {
   return value
     .split(/\r?\n/)
@@ -1603,6 +2664,9 @@ function scoreboardInsight(rows) {
 function calculateScores() {
   return state.participants.map((name) => {
     ensurePrediction(name);
+    if (baseTemplateId(state.event.templateId) !== "worldCup" && !isResultFinalized(state.event)) {
+      return { name, score: 0, detail: state.event?.resultFlow?.status === "submitted" ? "結果承認待ち" : "結果未確定" };
+    }
     const templateId = baseTemplateId(state.event.templateId);
     let score = 0;
     let detail = "";
@@ -1636,6 +2700,15 @@ function calculateScores() {
     }
     if (templateId === "worldCup") {
       const prediction = state.event.predictions[name];
+      normalizeWorldCupPrediction(state.event, name);
+      const phase1 = worldCupPhaseStatus("phase1") === "finalized" ? worldCupPhaseOneScore(name) : 0;
+      const phase2 = worldCupPhaseStatus("phase2") === "finalized" ? worldCupPhaseTwoScore(name) : 0;
+      const phase3 = worldCupPhaseStatus("phase3") === "finalized" ? worldCupPhaseThreeScore(name) : 0;
+      score += phase1 + phase2 + phase3;
+      detail = `W杯: 第1回 ${formatScore(phase1)} / 第2回 ${formatScore(phase2)} / 第3回 ${formatScore(phase3)}pt`;
+    }
+    if (templateId === "worldCup" && false) {
+      const prediction = state.event.predictions[name];
       score += Number(prediction.glScore) || 0;
       score += Number(prediction.awardScore) || 0;
       score += [200, 100, 50, 30].reduce((total, points, index) => {
@@ -1655,6 +2728,93 @@ function calculateScores() {
     }
     return { name, score, detail };
   }).sort((a, b) => b.score - a.score);
+}
+
+function worldCupGroupStageScore(prediction, results, groups) {
+  return groups.reduce((total, group) => {
+    const pick = prediction.glPicks?.[group.id] || {};
+    const actual = results.gl?.[group.id] || {};
+    return total + worldCupGroupPickScore(pick.first, actual, "first") + worldCupGroupPickScore(pick.second, actual, "second");
+  }, 0);
+}
+
+function worldCupGroupPickScore(pick, actual, expectedPlace) {
+  if (!pick || !actual.first || !actual.second) return 0;
+  if (pick === actual[expectedPlace]) return 10;
+  if (pick === actual.first || pick === actual.second) return 5;
+  return 0;
+}
+
+function worldCupThirdAdvancerScore(prediction, results) {
+  const actual = new Set(normalizeFixedArray(results.thirdAdvancers, 8).filter(Boolean));
+  const picks = [...new Set(normalizeFixedArray(prediction.thirdAdvancers, 8).filter(Boolean))];
+  return picks.reduce((total, country) => total + (actual.has(country) ? 5 : 0), 0);
+}
+
+function worldCupPhaseOneScore(name) {
+  const prediction = state.event.predictions[name];
+  return worldCupGroupStageScore(prediction, state.event.results, getWorldCupGroups())
+    + worldCupThirdAdvancerScore(prediction, state.event.results);
+}
+
+function worldCupPhaseTwoScore(name) {
+  const prediction = state.event.predictions[name];
+  const top4Points = [200, 100, 50, 30].reduce((total, points, index) => {
+    return total + (prediction.top4[index] && prediction.top4[index] === state.event.results.top4[index] ? points : 0);
+  }, 0);
+  const futuresPoints = (prediction.futures || []).reduce((total, future) => {
+    if (!future || !future.country || !future.finish) return total;
+    const reached = finishForCountry(future.country);
+    if (!reached) return total;
+    if (finishRank(reached) > finishRank(future.finish)) return total;
+    return total + futureBasePoints(reached) * Math.min(200, Number(future.odds) || 0);
+  }, 0);
+  const awardsPoints = worldCupAwardMarkets.reduce((total, award) => {
+    const picked = prediction.awards?.[award.id];
+    return total + (picked && picked === state.event.results.awards?.[award.id] ? award.points : 0);
+  }, 0);
+  return top4Points + futuresPoints + awardsPoints;
+}
+
+function worldCupPhaseThreeScore(name) {
+  return worldCupSettlementRows().find((row) => row.name === name)?.phase3 || 0;
+}
+
+function worldCupSettlementRows() {
+  const final = state.event.results.finalMatch || {};
+  const finalScoreKnown = final.homeScore !== "" && final.awayScore !== "";
+  const baseRows = state.participants.map((name) => ({
+    name,
+    base: worldCupPhaseOneScore(name) + worldCupPhaseTwoScore(name),
+  }));
+  const rows = baseRows.map((row) => ({
+    ...row,
+    stake: Math.round(row.base * 0.05 * 100) / 100,
+    exact: finalScoreKnown && worldCupHasExactFinalScore(row.name),
+    phase3: 0,
+  }));
+  if (!finalScoreKnown) return rows;
+  const pool = rows.reduce((total, row) => total + row.stake, 0);
+  const winners = rows.filter((row) => row.exact);
+  rows.forEach((row) => {
+    if (!winners.length) {
+      row.phase3 = -row.stake;
+      return;
+    }
+    if (row.exact) {
+      row.phase3 = Math.round(((pool / winners.length) - row.stake + 50) * 100) / 100;
+    } else {
+      row.phase3 = -row.stake;
+    }
+  });
+  return rows;
+}
+
+function worldCupHasExactFinalScore(name) {
+  const final = state.event.results.finalMatch || {};
+  if (final.homeScore === "" || final.awayScore === "") return false;
+  const prediction = state.event.predictions[name]?.finalScore || {};
+  return String(prediction.home) === String(final.homeScore) && String(prediction.away) === String(final.awayScore);
 }
 
 function finishForCountry(country) {
@@ -1689,6 +2849,7 @@ function finishLabel(value) {
 
 function ensurePrediction(name) {
   if (!state.event.predictions[name]) state.event.predictions[name] = createPrediction(state.event.templateId);
+  if (baseTemplateId(state.event.templateId) === "worldCup") normalizeWorldCupPrediction(state.event, name);
 }
 
 function optionList(options, selected) {
@@ -1797,9 +2958,10 @@ els.newEventButton?.addEventListener("click", () => {
 els.settingsNewEventButton?.addEventListener("click", () => {
   const event = createTournamentFromSettings();
   addAndSelectEvent(event);
-  window.location.hash = "prediction";
   render();
 });
+
+els.presetDetails?.addEventListener("toggle", updatePresetSummary);
 
 els.saveButton?.addEventListener("click", () => {
   if (els.confirmDialog?.showModal) {
@@ -1904,5 +3066,13 @@ els.themeToggle?.addEventListener("click", () => {
   applyTheme(document.body.dataset.theme === "day" ? "dark" : "day");
 });
 
+els.authModeButtons?.forEach((button) => {
+  button.addEventListener("click", () => setAuthMode(button.dataset.authMode));
+});
+
+els.authForm?.addEventListener("submit", handleAuthSubmit);
+els.logoutButton?.addEventListener("click", logoutAuthUser);
+
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+renderAuthState();
 render();

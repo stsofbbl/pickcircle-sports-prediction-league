@@ -119,7 +119,115 @@ h3 {
   position: relative;
   width: min(1180px, 100%);
   margin: 0 auto;
+  padding: 18px 18px 112px;
+}
+
+body.auth-locked .app-shell {
+  display: none;
+}
+
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
   padding: 18px;
+  position: relative;
+  z-index: 1;
+}
+
+.auth-screen[hidden] {
+  display: none;
+}
+
+.auth-card {
+  width: min(430px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+  background:
+    linear-gradient(145deg, rgba(238, 232, 224, 0.06), transparent 40%),
+    radial-gradient(ellipse at 20% 0%, rgba(255, 79, 147, 0.12), transparent 48%),
+    linear-gradient(180deg, rgba(32, 25, 24, 0.96), rgba(24, 19, 18, 0.98));
+  box-shadow: var(--shadow);
+}
+
+.auth-logo {
+  display: block;
+  width: 122px;
+  height: auto;
+  margin-bottom: 20px;
+}
+
+.auth-copy h1 {
+  margin-bottom: 8px;
+  font-size: 30px;
+}
+
+.auth-copy p,
+.auth-note {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.auth-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 18px 0;
+  padding: 5px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.auth-mode-switch button {
+  min-height: 40px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.auth-mode-switch button.is-active {
+  color: var(--ink);
+  background: rgba(245, 154, 194, 0.16);
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-screen[data-mode="login"] .auth-register-only {
+  display: none;
+}
+
+.auth-message {
+  min-height: 20px;
+  margin: 0;
+  color: var(--soap-pink);
+  font-size: 13px;
+}
+
+.auth-note {
+  margin: 16px 0 0;
+  font-size: 12px;
+}
+
+.account-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.account-chip span {
+  padding-left: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .topbar,
@@ -556,6 +664,229 @@ input[type="number"],
   padding-top: 16px;
 }
 
+.worldcup-phase-panel {
+  border: 1px solid rgba(255, 170, 210, 0.18);
+  border-radius: 18px;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 72, 156, 0.16), rgba(10, 8, 9, 0.58) 52%),
+    rgba(17, 12, 14, 0.82);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+.worldcup-phase-panel h3 {
+  margin: 6px 0 8px;
+  font-size: clamp(22px, 4vw, 34px);
+}
+
+.worldcup-phase-panel p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.worldcup-rule-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wc-phase-tab {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.wc-phase-tab small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.wc-phase-tab.is-active {
+  border-color: rgba(255, 142, 196, 0.5);
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(255, 72, 156, 0.26), rgba(255, 255, 255, 0.05));
+}
+
+.wc-phase-admin {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.wc-phase-guide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.wc-phase-guide strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.wc-progress-meter {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.wc-progress-meter span {
+  text-align: right;
+}
+
+.wc-progress-meter div {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(238, 232, 224, 0.12);
+}
+
+.wc-progress-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.wc-public-row {
+  align-items: start;
+}
+
+.wc-public-row span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.wc-seed-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wc-seed-preview div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(238, 232, 224, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.wc-seed-preview strong {
+  font-size: 12px;
+}
+
+.wc-seed-preview span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.worldcup-rule-strip span,
+.wc-participant-head span,
+.wc-group-head span {
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+}
+
+.wc-participant-head,
+.wc-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wc-participant-head {
+  margin-bottom: 12px;
+}
+
+.wc-participant-head h3,
+.wc-participant-head h4 {
+  margin: 0;
+}
+
+.wc-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.wc-group-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 16px;
+  padding: 13px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    rgba(12, 9, 10, 0.72);
+}
+
+.wc-group-head strong {
+  letter-spacing: 0.04em;
+}
+
+.wc-team-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 26px;
+}
+
+.wc-team-list span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.wc-third-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.wc-third-section h4 {
+  margin: 0;
+}
+
+.wc-third-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
 .block-head {
   display: flex;
   align-items: flex-start;
@@ -766,7 +1097,20 @@ input[type="number"],
 }
 
 .phase-row {
-  grid-template-columns: 1.1fr 0.8fr 0.8fr 0.7fr;
+  grid-template-columns: 32px 1.1fr 0.8fr 0.8fr 0.7fr;
+}
+
+.wc-row-index {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .result-board,
@@ -1037,11 +1381,19 @@ dialog::backdrop {
     width: 38px;
     height: 44px;
   }
+
+  .wc-phase-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .wc-progress-meter span {
+    text-align: left;
+  }
 }
 
 @media (max-width: 520px) {
   .app-shell {
-    padding: 12px;
+    padding: 12px 12px 112px;
   }
 
   .topbar,
@@ -1596,8 +1948,13 @@ body[data-theme="day"] .tournament-card {
   gap: 8px;
 }
 
+.tournament-actions.is-manage {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .primary-link,
 .ghost-link {
+  appearance: none;
   display: inline-flex;
   min-height: 44px;
   align-items: center;
@@ -1622,8 +1979,63 @@ body[data-theme="day"] .tournament-card {
   color: var(--app-text);
 }
 
+.ghost-link.danger-action {
+  border-color: rgba(176, 0, 32, 0.46);
+  color: #ffd7df;
+}
+
+.ghost-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.primary-link.is-disabled,
+.ghost-link.is-disabled {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
 .muted-card {
   opacity: 0.78;
+}
+
+.result-flow-panel {
+  border-color: var(--app-line-strong);
+}
+
+.result-flow-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.result-flow-head h3 {
+  margin: 4px 0 2px;
+}
+
+.result-flow-meta,
+.result-flow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.result-flow-meta span {
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  color: var(--app-muted);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.result-flow-actions select {
+  min-height: 42px;
+  flex: 1 1 150px;
 }
 
 .ranking-tabs {
@@ -1760,9 +2172,14 @@ body[data-theme="day"] .preset-details {
 
 .preset-summary {
   cursor: pointer;
+  list-style: none;
   color: var(--app-text);
   font-size: 13px;
   font-weight: 900;
+}
+
+.preset-summary::-webkit-details-marker {
+  display: none;
 }
 
 .preset-description {
@@ -1802,6 +2219,16 @@ body[data-theme="day"] .preset-description {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.04);
   padding: 12px;
+}
+
+.create-submit-row {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+}
+
+.create-submit-row .primary-button {
+  width: min(180px, 100%);
 }
 
 body[data-theme="day"] .event-create-form {

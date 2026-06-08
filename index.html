@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="身内用スポーツ予想リーグをポイント制で管理するアプリ"
+      content="友達同士のスポーツ予想リーグをポイント制で管理するYOSOアプリ"
     />
     <title>YOSO</title>
     <meta name="theme-color" content="#050507" />
@@ -18,6 +18,37 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body data-theme="dark">
+    <section class="auth-screen" id="authScreen" aria-label="ログイン">
+      <div class="auth-card">
+        <img class="auth-logo" src="./assets/yoso-header-logo.png" alt="YOSO" />
+        <div class="auth-copy">
+          <span class="match-kicker">YOSO ACCOUNT</span>
+          <h1>ログイン</h1>
+          <p>この端末のYOSOメンバーとして入ります。</p>
+        </div>
+        <div class="auth-mode-switch" role="tablist" aria-label="認証モード">
+          <button class="is-active" type="button" data-auth-mode="login">ログイン</button>
+          <button type="button" data-auth-mode="register">新規登録</button>
+        </div>
+        <form class="auth-form" id="authForm">
+          <label class="field">
+            <span>ユーザーID</span>
+            <input id="authUsername" type="text" autocomplete="username" required />
+          </label>
+          <label class="field auth-register-only">
+            <span>表示名</span>
+            <input id="authDisplayName" type="text" autocomplete="name" placeholder="例: 和田" />
+          </label>
+          <label class="field">
+            <span>パスワード</span>
+            <input id="authPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button" id="authSubmitButton" type="submit">ログイン</button>
+          <p class="auth-message" id="authMessage" role="status"></p>
+        </form>
+        <p class="auth-note">ローカル保存の簡易アカウントです。共有サーバー認証が必要になったらSupabaseやFirebaseへ差し替えます。</p>
+      </div>
+    </section>
     <div class="app-shell">
       <header class="topbar">
         <a class="brand-home" href="#home" aria-label="ホームへ戻る">
@@ -25,6 +56,10 @@
             <img src="./assets/yoso-header-logo.png" alt="" />
           </span>
         </a>
+        <div class="account-chip" id="accountChip" hidden>
+          <span id="accountName">Guest</span>
+          <button class="ghost-button small-button" id="logoutButton" type="button">ログアウト</button>
+        </div>
       </header>
 
       <main class="app-pages">
@@ -76,15 +111,15 @@
             <div class="tournament-list" id="activeTournamentCards"></div>
           </section>
 
-          <section class="settings-section" aria-label="大会設定">
+          <section class="settings-section" aria-label="新規大会作成">
             <div class="settings-section-head">
-              <h3>大会設定</h3>
+              <h3>新規大会作成</h3>
             </div>
             <div class="field">
               <span>ルールプリセット</span>
-              <small class="field-note">競技ごとの予想形式の型</small>
-              <details class="preset-details" open>
-                <summary class="preset-summary">プリセット一覧</summary>
+              <small class="field-note">競技ごとの予想形式を選びます。</small>
+              <details class="preset-details" id="presetDetails">
+                <summary class="preset-summary" id="presetSummary">▶ プリセット一覧を表示</summary>
                 <div class="preset-description" id="presetDescription"></div>
                 <div class="template-grid" id="templateGrid"></div>
               </details>
@@ -113,22 +148,10 @@
                   <span>締切</span>
                   <input id="newTournamentDeadline" type="datetime-local" />
                 </label>
-                <label class="field compact-field">
-                  <span>ステータス</span>
-                  <select id="newTournamentStatus">
-                    <option value="open">予想受付中</option>
-                    <option value="resultWait">結果待ち</option>
-                    <option value="archive">アーカイブ</option>
-                  </select>
-                </label>
-              </div>
-              <article class="setting-row">
-                <div>
-                  <span>大会追加</span>
-                  <strong>開催する大会を作成</strong>
+                <div class="create-submit-row">
+                  <button id="settingsNewEventButton" class="primary-button" type="button">作成</button>
                 </div>
-                <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
-              </article>
+              </div>
               <article class="setting-row">
                 <div>
                   <span>候補 / カード / オッズ</span>
@@ -171,12 +194,12 @@
               <div class="result-card">
                 <span>Current table</span>
                 <strong id="resultEventName">未設定</strong>
-                <small>確定結果の入力状況に応じてランキングが動きます</small>
+                <small>確定結果の入力状況に応じてランキングが動きます。</small>
               </div>
               <div class="result-card result-card-accent">
                 <span>House note</span>
                 <strong>POINT ONLY</strong>
-                <small>決済・送金・リアルマネーを扱う機能はありません</small>
+                <small>決済、送金、リアルマネーを扱う機能はありません。</small>
               </div>
             </div>
             <div class="archive-list" id="archiveList"></div>
@@ -194,12 +217,12 @@
               <div class="history-row">
                 <span>最新保存</span>
                 <strong id="historyEventName">未保存</strong>
-                <small>この端末のブラウザ内に保存されます</small>
+                <small>この端末のブラウザ内に保存されます。</small>
               </div>
               <div class="history-row">
                 <span>安全メモ</span>
                 <strong>ポイント記録専用</strong>
-                <small>決済・送金・リアルマネーを扱う機能はありません</small>
+                <small>決済、送金、リアルマネーを扱う機能はありません。</small>
               </div>
             </div>
           </section>
@@ -219,7 +242,7 @@
               <button class="is-active" type="button">全期間</button>
               <button type="button">今月</button>
               <button type="button">年初来</button>
-              <button type="button">直近1年間</button>
+              <button type="button">直近1年</button>
               <button type="button">カスタム期間</button>
               <button type="button">大会別</button>
             </div>
@@ -300,7 +323,7 @@
                   <article class="setting-row">
                     <div>
                       <span>結果承認</span>
-                      <strong id="approvalRuleText">承認数を計算中</strong>
+                      <strong id="approvalRuleText">承認人数を計算中</strong>
                     </div>
                     <a class="ghost-link" href="#active">承認へ</a>
                   </article>
@@ -348,7 +371,7 @@
     <dialog id="confirmDialog" class="confirm-dialog">
       <form method="dialog">
         <p class="eyebrow">Final call</p>
-        <h2>この予想を確定しますか？</h2>
+        <h2>このYOSOを確定しますか？</h2>
         <p>一度確定すると変更できません。内容を確認してから進めてください。</p>
         <div class="dialog-actions">
           <button class="ghost-button" value="cancel">戻る</button>
@@ -356,7 +379,6 @@
         </div>
       </form>
     </dialog>
-
     <script src="./app.js"></script>
   </body>
 </html>
