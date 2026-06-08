@@ -50,7 +50,10 @@
           <button class="primary-button" id="authSubmitButton" type="submit">ログイン</button>
           <p class="auth-message" id="authMessage" role="status"></p>
         </form>
-        <p class="auth-note">ローカル保存の簡易アカウントです。共有サーバー認証が必要になったらSupabaseやFirebaseへ差し替えます。</p>
+        <div class="auth-help">
+          <button class="ghost-button small-button" id="authResetButton" type="button">パスワードを忘れた</button>
+        </div>
+        <p class="auth-note">ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。</p>
       </div>
     </section>
     <div class="app-shell">

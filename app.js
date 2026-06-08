@@ -139,6 +139,7 @@ const els = {
   authPassword: document.querySelector("#authPassword"),
   authRemember: document.querySelector("#authRemember"),
   authSubmitButton: document.querySelector("#authSubmitButton"),
+  authResetButton: document.querySelector("#authResetButton"),
   authMessage: document.querySelector("#authMessage"),
   accountChip: document.querySelector("#accountChip"),
   accountName: document.querySelector("#accountName"),
@@ -417,6 +418,16 @@ async function loginAuthUser(username, password, remember = true) {
 function logoutAuthUser() {
   saveAuthSession(null);
   renderAuthState();
+}
+
+function resetLocalAuth() {
+  const ok = confirm("ローカルのログイン情報だけをリセットします。大会データやYOSOは残ります。もう一度新規登録しますか？");
+  if (!ok) return;
+  localStorage.removeItem(AUTH_USERS_KEY);
+  clearAuthSessionStorage();
+  authSession = null;
+  renderAuthState();
+  setAuthMessage("ログイン情報をリセットしました。新規登録してください。");
 }
 
 function saveUpdatedAuthUser(nextUser) {
@@ -3276,6 +3287,7 @@ els.authModeButtons?.forEach((button) => {
 });
 
 els.authForm?.addEventListener("submit", handleAuthSubmit);
+els.authResetButton?.addEventListener("click", resetLocalAuth);
 els.logoutButton?.addEventListener("click", logoutAuthUser);
 els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
