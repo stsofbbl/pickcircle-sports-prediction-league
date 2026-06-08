@@ -1,4 +1,7 @@
 const STORAGE_KEY = "yoso-league-state-v1";
+const AUTH_USERS_KEY = "yoso-auth-users-v1";
+const AUTH_SESSION_KEY = "yoso-auth-session-v1";
+const AUTH_PBKDF2_ITERATIONS = 120000;
 
 const templates = {
   rankingOdds: {
@@ -126,6 +129,17 @@ const els = {
   navLinks: [...document.querySelectorAll("[data-nav-page]")],
   themeToggle: document.querySelector("#themeToggle"),
   themeOptions: [...document.querySelectorAll("[data-theme-label]")],
+  authScreen: document.querySelector("#authScreen"),
+  authForm: document.querySelector("#authForm"),
+  authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
+  authUsername: document.querySelector("#authUsername"),
+  authDisplayName: document.querySelector("#authDisplayName"),
+  authPassword: document.querySelector("#authPassword"),
+  authSubmitButton: document.querySelector("#authSubmitButton"),
+  authMessage: document.querySelector("#authMessage"),
+  accountChip: document.querySelector("#accountChip"),
+  accountName: document.querySelector("#accountName"),
+  logoutButton: document.querySelector("#logoutButton"),
   homeClubLine: document.querySelector("#homeClubLine"),
   homeParticipantName: document.querySelector("#homeParticipantName"),
   homeOpenCount: document.querySelector("#homeOpenCount"),
@@ -183,6 +197,197 @@ function loadState() {
   } catch {
     return createDefaultState();
   }
+}
+
+let authSession = loadAuthSession();
+let authMode = "login";
+
+function loadAuthUsers() {
+  try {
+    const stored = localStorage.getItem(AUTH_USERS_KEY);
+    const users = stored ? JSON.parse(stored) : [];
+    return Array.isArray(users) ? users : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAuthUsers(users) {
+  localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(users));
+}
+
+function loadAuthSession() {
+  try {
+    const stored = localStorage.getItem(AUTH_SESSION_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveAuthSession(session) {
+  authSession = session;
+  if (session) localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+  else localStorage.removeItem(AUTH_SESSION_KEY);
+}
+
+function currentAuthUser() {
+  if (!authSession?.userId) return null;
+  return loadAuthUsers().find((user) => user.id === authSession.userId) || null;
+}
+
+function renderAuthState() {
+  const user = currentAuthUser();
+  document.body.classList.toggle("auth-locked", !user);
+  if (els.authScreen) els.authScreen.hidden = Boolean(user);
+  if (els.accountChip) els.accountChip.hidden = !user;
+  if (els.accountName) els.accountName.textContent = user ? `${user.displayName}${user.role === "admin" ? " / Admin" : ""}` : "";
+  if (!user) {
+    setAuthMode(loadAuthUsers().length ? "login" : "register");
+    return;
+  }
+  ensureParticipantForAuth(user);
+}
+
+function setAuthMode(mode) {
+  authMode = mode === "register" ? "register" : "login";
+  els.authModeButtons?.forEach((button) => button.classList.toggle("is-active", button.dataset.authMode === authMode));
+  if (els.authScreen) els.authScreen.dataset.mode = authMode;
+  if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? "登録して入る" : "ログイン";
+  if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  setAuthMessage("");
+}
+
+function setAuthMessage(message) {
+  if (els.authMessage) els.authMessage.textContent = message;
+}
+
+async function handleAuthSubmit(event) {
+  event.preventDefault();
+  if (!crypto?.subtle) {
+    setAuthMessage("このブラウザではWeb Crypto APIが使えないため登録できません。");
+    return;
+  }
+  const username = normalizeUsername(els.authUsername?.value || "");
+  const displayName = (els.authDisplayName?.value || "").trim();
+  const password = els.authPassword?.value || "";
+  if (authMode === "register") await registerAuthUser(username, displayName, password);
+  else await loginAuthUser(username, password);
+}
+
+async function registerAuthUser(username, displayName, password) {
+  const users = loadAuthUsers();
+  if (username.length < 3) {
+    setAuthMessage("ユーザーIDは3文字以上で入力してください。");
+    return;
+  }
+  if (!displayName) {
+    setAuthMessage("表示名を入力してください。");
+    return;
+  }
+  if (password.length < 6) {
+    setAuthMessage("パスワードは6文字以上で入力してください。");
+    return;
+  }
+  if (users.some((user) => user.username === username)) {
+    setAuthMessage("このユーザーIDは登録済みです。");
+    return;
+  }
+  const salt = randomBase64(16);
+  const passwordHash = await derivePasswordHash(password, salt);
+  const user = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `user-${Date.now()}`,
+    username,
+    displayName,
+    role: users.length ? "member" : "admin",
+    salt,
+    passwordHash,
+    createdAt: new Date().toISOString(),
+  };
+  users.push(user);
+  saveAuthUsers(users);
+  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString() });
+  if (els.authPassword) els.authPassword.value = "";
+  ensureParticipantForAuth(user);
+  renderAuthState();
+  render();
+}
+
+async function loginAuthUser(username, password) {
+  const user = loadAuthUsers().find((candidate) => candidate.username === username);
+  if (!user) {
+    setAuthMessage("ユーザーIDまたはパスワードが違います。");
+    return;
+  }
+  const passwordHash = await derivePasswordHash(password, user.salt);
+  if (passwordHash !== user.passwordHash) {
+    setAuthMessage("ユーザーIDまたはパスワードが違います。");
+    return;
+  }
+  saveAuthSession({ userId: user.id, signedInAt: new Date().toISOString() });
+  if (els.authPassword) els.authPassword.value = "";
+  ensureParticipantForAuth(user);
+  renderAuthState();
+  render();
+}
+
+function logoutAuthUser() {
+  saveAuthSession(null);
+  renderAuthState();
+}
+
+function ensureParticipantForAuth(user) {
+  if (!user?.displayName || state.participants.includes(user.displayName)) return;
+  state.participants.push(user.displayName);
+  (state.events || []).forEach((event) => {
+    event.predictions ||= {};
+    event.predictions[user.displayName] = createPrediction(event.templateId);
+    if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, user.displayName);
+  });
+  persist();
+}
+
+function normalizeUsername(value) {
+  return value.trim().toLowerCase();
+}
+
+async function derivePasswordHash(password, saltBase64) {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: base64ToBytes(saltBase64),
+      iterations: AUTH_PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    256,
+  );
+  return bytesToBase64(new Uint8Array(bits));
+}
+
+function randomBase64(length) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64(bytes);
+}
+
+function bytesToBase64(bytes) {
+  let value = "";
+  bytes.forEach((byte) => {
+    value += String.fromCharCode(byte);
+  });
+  return btoa(value);
+}
+
+function base64ToBytes(value) {
+  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
 }
 
 function createDefaultState() {
@@ -636,10 +841,14 @@ function emptyTournamentMarkup(message) {
 }
 
 function currentParticipantName() {
+  const user = currentAuthUser();
+  if (user?.displayName) return user.displayName;
   return state.participants[0] || "あなた";
 }
 
 function isCurrentUserAdmin() {
+  const user = currentAuthUser();
+  if (user?.role === "admin") return true;
   return currentParticipantName() === state.participants[0];
 }
 
@@ -2857,5 +3066,13 @@ els.themeToggle?.addEventListener("click", () => {
   applyTheme(document.body.dataset.theme === "day" ? "dark" : "day");
 });
 
+els.authModeButtons?.forEach((button) => {
+  button.addEventListener("click", () => setAuthMode(button.dataset.authMode));
+});
+
+els.authForm?.addEventListener("submit", handleAuthSubmit);
+els.logoutButton?.addEventListener("click", logoutAuthUser);
+
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+renderAuthState();
 render();

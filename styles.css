@@ -122,6 +122,114 @@ h3 {
   padding: 18px 18px 112px;
 }
 
+body.auth-locked .app-shell {
+  display: none;
+}
+
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  position: relative;
+  z-index: 1;
+}
+
+.auth-screen[hidden] {
+  display: none;
+}
+
+.auth-card {
+  width: min(430px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+  background:
+    linear-gradient(145deg, rgba(238, 232, 224, 0.06), transparent 40%),
+    radial-gradient(ellipse at 20% 0%, rgba(255, 79, 147, 0.12), transparent 48%),
+    linear-gradient(180deg, rgba(32, 25, 24, 0.96), rgba(24, 19, 18, 0.98));
+  box-shadow: var(--shadow);
+}
+
+.auth-logo {
+  display: block;
+  width: 122px;
+  height: auto;
+  margin-bottom: 20px;
+}
+
+.auth-copy h1 {
+  margin-bottom: 8px;
+  font-size: 30px;
+}
+
+.auth-copy p,
+.auth-note {
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.auth-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 18px 0;
+  padding: 5px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.auth-mode-switch button {
+  min-height: 40px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.auth-mode-switch button.is-active {
+  color: var(--ink);
+  background: rgba(245, 154, 194, 0.16);
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-screen[data-mode="login"] .auth-register-only {
+  display: none;
+}
+
+.auth-message {
+  min-height: 20px;
+  margin: 0;
+  color: var(--soap-pink);
+  font-size: 13px;
+}
+
+.auth-note {
+  margin: 16px 0 0;
+  font-size: 12px;
+}
+
+.account-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.account-chip span {
+  padding-left: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .topbar,
 .match-strip,
 .league-panel,

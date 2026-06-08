@@ -18,6 +18,37 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body data-theme="dark">
+    <section class="auth-screen" id="authScreen" aria-label="ログイン">
+      <div class="auth-card">
+        <img class="auth-logo" src="./assets/yoso-header-logo.png" alt="YOSO" />
+        <div class="auth-copy">
+          <span class="match-kicker">YOSO ACCOUNT</span>
+          <h1>ログイン</h1>
+          <p>この端末のYOSOメンバーとして入ります。</p>
+        </div>
+        <div class="auth-mode-switch" role="tablist" aria-label="認証モード">
+          <button class="is-active" type="button" data-auth-mode="login">ログイン</button>
+          <button type="button" data-auth-mode="register">新規登録</button>
+        </div>
+        <form class="auth-form" id="authForm">
+          <label class="field">
+            <span>ユーザーID</span>
+            <input id="authUsername" type="text" autocomplete="username" required />
+          </label>
+          <label class="field auth-register-only">
+            <span>表示名</span>
+            <input id="authDisplayName" type="text" autocomplete="name" placeholder="例: 和田" />
+          </label>
+          <label class="field">
+            <span>パスワード</span>
+            <input id="authPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <button class="primary-button" id="authSubmitButton" type="submit">ログイン</button>
+          <p class="auth-message" id="authMessage" role="status"></p>
+        </form>
+        <p class="auth-note">ローカル保存の簡易アカウントです。共有サーバー認証が必要になったらSupabaseやFirebaseへ差し替えます。</p>
+      </div>
+    </section>
     <div class="app-shell">
       <header class="topbar">
         <a class="brand-home" href="#home" aria-label="ホームへ戻る">
@@ -25,6 +56,10 @@
             <img src="./assets/yoso-header-logo.png" alt="" />
           </span>
         </a>
+        <div class="account-chip" id="accountChip" hidden>
+          <span id="accountName">Guest</span>
+          <button class="ghost-button small-button" id="logoutButton" type="button">ログアウト</button>
+        </div>
       </header>
 
       <main class="app-pages">
