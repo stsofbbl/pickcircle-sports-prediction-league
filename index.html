@@ -76,15 +76,15 @@
             <div class="tournament-list" id="activeTournamentCards"></div>
           </section>
 
-          <section class="settings-section" aria-label="大会設定">
+          <section class="settings-section" aria-label="新規大会作成">
             <div class="settings-section-head">
-              <h3>大会設定</h3>
+              <h3>新規大会作成</h3>
             </div>
             <div class="field">
               <span>ルールプリセット</span>
               <small class="field-note">競技ごとの予想形式の型</small>
-              <details class="preset-details" open>
-                <summary class="preset-summary">プリセット一覧</summary>
+              <details class="preset-details" id="presetDetails">
+                <summary class="preset-summary" id="presetSummary">▶ プリセット一覧を表示</summary>
                 <div class="preset-description" id="presetDescription"></div>
                 <div class="template-grid" id="templateGrid"></div>
               </details>
@@ -113,22 +113,10 @@
                   <span>締切</span>
                   <input id="newTournamentDeadline" type="datetime-local" />
                 </label>
-                <label class="field compact-field">
-                  <span>ステータス</span>
-                  <select id="newTournamentStatus">
-                    <option value="open">予想受付中</option>
-                    <option value="resultWait">結果待ち</option>
-                    <option value="archive">アーカイブ</option>
-                  </select>
-                </label>
-              </div>
-              <article class="setting-row">
-                <div>
-                  <span>大会追加</span>
-                  <strong>開催する大会を作成</strong>
+                <div class="create-submit-row">
+                  <button id="settingsNewEventButton" class="primary-button" type="button">作成</button>
                 </div>
-                <button id="settingsNewEventButton" class="primary-button">NEW TABLE</button>
-              </article>
+              </div>
               <article class="setting-row">
                 <div>
                   <span>候補 / カード / オッズ</span>

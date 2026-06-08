@@ -556,6 +556,115 @@ input[type="number"],
   padding-top: 16px;
 }
 
+.worldcup-phase-panel {
+  border: 1px solid rgba(255, 170, 210, 0.18);
+  border-radius: 18px;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 72, 156, 0.16), rgba(10, 8, 9, 0.58) 52%),
+    rgba(17, 12, 14, 0.82);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+.worldcup-phase-panel h3 {
+  margin: 6px 0 8px;
+  font-size: clamp(22px, 4vw, 34px);
+}
+
+.worldcup-phase-panel p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.worldcup-rule-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.worldcup-rule-strip span,
+.wc-participant-head span,
+.wc-group-head span {
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+}
+
+.wc-participant-head,
+.wc-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wc-participant-head {
+  margin-bottom: 12px;
+}
+
+.wc-participant-head h3,
+.wc-participant-head h4 {
+  margin: 0;
+}
+
+.wc-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.wc-group-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 16px;
+  padding: 13px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+    rgba(12, 9, 10, 0.72);
+}
+
+.wc-group-head strong {
+  letter-spacing: 0.04em;
+}
+
+.wc-team-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 26px;
+}
+
+.wc-team-list span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.wc-third-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.wc-third-section h4 {
+  margin: 0;
+}
+
+.wc-third-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
 .block-head {
   display: flex;
   align-items: flex-start;
@@ -1596,8 +1705,13 @@ body[data-theme="day"] .tournament-card {
   gap: 8px;
 }
 
+.tournament-actions.is-manage {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .primary-link,
 .ghost-link {
+  appearance: none;
   display: inline-flex;
   min-height: 44px;
   align-items: center;
@@ -1622,8 +1736,63 @@ body[data-theme="day"] .tournament-card {
   color: var(--app-text);
 }
 
+.ghost-link.danger-action {
+  border-color: rgba(176, 0, 32, 0.46);
+  color: #ffd7df;
+}
+
+.ghost-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.primary-link.is-disabled,
+.ghost-link.is-disabled {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
 .muted-card {
   opacity: 0.78;
+}
+
+.result-flow-panel {
+  border-color: var(--app-line-strong);
+}
+
+.result-flow-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.result-flow-head h3 {
+  margin: 4px 0 2px;
+}
+
+.result-flow-meta,
+.result-flow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.result-flow-meta span {
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  color: var(--app-muted);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.result-flow-actions select {
+  min-height: 42px;
+  flex: 1 1 150px;
 }
 
 .ranking-tabs {
@@ -1760,9 +1929,14 @@ body[data-theme="day"] .preset-details {
 
 .preset-summary {
   cursor: pointer;
+  list-style: none;
   color: var(--app-text);
   font-size: 13px;
   font-weight: 900;
+}
+
+.preset-summary::-webkit-details-marker {
+  display: none;
 }
 
 .preset-description {
@@ -1802,6 +1976,16 @@ body[data-theme="day"] .preset-description {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.04);
   padding: 12px;
+}
+
+.create-submit-row {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+}
+
+.create-submit-row .primary-button {
+  width: min(180px, 100%);
 }
 
 body[data-theme="day"] .event-create-form {
