@@ -585,6 +585,39 @@ input[type="number"],
   margin-top: 14px;
 }
 
+.wc-phase-tab {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.wc-phase-tab small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.wc-phase-tab.is-active {
+  border-color: rgba(255, 142, 196, 0.5);
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(255, 72, 156, 0.26), rgba(255, 255, 255, 0.05));
+}
+
+.wc-phase-admin {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .worldcup-rule-strip span,
 .wc-participant-head span,
 .wc-group-head span {
