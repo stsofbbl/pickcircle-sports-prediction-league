@@ -13,6 +13,22 @@
 - ローカル簡易ログイン/ユーザー登録
 - GitHub Pages公開
 
+## 今月末までの実用化方針
+
+仲間内で使う試験運用は、Google Sheetsを共有データ置き場にする想定で進めます。
+
+想定構成:
+
+```text
+GitHub Pages
++ Google Apps Script
++ Google Sheets
+```
+
+まずはローカル保存のUI/運用フローを磨き、次にGoogle Sheets同期を追加します。
+
+本格的な多人数/長期運用が必要になった場合は、Supabase Auth + Supabase Postgresへの移行を検討します。
+
 ## ログイン仕様
 
 現在はローカル保存の簡易アカウントです。
@@ -57,7 +73,7 @@
 
 ## 次におすすめの作業
 
-1. Supabase/Firebaseなど本物の共有ログインを検討
+1. Google Sheets同期モードを設計
 2. W杯出場国リストの更新
 3. ランキング画面の期間/大会別フィルターを実装
 4. スマホ表示で第2回入力の見やすさをさらに改善

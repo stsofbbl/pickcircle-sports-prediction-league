@@ -35,6 +35,22 @@ Files:
 - `assets/`: images and icons
 - `docs/WORKFLOW.md`: human collaboration guide
 
+## Near-Term Online Plan
+
+The near-term practical target is friend-group use by the end of this month.
+
+For that stage, assume Google Sheets sync rather than a full backend:
+
+```text
+GitHub Pages
++ Google Apps Script
++ Google Sheets
+```
+
+Treat Google Sheets as the trial shared data store. Keep the UI and state shape easy to migrate later.
+
+If the app needs production-grade accounts, multi-device identity, strict permissions, and long-term scale, migrate to Supabase Auth + Supabase Postgres later.
+
 State is stored in localStorage:
 
 - `yoso-league-state-v1`: app state
