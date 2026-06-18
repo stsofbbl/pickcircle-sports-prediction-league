@@ -18,6 +18,7 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - `assets/`: ロゴ、アイコン、画像
 - `CLAUDE.md`: Claude Code / Codex などAI開発メンバー向けの作業ルール
 - `docs/WORKFLOW.md`: GitHubが分からない人向けの共同作業手順
+- `docs/GOOGLE_SHEETS_SYNC_PLAN.md`: Google Sheets同期の設計メモ
 
 ビルドツールはありません。HTML/CSS/JavaScriptだけで動きます。
 
@@ -60,7 +61,14 @@ http://127.0.0.1:4173
 - 締切後の予想公開
 - 結果入力/承認
 - ポイントランキング
+- 設定画面のデータ接続準備
 - GitHub Pages公開
+
+## データ保存
+
+現在の実データ保存は端末内の `localStorage` です。
+
+仲間内テストに向けて、設定画面にGoogle Sheets接続準備欄を追加しています。Apps Script URLとSpreadsheet IDを保存できますが、実際の同期通信は次の実装で追加します。詳細は `docs/GOOGLE_SHEETS_SYNC_PLAN.md` を見てください。
 
 ## W杯2026プリセット
 
@@ -85,7 +93,8 @@ W杯2026は通常の複合型ではなく、専用の3フェーズプリセッ�
 
 1. `CLAUDE.md`
 2. `docs/WORKFLOW.md`
-3. このREADME
+3. `docs/GOOGLE_SHEETS_SYNC_PLAN.md`
+4. このREADME
 
 基本の流れ:
 
