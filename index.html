@@ -375,6 +375,48 @@
                 </div>
               </section>
 
+              <section class="settings-section" aria-label="データ接続">
+                <div class="settings-section-head">
+                  <h3>データ接続</h3>
+                </div>
+                <div class="settings-action-list">
+                  <article class="setting-row">
+                    <div>
+                      <span id="dataConnectionStatus">この端末に保存中</span>
+                      <strong id="dataConnectionSummary">Google Sheets同期は準備中です</strong>
+                    </div>
+                    <span class="status-label pending" id="dataConnectionBadge">LOCAL</span>
+                  </article>
+                </div>
+                <div class="connection-settings-grid">
+                  <label class="field">
+                    <span>保存モード</span>
+                    <select id="dataConnectionMode">
+                      <option value="local">この端末のみ</option>
+                      <option value="sheets">Google Sheets準備</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Apps Script URL</span>
+                    <input id="dataConnectionScriptUrl" type="url" placeholder="https://script.google.com/..." />
+                  </label>
+                  <label class="field">
+                    <span>Spreadsheet ID</span>
+                    <input id="dataConnectionSpreadsheetId" type="text" placeholder="スプレッドシートID" />
+                  </label>
+                  <label class="field">
+                    <span>最終同期</span>
+                    <input id="dataConnectionLastSync" type="text" disabled />
+                  </label>
+                </div>
+                <p class="field-note">今はローカル保存を継続します。ここに接続情報を保存しておくと、次の実装でApps Script経由の同期に切り替えやすくなります。</p>
+                <div class="account-action-row">
+                  <button class="primary-button" id="dataConnectionSaveButton" type="button">接続設定を保存</button>
+                  <button class="ghost-button" id="dataConnectionCopyStateButton" type="button">現在のデータをコピー</button>
+                </div>
+                <p class="auth-message" id="dataConnectionMessage" role="status"></p>
+              </section>
+
               <section class="settings-section" aria-label="結果確定ルール">
                 <div class="settings-section-head">
                   <h3>結果確定ルール</h3>

@@ -5,6 +5,7 @@ YOSOアプリの共同開発に参加するときは、まず以下を読んで�
 1. `README.md`
 2. `CLAUDE.md`
 3. `docs/WORKFLOW.md`
+4. `docs/GOOGLE_SHEETS_SYNC_PLAN.md`
 
 ## 作業ブランチ
 
@@ -47,6 +48,7 @@ git diff --check
 
 - 認証方式を変える
 - localStorageのキーを変える
+- Google Sheets同期方式を変える
 - W杯の得点計算を変える
 - デザイン全体を変える
 - 公開URLの設定を変える

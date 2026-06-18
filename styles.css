@@ -252,7 +252,8 @@ body.auth-locked .app-shell {
 }
 
 .account-settings-grid,
-.account-password-grid {
+.account-password-grid,
+.connection-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -818,6 +819,34 @@ input[type="number"],
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.wc-phase-intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.wc-future-list {
+  display: grid;
+  gap: 8px;
+}
+
+.wc-future-row {
+  margin-bottom: 0;
+}
+
+.wc-future-row label {
+  display: grid;
+  gap: 4px;
+}
+
+.wc-row-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .wc-seed-preview {
@@ -1395,6 +1424,7 @@ dialog::backdrop {
   .form-grid,
   .account-settings-grid,
   .account-password-grid,
+  .connection-settings-grid,
   .market-row,
   .draft-row,
   .phase-row,
@@ -1429,6 +1459,15 @@ dialog::backdrop {
 
   .wc-progress-meter span {
     text-align: left;
+  }
+
+  .wc-future-row {
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .wc-future-row .sub-label {
+    padding-left: 42px;
   }
 
   .readiness-grid {

@@ -120,6 +120,12 @@ const defaultState = {
   participants: ["和田", "担当A", "担当B", "ゲスト"],
   activeTemplate: "worldCup",
   approvalPolicy: "half",
+  connection: {
+    mode: "local",
+    scriptUrl: "",
+    spreadsheetId: "",
+    lastSyncAt: "",
+  },
   activeEventId: null,
   events: null,
   event: null,
@@ -156,6 +162,16 @@ const els = {
   accountPasswordButton: document.querySelector("#accountPasswordButton"),
   settingsLogoutButton: document.querySelector("#settingsLogoutButton"),
   accountMessage: document.querySelector("#accountMessage"),
+  dataConnectionMode: document.querySelector("#dataConnectionMode"),
+  dataConnectionScriptUrl: document.querySelector("#dataConnectionScriptUrl"),
+  dataConnectionSpreadsheetId: document.querySelector("#dataConnectionSpreadsheetId"),
+  dataConnectionLastSync: document.querySelector("#dataConnectionLastSync"),
+  dataConnectionSaveButton: document.querySelector("#dataConnectionSaveButton"),
+  dataConnectionCopyStateButton: document.querySelector("#dataConnectionCopyStateButton"),
+  dataConnectionStatus: document.querySelector("#dataConnectionStatus"),
+  dataConnectionSummary: document.querySelector("#dataConnectionSummary"),
+  dataConnectionBadge: document.querySelector("#dataConnectionBadge"),
+  dataConnectionMessage: document.querySelector("#dataConnectionMessage"),
   homeClubLine: document.querySelector("#homeClubLine"),
   homeParticipantName: document.querySelector("#homeParticipantName"),
   homeOpenCount: document.querySelector("#homeOpenCount"),
@@ -334,6 +350,57 @@ function renderAccountSettings(user = currentAuthUser()) {
   if (els.accountIdleTimeout) els.accountIdleTimeout.value = String(user.idleTimeoutMinutes ?? AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES);
   if (els.accountRememberDefault) els.accountRememberDefault.checked = user.rememberDefault !== false;
   if (els.authRemember) els.authRemember.checked = user.rememberDefault !== false;
+}
+
+function renderConnectionSettings() {
+  state.connection = normalizeConnectionSettings(state.connection);
+  const connection = state.connection;
+  const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId;
+  if (els.dataConnectionMode) els.dataConnectionMode.value = connection.mode;
+  if (els.dataConnectionScriptUrl) els.dataConnectionScriptUrl.value = connection.scriptUrl;
+  if (els.dataConnectionSpreadsheetId) els.dataConnectionSpreadsheetId.value = connection.spreadsheetId;
+  if (els.dataConnectionLastSync) els.dataConnectionLastSync.value = connection.lastSyncAt ? formatDateTime(connection.lastSyncAt) : "未同期";
+  if (els.dataConnectionStatus) {
+    els.dataConnectionStatus.textContent = connection.mode === "sheets" ? "Google Sheets接続準備中" : "この端末に保存中";
+  }
+  if (els.dataConnectionSummary) {
+    els.dataConnectionSummary.textContent = isSheetsReady
+      ? "接続情報は保存済みです。次の実装で同期APIに接続します。"
+      : connection.mode === "sheets"
+        ? "Apps Script URLとSpreadsheet IDを入れると同期準備が完了します。"
+        : "友達と共有する前に、次のステップでSheets同期を追加します。";
+  }
+  if (els.dataConnectionBadge) {
+    els.dataConnectionBadge.textContent = isSheetsReady ? "READY" : connection.mode === "sheets" ? "SETUP" : "LOCAL";
+    els.dataConnectionBadge.className = `status-label ${isSheetsReady ? "open" : "pending"}`;
+  }
+}
+
+function setConnectionMessage(message) {
+  if (els.dataConnectionMessage) els.dataConnectionMessage.textContent = message;
+}
+
+function handleConnectionSave() {
+  state.connection = normalizeConnectionSettings({
+    mode: els.dataConnectionMode?.value,
+    scriptUrl: els.dataConnectionScriptUrl?.value.trim(),
+    spreadsheetId: els.dataConnectionSpreadsheetId?.value.trim(),
+    lastSyncAt: state.connection?.lastSyncAt || "",
+  });
+  persist();
+  renderConnectionSettings();
+  setConnectionMessage("接続設定を保存しました。同期本体は次の実装で有効化します。");
+  renderDashboard();
+}
+
+async function copyCurrentStateForSheets() {
+  const payload = JSON.stringify({ exportedAt: new Date().toISOString(), state }, null, 2);
+  try {
+    await navigator.clipboard.writeText(payload);
+    setConnectionMessage("現在の大会データをクリップボードにコピーしました。");
+  } catch {
+    setConnectionMessage("コピーできませんでした。ブラウザの権限設定を確認してください。");
+  }
 }
 
 function setAuthMessage(message) {
@@ -589,7 +656,24 @@ function normalizeState(nextState) {
     ? nextState.activeEventId
     : events[0].id;
   const event = events.find((item) => item.id === activeEventId) || events[0];
-  return { ...nextState, events, activeEventId, event, activeTemplate: event.templateId };
+  return {
+    ...nextState,
+    connection: normalizeConnectionSettings(nextState.connection),
+    events,
+    activeEventId,
+    event,
+    activeTemplate: event.templateId,
+  };
+}
+
+function normalizeConnectionSettings(connection = {}) {
+  const mode = connection.mode === "sheets" ? "sheets" : "local";
+  return {
+    mode,
+    scriptUrl: String(connection.scriptUrl || "").trim(),
+    spreadsheetId: String(connection.spreadsheetId || "").trim(),
+    lastSyncAt: String(connection.lastSyncAt || ""),
+  };
 }
 
 function normalizeEvent(event, sourceState = state) {
@@ -872,6 +956,7 @@ function normalizeFixedArray(value, length) {
 function render() {
   updateEventStatuses();
   if (els.leagueName) els.leagueName.value = state.leagueName;
+  renderConnectionSettings();
   renderParticipants();
   renderTemplates();
   renderPresetDescription();
@@ -925,8 +1010,10 @@ function renderDashboard() {
 function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount, openEvents }) {
   if (!els.homeReadinessPanel) return;
   const activeEvent = openEvents[0] || state.event;
-  const storageLabel = "この端末";
-  const syncLabel = "Sheets準備中";
+  const connection = normalizeConnectionSettings(state.connection);
+  const hasSheetsTarget = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId;
+  const storageLabel = connection.mode === "sheets" ? "Google Sheets" : "この端末";
+  const syncLabel = hasSheetsTarget ? "接続情報保存済み" : connection.mode === "sheets" ? "接続情報待ち" : "Sheets準備中";
   els.homeReadinessPanel.innerHTML = `
     <article class="readiness-card primary-readiness">
       <div>
@@ -1222,6 +1309,13 @@ function formatDeadline(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ja-JP", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function renderTournamentCreateOptions() {
@@ -1877,6 +1971,7 @@ function participantWorldCupPhaseTwoBlock(name, countries) {
         <h3>${escapeHtml(name)} のYOSO</h3>
         <span>第2回</span>
       </div>
+      <p class="wc-phase-intro">1〜4位を選び、さらにベスト16以上へ進みそうな国を10枠まで選びます。複勝枠は到達点とオッズで加点します。</p>
       <div class="prediction-grid">
         ${[0, 1, 2, 3].map((index) => `
           <label class="field"><span>${index + 1}位予想</span><select data-wc-top-pick="${escapeAttr(name)}:${index}">${optionList(countries, prediction.top4[index])}</select></label>
@@ -1884,18 +1979,29 @@ function participantWorldCupPhaseTwoBlock(name, countries) {
       </div>
       <div class="wc-third-section">
         <h4>複勝枠 10カ国</h4>
-        ${Array.from({ length: 10 }).map((_, index) => {
-          const future = prediction.futures[index] || { country: "", finish: "", odds: 1 };
-          return `
-            <div class="phase-row">
-              <span class="wc-row-index">${index + 1}</span>
-              <select data-wc-future-country="${escapeAttr(name)}:${index}">${optionList(countries, future.country)}</select>
-              <select data-wc-future-finish="${escapeAttr(name)}:${index}">${optionList(["", ...worldCupFinishOptions], future.finish)}</select>
-              <input data-wc-future-odds="${escapeAttr(name)}:${index}" type="number" min="0" max="200" step="0.1" value="${formatOddsInput(future.odds || 1)}">
-              <span class="sub-label">到達点 × オッズ</span>
-            </div>
-          `;
-        }).join("")}
+        <div class="wc-future-list">
+          ${Array.from({ length: 10 }).map((_, index) => {
+            const future = prediction.futures[index] || { country: "", finish: "", odds: 1 };
+            return `
+              <div class="phase-row wc-future-row">
+                <span class="wc-row-index">${index + 1}</span>
+                <label>
+                  <span class="wc-row-label">国</span>
+                  <select data-wc-future-country="${escapeAttr(name)}:${index}">${optionList(countries, future.country)}</select>
+                </label>
+                <label>
+                  <span class="wc-row-label">到達</span>
+                  <select data-wc-future-finish="${escapeAttr(name)}:${index}">${optionList(["", ...worldCupFinishOptions], future.finish)}</select>
+                </label>
+                <label>
+                  <span class="wc-row-label">倍率</span>
+                  <input data-wc-future-odds="${escapeAttr(name)}:${index}" type="number" min="0" max="200" step="0.1" value="${formatOddsInput(future.odds || 1)}">
+                </label>
+                <span class="sub-label">到達点 × オッズ</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
       </div>
       <div class="wc-third-section">
         <h4>個人賞受賞国</h4>
@@ -3292,6 +3398,8 @@ els.logoutButton?.addEventListener("click", logoutAuthUser);
 els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
 els.accountPasswordButton?.addEventListener("click", handlePasswordChange);
+els.dataConnectionSaveButton?.addEventListener("click", handleConnectionSave);
+els.dataConnectionCopyStateButton?.addEventListener("click", copyCurrentStateForSheets);
 
 ["click", "input", "keydown", "touchstart"].forEach((eventName) => {
   document.addEventListener(eventName, () => touchAuthSession(), { passive: true });
