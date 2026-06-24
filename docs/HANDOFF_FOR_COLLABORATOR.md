@@ -36,6 +36,7 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - リアルマネー、決済、送金、ブックメーカー連携は入れない。
 - W杯2026は専用プリセットとして扱う。
 - 直近はW杯UIの完成より、Google Sheets同期と夏の甲子園リリースを優先する。
+- 夏の甲子園は8校ピック、キャプテン2倍、進出ポイント累積方式を採用する。
 
 ## 最低限の確認
 
@@ -52,7 +53,18 @@ git diff --check
 - localStorageのキーを変える
 - Google Sheets同期方式を変える
 - W杯の得点計算を変える
+- 夏の甲子園の8校ピック得点計算を変える
 - デザイン全体を変える
 - 公開URLの設定を変える
+
+## Google Sheets同期
+
+Apps Scriptテンプレートは以下です。
+
+```text
+scripts/google-sheets-web-app.gs
+```
+
+Google Sheets作成、Apps Script貼り付け、Webアプリ公開は、ユーザーのGoogleアカウントで行う必要があります。
 
 迷ったらPull Requestに「相談」と書いて止めてください。

@@ -849,6 +849,35 @@ input[type="number"],
   letter-spacing: 0;
 }
 
+.koshien-score-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.koshien-score-strip span {
+  border: 1px solid rgba(238, 232, 224, 0.12);
+  border-radius: 999px;
+  padding: 6px 10px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.koshien-result-list {
+  display: grid;
+  gap: 8px;
+  max-height: 460px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.koshien-pick-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .wc-seed-preview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

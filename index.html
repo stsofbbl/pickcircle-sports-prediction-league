@@ -405,13 +405,19 @@
                     <input id="dataConnectionSpreadsheetId" type="text" placeholder="スプレッドシートID" />
                   </label>
                   <label class="field">
+                    <span>League ID</span>
+                    <input id="dataConnectionLeagueId" type="text" placeholder="例: g-unit-koshien-2026" />
+                  </label>
+                  <label class="field">
                     <span>最終同期</span>
                     <input id="dataConnectionLastSync" type="text" disabled />
                   </label>
                 </div>
-                <p class="field-note">今はローカル保存を継続します。ここに接続情報を保存しておくと、次の実装でApps Script経由の同期に切り替えやすくなります。</p>
+                <p class="field-note">Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。</p>
                 <div class="account-action-row">
                   <button class="primary-button" id="dataConnectionSaveButton" type="button">接続設定を保存</button>
+                  <button class="ghost-button" id="dataConnectionSyncToButton" type="button">Sheetsへ保存</button>
+                  <button class="ghost-button" id="dataConnectionSyncFromButton" type="button">Sheetsから読込</button>
                   <button class="ghost-button" id="dataConnectionCopyStateButton" type="button">現在のデータをコピー</button>
                 </div>
                 <p class="auth-message" id="dataConnectionMessage" role="status"></p>

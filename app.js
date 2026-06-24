@@ -4,6 +4,7 @@ const AUTH_SESSION_KEY = "yoso-auth-session-v1";
 const AUTH_PBKDF2_ITERATIONS = 120000;
 const AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES = 10080;
 const AUTH_ACTIVITY_THROTTLE_MS = 30000;
+const SHEETS_SYNC_TIMEOUT_MS = 12000;
 
 const templates = {
   rankingOdds: {
@@ -35,6 +36,24 @@ const templates = {
     eventName: "選抜ドラフト",
     teams: ["大阪桐蔭", "山梨学院", "八戸学院光星", "中京大中京", "花巻東", "英明", "智弁学園", "専大松戸"],
     finishPoints: { champion: 100, runnerUp: 70, semifinal: 40, quarterfinal: 10 },
+  },
+  koshien: {
+    id: "koshien",
+    sport: "baseball",
+    name: "夏の甲子園8校ピック",
+    subtitle: "49代表から8校を選び、キャプテン校は2倍で加点",
+    eventName: "夏の甲子園2026 YOSO",
+    teams: [
+      "北北海道代表", "南北海道代表", "青森代表", "岩手代表", "宮城代表", "秋田代表", "山形代表",
+      "福島代表", "茨城代表", "栃木代表", "群馬代表", "埼玉代表", "千葉代表", "東東京代表",
+      "西東京代表", "神奈川代表", "山梨代表", "新潟代表", "長野代表", "富山代表", "石川代表",
+      "福井代表", "静岡代表", "愛知代表", "岐阜代表", "三重代表", "滋賀代表", "京都代表",
+      "大阪代表", "兵庫代表", "奈良代表", "和歌山代表", "鳥取代表", "島根代表", "岡山代表",
+      "広島代表", "山口代表", "香川代表", "徳島代表", "愛媛代表", "高知代表", "福岡代表",
+      "佐賀代表", "長崎代表", "熊本代表", "大分代表", "宮崎代表", "鹿児島代表", "沖縄代表",
+    ],
+    pickCount: 8,
+    stagePoints: { best32: 1, best16: 2, best8: 4, semifinal: 8, runnerUp: 16, champion: 32 },
   },
   fightCard: {
     id: "fightCard",
@@ -108,6 +127,7 @@ const presetRuleDescriptions = {
   rankingOdds: "優勝、準優勝、ベスト4などの順位を予想する型です。WBC、甲子園、W杯の上位予想に向いています。",
   playoff: "クライマックスシリーズやプレーオフの勝ち抜け、シリーズ勝者、注目枠を予想する型です。",
   draft: "参加者がチームや選手を指名し、到達成績に応じてポイントを得る型です。",
+  koshien: "夏の甲子園向けの8校ピック型です。49代表から8校を選び、キャプテン校は2倍、勝ち上がり段階ごとに累積加点します。",
   fightCard: "格闘技やボクシングの対戦カードごとに、勝者、KO、判定などを予想する型です。",
   scoreBonus: "決勝スコア、総得点、KOラウンドなど、単独のボーナス項目を予想する型です。",
   worldCup: "W杯2026専用の3フェーズ型です。第1回GL、第2回決勝T、第3回決勝スコアを段階ごとに扱います。",
@@ -124,6 +144,8 @@ const defaultState = {
     mode: "local",
     scriptUrl: "",
     spreadsheetId: "",
+    leagueId: "g-unit-koshien-2026",
+    clientId: "",
     lastSyncAt: "",
   },
   activeEventId: null,
@@ -165,8 +187,11 @@ const els = {
   dataConnectionMode: document.querySelector("#dataConnectionMode"),
   dataConnectionScriptUrl: document.querySelector("#dataConnectionScriptUrl"),
   dataConnectionSpreadsheetId: document.querySelector("#dataConnectionSpreadsheetId"),
+  dataConnectionLeagueId: document.querySelector("#dataConnectionLeagueId"),
   dataConnectionLastSync: document.querySelector("#dataConnectionLastSync"),
   dataConnectionSaveButton: document.querySelector("#dataConnectionSaveButton"),
+  dataConnectionSyncToButton: document.querySelector("#dataConnectionSyncToButton"),
+  dataConnectionSyncFromButton: document.querySelector("#dataConnectionSyncFromButton"),
   dataConnectionCopyStateButton: document.querySelector("#dataConnectionCopyStateButton"),
   dataConnectionStatus: document.querySelector("#dataConnectionStatus"),
   dataConnectionSummary: document.querySelector("#dataConnectionSummary"),
@@ -355,23 +380,24 @@ function renderAccountSettings(user = currentAuthUser()) {
 function renderConnectionSettings() {
   state.connection = normalizeConnectionSettings(state.connection);
   const connection = state.connection;
-  const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId;
+  const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
   if (els.dataConnectionMode) els.dataConnectionMode.value = connection.mode;
   if (els.dataConnectionScriptUrl) els.dataConnectionScriptUrl.value = connection.scriptUrl;
   if (els.dataConnectionSpreadsheetId) els.dataConnectionSpreadsheetId.value = connection.spreadsheetId;
+  if (els.dataConnectionLeagueId) els.dataConnectionLeagueId.value = connection.leagueId;
   if (els.dataConnectionLastSync) els.dataConnectionLastSync.value = connection.lastSyncAt ? formatDateTime(connection.lastSyncAt) : "未同期";
   if (els.dataConnectionStatus) {
-    els.dataConnectionStatus.textContent = connection.mode === "sheets" ? "Google Sheets接続準備中" : "この端末に保存中";
+    els.dataConnectionStatus.textContent = connection.mode === "sheets" ? "Google Sheets同期" : "この端末に保存中";
   }
   if (els.dataConnectionSummary) {
     els.dataConnectionSummary.textContent = isSheetsReady
-      ? "接続情報は保存済みです。次の実装で同期APIに接続します。"
+      ? `League ID: ${connection.leagueId || "未設定"} / Sheetsへ保存・読込できます。`
       : connection.mode === "sheets"
-        ? "Apps Script URLとSpreadsheet IDを入れると同期準備が完了します。"
+        ? "Apps Script URL、Spreadsheet ID、League IDを入れると同期できます。"
         : "友達と共有する前に、次のステップでSheets同期を追加します。";
   }
   if (els.dataConnectionBadge) {
-    els.dataConnectionBadge.textContent = isSheetsReady ? "READY" : connection.mode === "sheets" ? "SETUP" : "LOCAL";
+    els.dataConnectionBadge.textContent = isSheetsReady ? "SYNC READY" : connection.mode === "sheets" ? "SETUP" : "LOCAL";
     els.dataConnectionBadge.className = `status-label ${isSheetsReady ? "open" : "pending"}`;
   }
 }
@@ -385,12 +411,136 @@ function handleConnectionSave() {
     mode: els.dataConnectionMode?.value,
     scriptUrl: els.dataConnectionScriptUrl?.value.trim(),
     spreadsheetId: els.dataConnectionSpreadsheetId?.value.trim(),
+    leagueId: els.dataConnectionLeagueId?.value.trim(),
+    clientId: state.connection?.clientId,
     lastSyncAt: state.connection?.lastSyncAt || "",
   });
   persist();
   renderConnectionSettings();
-  setConnectionMessage("接続設定を保存しました。同期本体は次の実装で有効化します。");
+  setConnectionMessage("接続設定を保存しました。Google側のWebアプリ公開が済んでいれば同期できます。");
   renderDashboard();
+}
+
+async function syncStateToSheets() {
+  const connection = ensureSheetsConnectionReady();
+  if (!connection) return;
+  setConnectionMessage("Sheetsへ保存しています...");
+  persist();
+  const now = new Date().toISOString();
+  const body = new URLSearchParams({
+    action: "saveState",
+    spreadsheetId: connection.spreadsheetId,
+    leagueId: connection.leagueId,
+    clientId: connection.clientId,
+    payload: JSON.stringify({
+      app: "YOSO",
+      version: 1,
+      savedAt: now,
+      state,
+    }),
+  });
+  try {
+    await fetch(connection.scriptUrl, {
+      method: "POST",
+      mode: "no-cors",
+      body,
+    });
+    state.connection.lastSyncAt = now;
+    persist();
+    renderConnectionSettings();
+    renderDashboard();
+    setConnectionMessage("Sheetsへ保存リクエストを送りました。別端末では「Sheetsから読込」で反映できます。");
+  } catch {
+    setConnectionMessage("Sheetsへ保存できませんでした。Apps Script URLと公開設定を確認してください。");
+  }
+}
+
+async function syncStateFromSheets() {
+  const connection = ensureSheetsConnectionReady();
+  if (!connection) return;
+  setConnectionMessage("Sheetsから読み込んでいます...");
+  try {
+    const response = await requestSheetsJsonp(connection, "getState");
+    if (!response?.ok || !response.state) {
+      setConnectionMessage(response?.error || "Sheetsに保存済みデータが見つかりませんでした。");
+      return;
+    }
+    const localConnection = normalizeConnectionSettings(state.connection);
+    state = normalizeState({
+      ...response.state,
+      connection: {
+        ...normalizeConnectionSettings(response.state.connection),
+        ...localConnection,
+        lastSyncAt: response.updatedAt || new Date().toISOString(),
+      },
+    });
+    renderAuthState();
+    render();
+    setConnectionMessage(`Sheetsから読み込みました。更新: ${formatDateTime(response.updatedAt || state.connection.lastSyncAt)}`);
+  } catch {
+    setConnectionMessage("Sheetsから読み込めませんでした。Apps Script URL、公開範囲、Spreadsheet IDを確認してください。");
+  }
+}
+
+function ensureSheetsConnectionReady() {
+  state.connection = normalizeConnectionSettings({
+    ...state.connection,
+    mode: els.dataConnectionMode?.value || state.connection?.mode,
+    scriptUrl: els.dataConnectionScriptUrl?.value.trim() || state.connection?.scriptUrl,
+    spreadsheetId: els.dataConnectionSpreadsheetId?.value.trim() || state.connection?.spreadsheetId,
+    leagueId: els.dataConnectionLeagueId?.value.trim() || state.connection?.leagueId,
+  });
+  if (state.connection.mode !== "sheets") {
+    setConnectionMessage("保存モードを「Google Sheets準備」に切り替えてください。");
+    return null;
+  }
+  if (!state.connection.scriptUrl || !state.connection.spreadsheetId || !state.connection.leagueId) {
+    setConnectionMessage("Apps Script URL、Spreadsheet ID、League IDを入力してください。");
+    return null;
+  }
+  persist();
+  renderConnectionSettings();
+  return state.connection;
+}
+
+function requestSheetsJsonp(connection, action) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `__yosoSheetsCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    let timeout;
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      delete window[callbackName];
+      script.remove();
+    };
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Sheets request timed out"));
+    }, SHEETS_SYNC_TIMEOUT_MS);
+    window[callbackName] = (payload) => {
+      cleanup();
+      resolve(payload);
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Sheets script failed"));
+    };
+    script.src = buildSheetsUrl(connection, {
+      action,
+      callback: callbackName,
+      spreadsheetId: connection.spreadsheetId,
+      leagueId: connection.leagueId,
+      clientId: connection.clientId,
+      t: Date.now(),
+    });
+    document.head.append(script);
+  });
+}
+
+function buildSheetsUrl(connection, params) {
+  const url = new URL(connection.scriptUrl);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  return url.toString();
 }
 
 async function copyCurrentStateForSheets() {
@@ -579,6 +729,7 @@ function renameParticipant(previousName, nextName) {
       event.resultFlow.approvals[nextName] = event.resultFlow.approvals[previousName];
       delete event.resultFlow.approvals[previousName];
     }
+    if (baseTemplateId(event.templateId) === "koshien") normalizeKoshienPrediction(event, nextName);
     if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, nextName);
   });
   persist();
@@ -590,6 +741,7 @@ function ensureParticipantForAuth(user) {
   (state.events || []).forEach((event) => {
     event.predictions ||= {};
     event.predictions[user.displayName] = createPrediction(event.templateId);
+    if (baseTemplateId(event.templateId) === "koshien") normalizeKoshienPrediction(event, user.displayName);
     if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, user.displayName);
   });
   persist();
@@ -668,10 +820,14 @@ function normalizeState(nextState) {
 
 function normalizeConnectionSettings(connection = {}) {
   const mode = connection.mode === "sheets" ? "sheets" : "local";
+  const randomClientId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `client-${Date.now()}`;
+  const clientId = connection.clientId || randomClientId;
   return {
     mode,
     scriptUrl: String(connection.scriptUrl || "").trim(),
     spreadsheetId: String(connection.spreadsheetId || "").trim(),
+    leagueId: String(connection.leagueId || "g-unit-koshien-2026").trim(),
+    clientId,
     lastSyncAt: String(connection.lastSyncAt || ""),
   };
 }
@@ -694,6 +850,7 @@ function normalizeEvent(event, sourceState = state) {
   (sourceState.participants || defaultState.participants).forEach((name) => {
     normalized.predictions[name] ||= createPrediction(templateId);
   });
+  normalizeKoshienEvent(normalized);
   normalizeWorldCupEvent(normalized);
   return normalized;
 }
@@ -809,6 +966,12 @@ function createConfig(templateId) {
   const base = baseTemplateId(templateId);
   if (base === "rankingOdds") return { teams: [...(template.teams || templates.rankingOdds.teams)], oddsBook: {} };
   if (base === "draft") return { teams: [...(template.teams || templates.draft.teams)], oddsBook: {} };
+  if (base === "koshien") return {
+    teams: [...(template.teams || templates.koshien.teams)],
+    pickCount: template.pickCount || templates.koshien.pickCount,
+    stagePoints: { ...templates.koshien.stagePoints, ...(template.stagePoints || {}) },
+    oddsBook: {},
+  };
   if (base === "fightCard") return { markets: structuredClone(template.markets || templates.fightCard.markets), oddsBook: {} };
   if (base === "worldCup") {
     const countries = [...(template.countries || templates.worldCup.countries)];
@@ -821,6 +984,7 @@ function createPrediction(templateId) {
   const base = baseTemplateId(templateId);
   if (base === "rankingOdds") return { picks: ["", "", "", ""], odds: [1, 1, 1, 1] };
   if (base === "draft") return { teams: ["", ""], bonusScore: "" };
+  if (base === "koshien") return { teams: Array(8).fill(""), captain: "", finalTotalScore: "" };
   if (base === "fightCard") return { picks: {}, odds: {} };
   if (base === "worldCup") return {
     glPicks: {},
@@ -839,6 +1003,7 @@ function createResults(templateId) {
   const base = baseTemplateId(templateId);
   if (base === "rankingOdds") return { finalTop4: ["", "", "", ""] };
   if (base === "draft") return { finishes: {}, scoreBonusWinner: "" };
+  if (base === "koshien") return { finishes: {}, finalTotalScore: "" };
   if (base === "fightCard") return { winners: {}, bonusWinner: "" };
   if (base === "worldCup") return {
     gl: {},
@@ -852,6 +1017,30 @@ function createResults(templateId) {
     exactScore: false,
   };
   return {};
+}
+
+function normalizeKoshienEvent(event) {
+  if (baseTemplateId(event.templateId) !== "koshien") return;
+  const template = templates[event.templateId] || templates.koshien;
+  event.config ||= createConfig(event.templateId);
+  event.config.teams = Array.isArray(event.config.teams) ? event.config.teams : [...templates.koshien.teams];
+  event.config.pickCount = Number(event.config.pickCount) || template.pickCount || templates.koshien.pickCount;
+  event.config.stagePoints = { ...templates.koshien.stagePoints, ...(event.config.stagePoints || {}) };
+  event.config.oddsBook ||= {};
+  event.results ||= createResults(event.templateId);
+  event.results.finishes ||= {};
+  event.results.finalTotalScore = event.results.finalTotalScore ?? "";
+  Object.keys(event.predictions || {}).forEach((name) => normalizeKoshienPrediction(event, name));
+}
+
+function normalizeKoshienPrediction(event, name) {
+  event.predictions ||= {};
+  event.predictions[name] ||= createPrediction(event.templateId);
+  const prediction = event.predictions[name];
+  const pickCount = Number(event.config?.pickCount) || templates.koshien.pickCount;
+  prediction.teams = normalizeFixedArray(prediction.teams, pickCount);
+  prediction.captain = prediction.captain || "";
+  prediction.finalTotalScore = prediction.finalTotalScore ?? "";
 }
 
 function createWorldCupGroups(groupIds = templates.worldCup.groups, countries = []) {
@@ -1011,7 +1200,7 @@ function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount
   if (!els.homeReadinessPanel) return;
   const activeEvent = openEvents[0] || state.event;
   const connection = normalizeConnectionSettings(state.connection);
-  const hasSheetsTarget = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId;
+  const hasSheetsTarget = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
   const storageLabel = connection.mode === "sheets" ? "Google Sheets" : "この端末";
   const syncLabel = hasSheetsTarget ? "接続情報保存済み" : connection.mode === "sheets" ? "接続情報待ち" : "Sheets準備中";
   els.homeReadinessPanel.innerHTML = `
@@ -1271,6 +1460,14 @@ function missingPredictionCountForEvent(event, name) {
   if (base === "draft") {
     return prediction.teams.filter((team) => !team).length;
   }
+  if (base === "koshien") {
+    normalizeKoshienPrediction(event, name);
+    if ((event.status || "open") !== "open") return 0;
+    const pickCount = Number(event.config?.pickCount) || templates.koshien.pickCount;
+    const picks = normalizeFixedArray(prediction.teams, pickCount);
+    const pickMissing = picks.filter((team) => !team).length;
+    return pickMissing + (prediction.captain ? 0 : 1) + (prediction.finalTotalScore !== "" ? 0 : 1);
+  }
   if (base === "fightCard") {
     return (event.config?.markets || templates.fightCard.markets).filter((market) => !prediction.picks[market.id]).length;
   }
@@ -1301,6 +1498,7 @@ function missingPredictionCountForEvent(event, name) {
 function ensurePredictionForEvent(event, name) {
   event.predictions ||= {};
   if (!event.predictions[name]) event.predictions[name] = createPrediction(event.templateId);
+  if (baseTemplateId(event.templateId) === "koshien") normalizeKoshienPrediction(event, name);
   if (baseTemplateId(event.templateId) === "worldCup") normalizeWorldCupPrediction(event, name);
 }
 
@@ -1523,6 +1721,7 @@ function renderEvent() {
   const base = baseTemplateId(template.id);
   if (base === "rankingOdds") renderRankingOddsForm();
   if (base === "draft") renderDraftForm();
+  if (base === "koshien") renderKoshienForm();
   if (base === "fightCard") renderFightForm();
   if (base === "worldCup") renderWorldCupTournamentForm();
 }
@@ -1608,6 +1807,123 @@ function participantDraftBlock(name, teams) {
       </div>
     </div>
   `;
+}
+
+function renderKoshienForm() {
+  normalizeKoshienEvent(state.event);
+  const teams = getTeams();
+  const participant = currentParticipantName();
+  const showPublic = state.event.status !== "open" || isResultFinalized(state.event);
+  els.eventForm.innerHTML = `
+    ${resultFlowPanel()}
+    <div class="worldcup-phase-panel koshien-preset-panel">
+      <span class="match-kicker">KOSHIEN 2026 / 8 TEAM PICK</span>
+      <h3>夏の甲子園 8校ピック</h3>
+      <p>49代表から8校を選び、キャプテン校は2倍で加点します。準々決勝以降の再抽選に左右されない、甲子園向けのYOSOプリセットです。</p>
+      <div class="koshien-score-strip">
+        ${koshienStageOptions.map((stage) => `<span>${stage.label} +${stage.points}</span>`).join("")}
+      </div>
+    </div>
+    <div class="form-grid">
+      <label class="field"><span>イベント名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
+      <label class="field"><span>決勝合計得点 結果</span><input data-koshien-final-total-result type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalTotalScore)}"></label>
+    </div>
+    ${editableTeamsBlock("49代表校", teams)}
+    ${koshienResultBlock(teams)}
+    ${participantKoshienBlock(participant, teams)}
+    ${showPublic ? koshienPublicPredictions(teams) : ""}
+  `;
+  bindGenericInputs();
+}
+
+const koshienStageOptions = [
+  { value: "best32", label: "32強", points: 1 },
+  { value: "best16", label: "16強", points: 2 },
+  { value: "best8", label: "8強", points: 4 },
+  { value: "semifinal", label: "4強", points: 8 },
+  { value: "runnerUp", label: "決勝", points: 16 },
+  { value: "champion", label: "優勝", points: 32 },
+];
+
+function koshienResultBlock(teams) {
+  return `
+    <div class="entry-block koshien-results">
+      <div class="block-head">
+        <div>
+          <h3>勝ち上がり結果</h3>
+          <p class="helper-text">管理者が各校の到達段階を入力します。優勝校は「優勝」、準優勝校は「決勝」を選びます。</p>
+        </div>
+      </div>
+      <div class="koshien-result-list">
+        ${teams.map((team) => `
+          <div class="draft-row koshien-result-row">
+            <span class="pill">${escapeHtml(team)}</span>
+            <select data-koshien-finish="${escapeAttr(team)}">${optionList(["", ...koshienStageOptions.map((stage) => stage.value)], state.event.results.finishes[team])}</select>
+            <span class="sub-label">${labelForOption(state.event.results.finishes[team])}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function participantKoshienBlock(name, teams) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  const picks = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8);
+  const pickedTeams = [...new Set(picks.filter(Boolean))];
+  return `
+    <div class="entry-block koshien-participant">
+      <div class="wc-participant-head">
+        <h3>${escapeHtml(name)} のYOSO</h3>
+        <span>${pickedTeams.length} / ${picks.length}</span>
+      </div>
+      <p class="wc-phase-intro">8校を選び、その中からキャプテンを1校選びます。友達同士で同じ学校を選んでもOKです。</p>
+      <div class="prediction-grid koshien-pick-grid">
+        ${picks.map((pick, index) => `
+          <label class="field">
+            <span>指名${index + 1}</span>
+            <select data-koshien-pick="${escapeAttr(name)}:${index}">${optionList(teams, pick)}</select>
+          </label>
+        `).join("")}
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>キャプテン校</span><select data-koshien-captain="${escapeAttr(name)}">${optionList(pickedTeams, prediction.captain)}</select></label>
+        <label class="field"><span>決勝合計得点予想</span><input data-koshien-final-total="${escapeAttr(name)}" type="number" min="0" step="1" value="${escapeAttr(prediction.finalTotalScore)}"></label>
+      </div>
+    </div>
+  `;
+}
+
+function koshienPublicPredictions() {
+  return `
+    <div class="entry-block koshien-results">
+      <h3>締切後公開: 全員のYOSO</h3>
+      <div class="history-list">
+        ${state.participants.map((name) => `
+          <div class="history-row wc-public-row">
+            <strong>${escapeHtml(name)}</strong>
+            <small>${escapeHtml(koshienPredictionSummary(name))}</small>
+            <span>${escapeHtml(koshienPredictionDetails(name))}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function koshienPredictionSummary(name) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  const picked = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean);
+  return `指名 ${picked.length}/${state.event.config.pickCount || 8}、キャプテン ${prediction.captain || "未選択"}、決勝合計 ${prediction.finalTotalScore || "未入力"}`;
+}
+
+function koshienPredictionDetails(name) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  const picked = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean);
+  return picked.join(" / ") || "未入力";
 }
 
 function renderFightForm() {
@@ -2354,6 +2670,43 @@ function bindGenericInputs() {
       renderScoresOnly();
     });
   });
+  els.eventForm.querySelectorAll("[data-koshien-finish]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.event.results.finishes[input.dataset.koshienFinish] = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-final-total-result]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.event.results.finalTotalScore = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [name, index] = input.dataset.koshienPick.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].teams[Number(index)] = input.value;
+      if (state.event.predictions[name].captain && !state.event.predictions[name].teams.includes(state.event.predictions[name].captain)) {
+        state.event.predictions[name].captain = "";
+      }
+      render();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-captain]").forEach((input) => {
+    input.addEventListener("change", () => {
+      ensurePrediction(input.dataset.koshienCaptain);
+      state.event.predictions[input.dataset.koshienCaptain].captain = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-final-total]").forEach((input) => {
+    input.addEventListener("input", () => {
+      ensurePrediction(input.dataset.koshienFinalTotal);
+      state.event.predictions[input.dataset.koshienFinalTotal].finalTotalScore = input.value;
+      renderScoresOnly();
+    });
+  });
   els.eventForm.querySelectorAll("[data-market-result]").forEach((input) => {
     input.addEventListener("change", () => {
       state.event.results.winners[input.dataset.marketResult] = input.value;
@@ -2485,6 +2838,8 @@ function applyResultInputPermissions() {
     "[data-result-index]",
     "[data-result-key]",
     "[data-finish]",
+    "[data-koshien-finish]",
+    "[data-koshien-final-total-result]",
     "[data-market-result]",
     "[data-wc-top-result]",
     "[data-wc-gl-result]",
@@ -2497,7 +2852,16 @@ function applyResultInputPermissions() {
   els.eventForm.querySelectorAll(selectors.join(",")).forEach((input) => {
     input.disabled = !canEditResults;
   });
+  applyKoshienPermissions();
   applyWorldCupPhasePermissions();
+}
+
+function applyKoshienPermissions() {
+  if (baseTemplateId(state.event.templateId) !== "koshien") return;
+  const canPredict = (state.event.status || "open") === "open";
+  els.eventForm.querySelectorAll(".koshien-participant input, .koshien-participant select").forEach((input) => {
+    input.disabled = !canPredict;
+  });
 }
 
 function applyWorldCupPhasePermissions() {
@@ -2881,6 +3245,10 @@ function generatePopularityOdds() {
     state.participants.forEach((name) => (state.event.predictions[name]?.teams || []).forEach(add));
     state.event.config.oddsBook = buildPopularityOdds(getTeams(), counts);
   }
+  if (templateId === "koshien") {
+    state.participants.forEach((name) => (state.event.predictions[name]?.teams || []).forEach(add));
+    state.event.config.oddsBook = buildPopularityOdds(getTeams(), counts);
+  }
   if (templateId === "fightCard") {
     const markets = getMarkets();
     state.participants.forEach((name) => {
@@ -2984,6 +3352,8 @@ function scoreboardInsight(rows) {
 }
 
 function calculateScores() {
+  const templateId = baseTemplateId(state.event.templateId);
+  const koshienRows = templateId === "koshien" && isResultFinalized(state.event) ? koshienScoreRows() : [];
   return state.participants.map((name) => {
     ensurePrediction(name);
     if (baseTemplateId(state.event.templateId) !== "worldCup" && !isResultFinalized(state.event)) {
@@ -3010,6 +3380,14 @@ function calculateScores() {
       score = prediction.teams.reduce((total, team) => total + (template.finishPoints[state.event.results.finishes[team]] || 0), 0);
       if (state.event.results.scoreBonusWinner === name) score += 30;
       detail = "ドラフト到達点 + スコアボーナス";
+    }
+    if (templateId === "koshien") {
+      const prediction = state.event.predictions[name];
+      normalizeKoshienPrediction(state.event, name);
+      const row = koshienRows.find((item) => item.name === name);
+      score = row?.score || 0;
+      detail = row?.detail || "8校ピック + キャプテン2倍";
+      return { name, score, detail, tiebreakDelta: row?.tiebreakDelta };
     }
     if (templateId === "fightCard") {
       const prediction = state.event.predictions[name];
@@ -3049,7 +3427,40 @@ function calculateScores() {
       detail = "GL + 単勝 + 複勝 + 個人賞 + 決勝";
     }
     return { name, score, detail };
-  }).sort((a, b) => b.score - a.score);
+  }).sort((a, b) => (b.score - a.score) || ((a.tiebreakDelta ?? Infinity) - (b.tiebreakDelta ?? Infinity)));
+}
+
+function koshienScoreRows() {
+  const actualFinalTotal = Number(state.event.results.finalTotalScore);
+  const hasFinalTotal = state.event.results.finalTotalScore !== "" && Number.isFinite(actualFinalTotal);
+  return state.participants.map((name) => {
+    ensurePrediction(name);
+    const prediction = state.event.predictions[name];
+    const uniquePicks = [...new Set(normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean))];
+    let score = 0;
+    uniquePicks.forEach((team) => {
+      const teamScore = koshienTeamScore(state.event.results.finishes[team]);
+      score += prediction.captain === team ? teamScore * 2 : teamScore;
+    });
+    const predictedFinalTotal = Number(prediction.finalTotalScore);
+    const tiebreakDelta = hasFinalTotal && Number.isFinite(predictedFinalTotal)
+      ? Math.abs(actualFinalTotal - predictedFinalTotal)
+      : Infinity;
+    const tiebreakText = hasFinalTotal && Number.isFinite(predictedFinalTotal) ? ` / 同点差 ${tiebreakDelta}` : "";
+    return {
+      name,
+      score,
+      tiebreakDelta,
+      detail: `8校ピック + キャプテン2倍${tiebreakText}`,
+    };
+  });
+}
+
+function koshienTeamScore(finish) {
+  const order = ["best32", "best16", "best8", "semifinal", "runnerUp", "champion"];
+  const index = order.indexOf(finish);
+  if (index === -1) return 0;
+  return order.slice(0, index + 1).reduce((total, stage) => total + (state.event.config.stagePoints?.[stage] || templates.koshien.stagePoints[stage] || 0), 0);
 }
 
 function worldCupGroupStageScore(prediction, results, groups) {
@@ -3171,6 +3582,7 @@ function finishLabel(value) {
 
 function ensurePrediction(name) {
   if (!state.event.predictions[name]) state.event.predictions[name] = createPrediction(state.event.templateId);
+  if (baseTemplateId(state.event.templateId) === "koshien") normalizeKoshienPrediction(state.event, name);
   if (baseTemplateId(state.event.templateId) === "worldCup") normalizeWorldCupPrediction(state.event, name);
 }
 
@@ -3187,6 +3599,7 @@ function labelForOption(option) {
     quarterfinal: "ベスト8",
     third: "3位",
     fourth: "4位",
+    best32: "32強",
     best8: "ベスト8",
     best16: "ベスト16",
     true: "はい",
@@ -3399,6 +3812,8 @@ els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
 els.accountPasswordButton?.addEventListener("click", handlePasswordChange);
 els.dataConnectionSaveButton?.addEventListener("click", handleConnectionSave);
+els.dataConnectionSyncToButton?.addEventListener("click", syncStateToSheets);
+els.dataConnectionSyncFromButton?.addEventListener("click", syncStateFromSheets);
 els.dataConnectionCopyStateButton?.addEventListener("click", copyCurrentStateForSheets);
 
 ["click", "input", "keydown", "touchstart"].forEach((eventName) => {
