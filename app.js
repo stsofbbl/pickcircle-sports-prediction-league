@@ -206,6 +206,7 @@ const els = {
   homeReadinessPanel: document.querySelector("#homeReadinessPanel"),
   homeTournamentCards: document.querySelector("#homeTournamentCards"),
   activeTournamentCards: document.querySelector("#activeTournamentCards"),
+  activeEventManager: document.querySelector("#activeEventManager"),
   archiveList: document.querySelector("#archiveList"),
   tournamentManageList: document.querySelector("#tournamentManageList"),
   approvalRuleText: document.querySelector("#approvalRuleText"),
@@ -1155,6 +1156,7 @@ function render() {
   renderScores();
   renderDashboard();
   renderActiveTournaments();
+  renderActiveEventManager();
   renderArchive();
   renderTournamentManageList();
   renderRankingEventOptions();
@@ -1249,6 +1251,176 @@ function renderActiveTournaments() {
     : emptyTournamentMarkup("開催中の大会はありません");
 }
 
+function renderActiveEventManager() {
+  if (!els.activeEventManager) return;
+  const event = state.event;
+  if (!event) {
+    els.activeEventManager.innerHTML = emptyTournamentMarkup("管理する大会がありません");
+    return;
+  }
+  ensureResultFlow();
+  const template = templates[event.templateId] || {};
+  const base = baseTemplateId(event.templateId);
+  const isAdmin = isCurrentUserAdmin();
+  const finalized = isResultFinalized(event);
+  const canEditSettings = isAdmin && !finalized;
+  const canEditResults = isAdmin && !finalized;
+  const statusActions = ["open", "resultWait", "archive"].map((status) => `
+    <button type="button" class="${event.status === status ? "is-active" : ""}" data-event-status="${escapeAttr(status)}" data-event-id="${escapeAttr(event.id)}" ${isAdmin ? "" : "disabled"}>${escapeHtml(statusLabel(status))}</button>
+  `).join("");
+
+  els.activeEventManager.innerHTML = `
+    <div class="active-manager-shell">
+      <div class="active-manager-summary">
+        <div>
+          <span class="match-kicker">${escapeHtml(sportMeta(event.templateId).label)} / ${escapeHtml(template.name || "ルール")}</span>
+          <h3>${escapeHtml(event.name)}</h3>
+          <p>${base === "koshien" ? "出場校、勝ち上がり、決勝合計得点はここで管理します。YOSOタブには予想入力だけを表示します。" : "大会の状態を管理します。詳細入力は各プリセットの管理UIに合わせて順次整えます。"}</p>
+        </div>
+        <span class="status-label ${finalized ? "open" : "pending"}">${escapeHtml(isResultFinalized(event) ? "結果確定" : statusLabel(event.status))}</span>
+      </div>
+      <div class="form-grid active-manager-fields">
+        <label class="field"><span>大会名</span><input data-manage-event-name value="${escapeAttr(event.name)}" ${canEditSettings ? "" : "disabled"}></label>
+        <label class="field"><span>締切</span><input data-manage-event-deadline type="datetime-local" value="${escapeAttr(event.deadline || "")}" ${canEditSettings ? "" : "disabled"}></label>
+      </div>
+      <div class="approval-segment active-manager-status" aria-label="大会状態">
+        ${statusActions}
+      </div>
+      ${base === "koshien" ? renderKoshienManagerPanel({ canEditSettings, canEditResults }) : renderGenericManagerPanel(base)}
+    </div>
+  `;
+  bindActiveEventManagerInputs();
+}
+
+function renderGenericManagerPanel(base) {
+  return `
+    <div class="entry-block">
+      <h3>管理メモ</h3>
+      <p class="helper-text">${escapeHtml(base === "worldCup" ? "W杯プリセットは専用フェーズUIで管理中です。" : "このプリセットの詳細管理UIは、必要になったタイミングで大会編集へ移します。")}</p>
+    </div>
+  `;
+}
+
+function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
+  normalizeKoshienEvent(state.event);
+  const teams = getTeams();
+  const disabledResults = canEditResults ? "" : "disabled";
+  return `
+    <div class="active-manager-note ${canEditResults ? "" : "is-disabled"}">
+      <strong>${canEditResults ? "管理者入力できます" : "結果入力はロック中"}</strong>
+      <span>${canEditResults ? "勝ち上がりと決勝合計得点を入力できます。入力後に結果を提出してください。" : "管理者権限、または確定状態を確認してください。"}</span>
+    </div>
+    ${resultFlowPanel()}
+    <div class="entry-block koshien-results">
+      <div class="block-head">
+        <div>
+          <h3>勝ち上がり結果</h3>
+          <p class="helper-text">各校の最終到達段階を入力します。優勝校は「優勝」、準優勝校は「決勝」です。</p>
+        </div>
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>決勝合計得点 結果</span><input data-koshien-final-total-result type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalTotalScore)}" ${disabledResults}></label>
+      </div>
+      <div class="koshien-result-list">
+        ${teams.map((team) => `
+          <div class="draft-row koshien-result-row">
+            <span class="pill">${escapeHtml(team)}</span>
+            <select data-koshien-finish="${escapeAttr(team)}" ${disabledResults}>${optionList(["", ...koshienStageOptions.map((stage) => stage.value)], state.event.results.finishes[team])}</select>
+            <span class="sub-label">${labelForOption(state.event.results.finishes[team])}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <details class="manager-details">
+      <summary>49代表校を編集</summary>
+      ${editableTeamsBlock("49代表校", teams)}
+    </details>
+  `;
+}
+
+function bindActiveEventManagerInputs() {
+  const root = els.activeEventManager;
+  if (!root) return;
+  const finalized = isResultFinalized(state.event);
+  const canEditSettings = isCurrentUserAdmin() && !finalized;
+  const canEditResults = isCurrentUserAdmin() && !finalized;
+
+  root.querySelectorAll("[data-manage-event-name]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.event.name = input.value.trim() || state.event.name;
+      render();
+    });
+  });
+  root.querySelectorAll("[data-manage-event-deadline]").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.event.deadline = input.value;
+      render();
+    });
+  });
+  root.querySelectorAll("[data-list-row]").forEach((input) => {
+    input.disabled = !canEditSettings;
+    input.addEventListener("change", () => {
+      if (!canEditSettings) return;
+      const [key, indexRaw] = input.dataset.listRow.split(":");
+      ensureEditableList(key);
+      state.event.config[key][Number(indexRaw)] = input.value.trim();
+      state.event.config[key] = state.event.config[key].filter(Boolean);
+      syncEditableListDependents(key);
+      render();
+    });
+  });
+  root.querySelectorAll("[data-list-add]").forEach((button) => {
+    button.disabled = !canEditSettings;
+    button.addEventListener("click", () => {
+      if (!canEditSettings) return;
+      const list = ensureEditableList(button.dataset.listAdd);
+      list.push("");
+      syncEditableListDependents(button.dataset.listAdd);
+      render();
+    });
+  });
+  root.querySelectorAll("[data-list-remove]").forEach((button) => {
+    button.disabled = !canEditSettings;
+    button.addEventListener("click", () => {
+      if (!canEditSettings) return;
+      const [key, indexRaw] = button.dataset.listRemove.split(":");
+      const list = ensureEditableList(key);
+      list.splice(Number(indexRaw), 1);
+      syncEditableListDependents(key);
+      render();
+    });
+  });
+  root.querySelectorAll("[data-koshien-finish]").forEach((input) => {
+    input.disabled = !canEditResults;
+    input.addEventListener("change", () => {
+      if (!canEditResults) return;
+      state.event.results.finishes[input.dataset.koshienFinish] = input.value;
+      renderScoresOnly();
+    });
+  });
+  root.querySelectorAll("[data-koshien-final-total-result]").forEach((input) => {
+    input.disabled = !canEditResults;
+    input.addEventListener("input", () => {
+      if (!canEditResults) return;
+      state.event.results.finalTotalScore = input.value;
+      persist();
+    });
+    input.addEventListener("change", () => {
+      if (!canEditResults) return;
+      renderScoresOnly();
+    });
+  });
+  root.querySelectorAll("[data-result-submit]").forEach((button) => {
+    button.addEventListener("click", submitResults);
+  });
+  root.querySelectorAll("[data-result-approve]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const select = button.closest(".result-flow-actions")?.querySelector("[data-result-approver]");
+      approveResults(select?.value || currentParticipantName());
+    });
+  });
+}
+
 function tournamentCardMarkup(event, { status, statusClass, actionLabel, missingCount, showDeadline, showManageActions = false }) {
   const sport = sportMeta(event.templateId);
   const template = templates[event.templateId];
@@ -1274,7 +1446,7 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
         <a class="primary-link" href="#prediction" data-event-action="predict" data-event-id="${escapeAttr(event.id)}">${escapeHtml(actionLabel)}</a>
         ${showManageActions
           ? `
-            <a class="ghost-link admin-action ${adminOnly ? "is-disabled" : ""}" href="#prediction" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+            <a class="ghost-link admin-action ${adminOnly ? "is-disabled" : ""}" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
             <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
           `
           : `<a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>`}
@@ -1320,8 +1492,8 @@ function resultWaitCardMarkup(event) {
         <span class="status-label ${finalized ? "open" : "pending"}">${finalized ? "結果確定" : "結果待ち"}</span>
       </div>
       <div class="tournament-actions is-manage">
-        <a class="primary-link admin-action ${adminOnly || finalized ? "is-disabled" : ""}" href="#prediction" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
-        <a class="ghost-link ${finalized ? "is-disabled" : ""}" href="#prediction" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
+        <a class="primary-link admin-action ${adminOnly || finalized ? "is-disabled" : ""}" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+        <a class="ghost-link ${finalized ? "is-disabled" : ""}" href="#active" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
         <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
       </div>
     </article>
@@ -1661,7 +1833,7 @@ function resultFlowPanel() {
   const approvedText = approvedNames.length ? approvedNames.join("、") : "まだ承認なし";
   const isResultWait = state.event.status === "resultWait";
   const finalized = isResultFinalized(state.event);
-  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized;
+  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized && flow.status !== "submitted";
   const canApprove = isResultWait && flow.status === "submitted" && !finalized;
   const approverOptions = state.participants
     .filter((name) => !flow.approvals?.[name])
@@ -1815,7 +1987,6 @@ function renderKoshienForm() {
   const participant = currentParticipantName();
   const showPublic = state.event.status !== "open" || isResultFinalized(state.event);
   els.eventForm.innerHTML = `
-    ${resultFlowPanel()}
     <div class="worldcup-phase-panel koshien-preset-panel">
       <span class="match-kicker">KOSHIEN 2026 / 8 TEAM PICK</span>
       <h3>夏の甲子園 8校ピック</h3>
@@ -1824,12 +1995,10 @@ function renderKoshienForm() {
         ${koshienStageOptions.map((stage) => `<span>${stage.label} +${stage.points}</span>`).join("")}
       </div>
     </div>
-    <div class="form-grid">
-      <label class="field"><span>イベント名</span><input data-path="event.name" value="${escapeAttr(state.event.name)}"></label>
-      <label class="field"><span>決勝合計得点 結果</span><input data-koshien-final-total-result type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalTotalScore)}"></label>
+    <div class="active-manager-note">
+      <strong>この画面は予想入力専用です</strong>
+      <span>出場校編集と勝ち上がり結果は「大会編集」タブで管理します。</span>
     </div>
-    ${editableTeamsBlock("49代表校", teams)}
-    ${koshienResultBlock(teams)}
     ${participantKoshienBlock(participant, teams)}
     ${showPublic ? koshienPublicPredictions(teams) : ""}
   `;
@@ -2896,6 +3065,7 @@ function renderScoresOnly() {
   renderScores();
   renderDashboard();
   renderActiveTournaments();
+  renderActiveEventManager();
   renderShellMeta();
   persist();
 }

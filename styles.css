@@ -2481,6 +2481,95 @@ body[data-theme="day"] .approval-segment {
   margin-top: 12px;
 }
 
+.active-event-manager-section {
+  margin-top: 14px;
+}
+
+.active-manager-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.active-manager-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  padding: 14px;
+}
+
+.active-manager-summary h3 {
+  margin: 4px 0 5px;
+  font-size: 18px;
+}
+
+.active-manager-summary p {
+  margin: 0;
+  color: var(--app-muted);
+  line-height: 1.6;
+}
+
+.active-manager-status {
+  justify-content: flex-start;
+}
+
+.active-manager-status button {
+  max-width: 150px;
+}
+
+.active-manager-status button:disabled,
+.tournament-manage-actions button:disabled,
+.edit-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.active-manager-note {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(245, 154, 194, 0.24);
+  border-radius: 14px;
+  background: rgba(245, 154, 194, 0.08);
+  color: var(--app-text);
+  padding: 12px;
+}
+
+.active-manager-note span {
+  color: var(--app-muted);
+  line-height: 1.6;
+}
+
+.active-manager-note.is-disabled {
+  border-color: var(--app-line);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.manager-details {
+  border-top: 1px solid rgba(238, 232, 224, 0.11);
+  padding-top: 14px;
+}
+
+.manager-details summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--app-text);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 14px;
+}
+
+.manager-details[open] summary {
+  margin-bottom: 12px;
+}
+
 .tournament-manage-list {
   display: grid;
   gap: 8px;
@@ -2787,6 +2876,14 @@ body[data-theme="day"] .bottom-nav {
 
   .tournament-manage-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .active-manager-summary {
+    display: grid;
+  }
+
+  .active-manager-status button {
+    max-width: none;
   }
 
   .bottom-nav {
