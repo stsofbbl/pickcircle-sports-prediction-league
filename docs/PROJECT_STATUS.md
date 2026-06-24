@@ -12,6 +12,8 @@
 - 第3回の5%ベット/プール/ピタリ賞計算
 - ローカル簡易ログイン/ユーザー登録
 - 設定画面のデータ接続準備
+- Google Sheets同期MVP
+- 夏の甲子園8校ピックプリセット
 - GitHub Pages公開
 
 ## 今月末までの実用化方針
@@ -26,7 +28,7 @@ GitHub Pages
 + Google Sheets
 ```
 
-まずはローカル保存のUI/運用フローを磨き、次にGoogle Sheets同期を追加します。現在は設定画面にApps Script URLとSpreadsheet IDを保存する足場まで入っています。
+まずはローカル保存のUI/運用フローを磨き、次にGoogle Sheets同期を追加します。現在は設定画面にApps Script URL、Spreadsheet ID、League IDを保存し、Sheetsへ保存/Sheetsから読込できるMVP導線まで入っています。
 
 本格的な多人数/長期運用が必要になった場合は、Supabase Auth + Supabase Postgresへの移行を検討します。
 
@@ -68,6 +70,8 @@ GitHub Pages
 
 - ローカル認証なので、友達同士で同じデータを共有するには不十分
 - Google Sheetsの実同期は未実装
+- Google Sheets同期はMVPで、実Googleアカウント上のApps Scriptデプロイ確認が必要
+- 夏の甲子園プリセットは8校ピックの土台実装済み。実代表校への差し替えと友達内テストが必要
 - W杯出場国リストは仮置き
 - 第2回の複勝/個人賞UXは改善中で、実利用しながらさらに磨ける
 - ランキングの期間フィルターは見た目先行の部分がある
@@ -77,6 +81,8 @@ GitHub Pages
 
 1. Apps Script APIを作り、Google Sheets同期を実装
 2. W杯出場国リストの更新
+1. 実Google Sheetsで同期MVPを確認
+2. 夏の甲子園プリセットを実代表校でテスト
 3. ランキング画面の期間/大会別フィルターを実装
 4. スマホ表示で第2回入力の見やすさをさらに改善
 5. Playwrightの簡易スモークテストを追加

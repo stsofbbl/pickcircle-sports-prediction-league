@@ -25,14 +25,39 @@ GitHub Pages
 - Apps Script URLとSpreadsheet IDを保存可能
 - ホーム画面の保存先表示が接続設定に連動
 - 現在のローカルデータをJSONとしてコピー可能
+- `Sheetsへ保存` と `Sheetsから読込` のMVP導線を追加済み
+- Apps Scriptテンプレートを `scripts/google-sheets-web-app.gs` に追加済み
 
-まだ実際の同期通信は行いません。次の実装でApps Script APIに接続します。
+保存は `no-cors POST`、読み込みはJSONPで行います。GitHub Pagesの静的アプリからApps Scriptへ直接アクセスするためのMVP方式です。
+
+## Google側で必要な手動作業
+
+この部分だけは、ユーザーのGoogleアカウントで行う必要があります。
+
+1. Google Sheetsを新規作成
+2. スプレッドシートIDを控える
+3. Apps Scriptを開く
+4. `scripts/google-sheets-web-app.gs` の内容を貼り付ける
+5. Webアプリとしてデプロイ
+6. 実行ユーザー: 自分
+7. アクセスできるユーザー: リンクを知っている全員、または全員
+8. 発行されたWebアプリURLをYOSOの設定画面に貼る
+9. Spreadsheet IDとLeague IDを入力
+10. `Sheetsへ保存`、別端末で `Sheetsから読込` を確認
+
+## 現在のMVP制約
+
+- Googleログイン認証とは連動しません
+- Apps Script URLを知っている人はAPIを呼べるため、仲間内テスト向けです
+- 保存は状態全体を1レコードとして上書きします
+- 複数人が同時編集した場合は、最後に保存した内容が勝ちます
+- 本格運用やApp Store展開ではSupabaseなどへの移行を検討します
 
 ## 最初のAPI案
 
 まずはシンプルに、アプリ状態を丸ごと読み書きする方式で始めます。
 
-### `GET ?action=getState&leagueId=...`
+### `GET ?action=getState&spreadsheetId=...&leagueId=...&callback=...`
 
 返すもの:
 
@@ -97,9 +122,8 @@ GitHub Pages
 
 ## 次の実装タスク
 
-1. Apps Scriptの `doGet` / `doPost` を作る
-2. `state` と `audit_log` タブを作る
-3. フロント側に `syncFromSheets` / `syncToSheets` を追加
-4. 設定画面に「同期する」「Sheetsから読み込む」を追加
-5. 同期中、成功、失敗、競合の表示を追加
-6. GitHub Pagesへデプロイしてスマホで確認
+1. 実Google Sheetsで同期MVPを確認
+2. 保存前バックアップを強化
+3. 競合表示を追加
+4. 甲子園プリセットで端末A/Bの共有テスト
+5. GitHub Pagesへデプロイしてスマホで確認
