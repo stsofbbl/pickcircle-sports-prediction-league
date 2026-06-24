@@ -1,26 +1,26 @@
 :root {
   color-scheme: dark;
-  --bg: #0a0908;
-  --surface: #181312;
-  --surface-2: #201918;
-  --surface-3: #1a1412;
-  --ink: #e7ddcc;
-  --muted: #8f8579;
-  --line: rgba(238, 232, 224, 0.13);
-  --line-strong: rgba(245, 154, 194, 0.34);
+  --bg: #242428;
+  --surface: #2c2b30;
+  --surface-2: #333238;
+  --surface-3: #28272c;
+  --ink: #f0ecef;
+  --muted: #bcb5bd;
+  --line: rgba(240, 236, 239, 0.15);
+  --line-strong: rgba(240, 168, 190, 0.34);
   --accent: #7a0c0c;
   --accent-strong: #4a1010;
-  --soap-pink: #f59ac2;
-  --soap-hot: #ff4f93;
-  --soap-deep: #7a173c;
-  --smoke: rgba(238, 232, 224, 0.16);
-  --smoke-soft: rgba(255, 154, 194, 0.1);
+  --soap-pink: #f0a8be;
+  --soap-hot: #d98ea7;
+  --soap-deep: #8a4860;
+  --smoke: rgba(240, 236, 239, 0.16);
+  --smoke-soft: rgba(240, 168, 190, 0.11);
   --gold: #9d8062;
   --brass: #6f5d4f;
   --gunmetal: #4a4f57;
   --green: #1e3a34;
   --danger: #7a0c0c;
-  --shadow: 0 34px 90px rgba(0, 0, 0, 0.68);
+  --shadow: 0 34px 90px rgba(10, 10, 14, 0.52);
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
@@ -39,10 +39,10 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(ellipse at 15% 0%, rgba(255, 79, 147, 0.16), transparent 34%),
-    radial-gradient(ellipse at 82% 8%, rgba(245, 154, 194, 0.09), transparent 30%),
-    radial-gradient(ellipse at 48% 42%, rgba(238, 232, 224, 0.08), transparent 44%),
-    linear-gradient(115deg, rgba(32, 18, 22, 0.78), rgba(10, 9, 8, 0.94) 45%, rgba(18, 12, 12, 0.96)),
+    radial-gradient(ellipse at 15% 0%, rgba(240, 168, 190, 0.14), transparent 34%),
+    radial-gradient(ellipse at 82% 8%, rgba(217, 142, 167, 0.09), transparent 30%),
+    radial-gradient(ellipse at 48% 42%, rgba(240, 236, 239, 0.08), transparent 44%),
+    linear-gradient(115deg, rgba(52, 49, 54, 0.86), rgba(36, 36, 40, 0.96) 45%, rgba(43, 41, 46, 0.97)),
     var(--bg);
   color: var(--ink);
 }
@@ -68,7 +68,7 @@ body::after {
   inset: -20%;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 30% 18%, rgba(245, 154, 194, 0.09), transparent 30%),
+    radial-gradient(ellipse at 30% 18%, rgba(240, 168, 190, 0.09), transparent 30%),
     radial-gradient(ellipse at 62% 24%, rgba(231, 221, 204, 0.06), transparent 26%),
     repeating-linear-gradient(103deg, transparent 0 34px, rgba(255, 255, 255, 0.018) 35px 37px);
   filter: blur(18px);
@@ -1571,23 +1571,24 @@ dialog::backdrop {
 
 /* YOSO soap app shell: bottom-tab pages, restrained pink accents. */
 :root {
-  --soap-pink: #ff4fa3;
-  --soap-hot: #ff2f94;
-  --soap-light: #ffd5eb;
-  --app-bg: #050507;
-  --app-surface: #111115;
-  --app-surface-2: #18181e;
-  --app-text: #f7f7fb;
-  --app-muted: #a5a7b1;
-  --app-line: rgba(255, 255, 255, 0.12);
-  --app-line-strong: rgba(255, 79, 163, 0.36);
+  --soap-pink: #f0a8be;
+  --soap-hot: #d98ea7;
+  --soap-light: #f8d7e2;
+  --soap-ink: #3b1f2a;
+  --app-bg: #242428;
+  --app-surface: #2c2b31;
+  --app-surface-2: #36353c;
+  --app-text: #f1edf0;
+  --app-muted: #c2bbc3;
+  --app-line: rgba(241, 237, 240, 0.15);
+  --app-line-strong: rgba(240, 168, 190, 0.38);
 }
 
 body {
   isolation: isolate;
   background:
-    radial-gradient(ellipse at 50% -10%, rgba(255, 79, 163, 0.16), transparent 35%),
-    linear-gradient(180deg, #09090c 0%, var(--app-bg) 48%, #020203 100%);
+    radial-gradient(ellipse at 50% -10%, rgba(240, 168, 190, 0.13), transparent 35%),
+    linear-gradient(180deg, #2f2e34 0%, var(--app-bg) 50%, #202025 100%);
   color: var(--app-text);
 }
 
@@ -1599,7 +1600,7 @@ body[data-theme="day"] {
   --app-muted: #676a75;
   --app-line: rgba(14, 15, 18, 0.12);
   background:
-    radial-gradient(ellipse at 50% -12%, rgba(255, 79, 163, 0.18), transparent 38%),
+    radial-gradient(ellipse at 50% -12%, rgba(240, 168, 190, 0.18), transparent 38%),
     linear-gradient(180deg, #ffffff 0%, #f7f8fb 56%, #eef0f6 100%);
 }
 
@@ -1629,7 +1630,7 @@ body::after {
   pointer-events: none;
   display: block;
   background:
-    linear-gradient(180deg, rgba(5, 5, 7, 0.12), rgba(5, 5, 7, 0.62) 46%, rgba(5, 5, 7, 0.9)),
+    linear-gradient(180deg, rgba(36, 36, 40, 0.2), rgba(36, 36, 40, 0.6) 46%, rgba(36, 36, 40, 0.88)),
     url("./assets/yoso-soap-header.png") center top / min(1280px, 150vw) auto no-repeat;
   opacity: 0.42;
   filter: saturate(1.08) contrast(1.03);
@@ -1651,10 +1652,10 @@ body[data-theme="day"]::after {
   padding: 12px;
   border-color: var(--app-line);
   background:
-    linear-gradient(90deg, rgba(17, 17, 21, 0.95), rgba(17, 17, 21, 0.78)),
+    linear-gradient(90deg, rgba(44, 43, 49, 0.95), rgba(44, 43, 49, 0.78)),
     url("./assets/yoso-soap-header.png") center 45% / cover no-repeat,
     var(--app-surface);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 18px 60px rgba(10, 10, 14, 0.32);
   overflow: hidden;
 }
 
@@ -1674,7 +1675,7 @@ body[data-theme="day"] .topbar {
   display: block;
   background:
     radial-gradient(ellipse at 24% 0%, rgba(255, 255, 255, 0.12), transparent 38%),
-    linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.22));
+    linear-gradient(180deg, transparent, rgba(36, 36, 40, 0.2));
   pointer-events: none;
 }
 
@@ -1687,9 +1688,9 @@ body[data-theme="day"] .topbar {
   height: 68px;
   border: 0;
   border-radius: 19px;
-  background: #050507;
+  background: #25242a;
   box-shadow:
-    0 16px 34px rgba(255, 47, 148, 0.28),
+    0 16px 34px rgba(217, 142, 167, 0.26),
     inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
@@ -1702,12 +1703,12 @@ body[data-theme="day"] .topbar {
   color: var(--app-text);
   font-size: clamp(40px, 11vw, 60px);
   text-shadow:
-    0 2px 0 rgba(255, 79, 163, 0.36),
-    0 10px 24px rgba(0, 0, 0, 0.45);
+    0 2px 0 rgba(191, 107, 132, 0.3),
+    0 10px 24px rgba(10, 10, 14, 0.36);
 }
 
 body[data-theme="day"] .brand-wordmark {
-  text-shadow: 0 2px 0 rgba(255, 79, 163, 0.25);
+  text-shadow: 0 2px 0 rgba(217, 142, 167, 0.25);
 }
 
 .theme-toggle {
@@ -1718,7 +1719,7 @@ body[data-theme="day"] .brand-wordmark {
   padding: 3px;
   border: 1px solid var(--app-line);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(44, 43, 49, 0.62);
   color: var(--app-muted);
 }
 
@@ -1737,7 +1738,7 @@ body[data-theme="day"] .theme-toggle {
 
 .theme-toggle-option.is-active {
   background: var(--soap-pink);
-  color: #fff;
+  color: var(--soap-ink);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
@@ -1795,7 +1796,7 @@ body[data-theme="day"] .theme-toggle {
 .home-page .template-card,
 .home-page .chip {
   background:
-    linear-gradient(180deg, rgba(17, 17, 21, 0.9), rgba(17, 17, 21, 0.97)),
+    linear-gradient(180deg, rgba(44, 43, 49, 0.9), rgba(44, 43, 49, 0.97)),
     url("./assets/yoso-soap-header.png") center top / 980px auto no-repeat,
     var(--app-surface);
 }
@@ -1831,7 +1832,7 @@ body[data-theme="day"] .insight-band {
 
 body[data-theme="day"] .match-card.sub-card {
   background:
-    linear-gradient(180deg, rgba(255, 79, 163, 0.035), transparent 45%),
+    linear-gradient(180deg, rgba(240, 168, 190, 0.055), transparent 45%),
     #ffffff;
 }
 
@@ -1847,7 +1848,7 @@ body[data-theme="day"] .match-card.sub-card {
   border: 1px solid var(--app-line);
   border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(17, 17, 21, 0.86), rgba(17, 17, 21, 0.97)),
+    linear-gradient(180deg, rgba(44, 43, 49, 0.86), rgba(44, 43, 49, 0.97)),
     url("./assets/yoso-soap-header.png") center top / 980px auto no-repeat,
     var(--app-surface);
   box-shadow: var(--shadow);
@@ -1863,7 +1864,7 @@ body[data-theme="day"] .match-card.sub-card {
   pointer-events: none;
   background:
     radial-gradient(ellipse at 20% 0%, rgba(255, 255, 255, 0.08), transparent 34%),
-    radial-gradient(ellipse at 70% 8%, rgba(255, 79, 163, 0.1), transparent 38%);
+    radial-gradient(ellipse at 70% 8%, rgba(240, 168, 190, 0.11), transparent 38%);
 }
 
 .dashboard-panel > *,
@@ -1884,7 +1885,7 @@ body[data-theme="day"] .match-card.sub-card {
   gap: 3px;
   border: 1px solid var(--app-line);
   border-radius: 18px;
-  background: rgba(0, 0, 0, 0.34);
+  background: rgba(36, 36, 40, 0.5);
   padding: 15px;
 }
 
@@ -1933,7 +1934,7 @@ body[data-theme="day"] .home-person {
   border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.052), transparent),
-    rgba(0, 0, 0, 0.24);
+    rgba(36, 36, 40, 0.42);
   padding: 12px;
 }
 
@@ -1974,7 +1975,7 @@ body[data-theme="day"] .readiness-card {
   border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent),
-    rgba(0, 0, 0, 0.28);
+    rgba(36, 36, 40, 0.48);
   padding: 14px;
 }
 
@@ -2041,7 +2042,7 @@ body[data-theme="day"] .tournament-card {
   width: 190px;
   height: 120px;
   border-radius: 999px;
-  background: rgba(255, 79, 163, 0.12);
+  background: rgba(240, 168, 190, 0.12);
   filter: blur(22px);
   pointer-events: none;
 }
@@ -2099,14 +2100,14 @@ body[data-theme="day"] .tournament-card {
 }
 
 .deadline-chip {
-  border-color: rgba(255, 79, 163, 0.52);
-  background: rgba(255, 79, 163, 0.18);
+  border-color: rgba(240, 168, 190, 0.52);
+  background: rgba(240, 168, 190, 0.2);
   color: var(--soap-light);
 }
 
 .missing-chip.has-missing {
-  color: #fff;
-  background: rgba(255, 79, 163, 0.18);
+  color: var(--app-text);
+  background: rgba(240, 168, 190, 0.18);
   border-color: var(--app-line-strong);
 }
 
@@ -2139,8 +2140,8 @@ body[data-theme="day"] .tournament-card {
 .primary-link {
   background:
     radial-gradient(ellipse at 30% 0%, rgba(255, 255, 255, 0.34), transparent 40%),
-    linear-gradient(180deg, #ff8ac4, var(--soap-pink) 52%, #e0187a);
-  color: #fff;
+    linear-gradient(180deg, #f6c4d1, var(--soap-pink) 56%, #c9829a);
+  color: var(--soap-ink);
 }
 
 .ghost-link {
@@ -2229,7 +2230,7 @@ body[data-theme="day"] .tournament-card {
 
 .ranking-tabs button.is-active {
   border-color: var(--app-line-strong);
-  background: rgba(255, 79, 163, 0.18);
+  background: rgba(240, 168, 190, 0.18);
   color: var(--app-text);
 }
 
@@ -2237,7 +2238,7 @@ body[data-theme="day"] .tournament-card {
   margin: -2px 0 14px;
   border: 1px solid var(--app-line);
   border-radius: 18px;
-  background: rgba(0, 0, 0, 0.24);
+  background: rgba(36, 36, 40, 0.46);
   padding: 12px;
 }
 
@@ -2272,7 +2273,7 @@ body[data-theme="day"] .ranking-filter-panel {
   align-content: start;
   border: 1px solid var(--app-line);
   border-radius: 18px;
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(36, 36, 40, 0.48);
   padding: 14px;
 }
 
@@ -2303,7 +2304,7 @@ body[data-theme="day"] .setting-card {
   border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 48%),
-    rgba(0, 0, 0, 0.22);
+    rgba(36, 36, 40, 0.44);
   padding: 14px;
 }
 
@@ -2358,7 +2359,7 @@ body[data-theme="day"] .preset-details {
   margin: 10px 0;
   border: 1px solid var(--app-line);
   border-radius: 14px;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(36, 36, 40, 0.4);
   padding: 10px;
 }
 
@@ -2448,7 +2449,7 @@ body[data-theme="day"] .setting-row {
   margin-bottom: 10px;
   border: 1px solid var(--app-line);
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.24);
+  background: rgba(36, 36, 40, 0.46);
   padding: 4px;
 }
 
@@ -2659,7 +2660,7 @@ input,
 select,
 textarea {
   border-color: var(--app-line);
-  background: rgba(0, 0, 0, 0.38);
+  background: rgba(36, 36, 40, 0.72);
   color: var(--app-text);
 }
 
@@ -2673,7 +2674,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--soap-pink);
-  box-shadow: 0 0 0 3px rgba(255, 79, 163, 0.12);
+  box-shadow: 0 0 0 3px rgba(240, 168, 190, 0.18);
 }
 
 .primary-button {
@@ -2681,10 +2682,10 @@ textarea:focus {
   border-radius: 999px;
   background:
     radial-gradient(ellipse at 30% 0%, rgba(255, 255, 255, 0.34), transparent 40%),
-    linear-gradient(180deg, #ff8ac4, var(--soap-pink) 52%, #e0187a);
-  color: #fff;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
-  box-shadow: 0 18px 36px rgba(255, 47, 148, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+    linear-gradient(180deg, #f6c4d1, var(--soap-pink) 56%, #c9829a);
+  color: var(--soap-ink);
+  text-shadow: none;
+  box-shadow: 0 18px 36px rgba(191, 107, 132, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .event-panel h2,
@@ -2713,7 +2714,7 @@ textarea:focus {
 .template-card.active {
   border-color: var(--app-line-strong);
   background:
-    linear-gradient(180deg, rgba(255, 79, 163, 0.13), transparent 50%),
+    linear-gradient(180deg, rgba(240, 168, 190, 0.15), transparent 50%),
     var(--app-surface);
 }
 
@@ -2764,7 +2765,7 @@ body[data-theme="day"] .sport-icon {
 .score-row-leader {
   border-color: var(--app-line-strong);
   background:
-    linear-gradient(90deg, rgba(255, 79, 163, 0.1), transparent 55%),
+    linear-gradient(90deg, rgba(240, 168, 190, 0.12), transparent 55%),
     var(--app-surface);
 }
 
@@ -2789,10 +2790,10 @@ body[data-theme="day"] .sport-icon {
   gap: 6px;
   transform: translateX(-50%);
   padding: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--app-line);
   border-radius: 24px;
-  background: rgba(2, 2, 4, 0.82);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
+  background: rgba(42, 41, 47, 0.86);
+  box-shadow: 0 24px 70px rgba(10, 10, 14, 0.38);
   backdrop-filter: blur(18px);
 }
 
@@ -2820,9 +2821,9 @@ body[data-theme="day"] .bottom-nav {
 .bottom-nav a.is-active {
   background:
     radial-gradient(ellipse at 32% 0%, rgba(255, 255, 255, 0.5), transparent 42%),
-    linear-gradient(180deg, #ff96cc 0%, var(--soap-pink) 54%, #dd1677 100%);
-  color: #fff;
-  box-shadow: 0 12px 28px rgba(255, 47, 148, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    linear-gradient(180deg, #f7c8d6 0%, var(--soap-pink) 56%, #c9829a 100%);
+  color: var(--soap-ink);
+  box-shadow: 0 12px 28px rgba(191, 107, 132, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 .nav-icon {
