@@ -19,6 +19,7 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - `CLAUDE.md`: Claude Code / Codex などAI開発メンバー向けの作業ルール
 - `docs/WORKFLOW.md`: GitHubが分からない人向けの共同作業手順
 - `docs/GOOGLE_SHEETS_SYNC_PLAN.md`: Google Sheets同期の設計メモ
+- `docs/KOSHIEN_2026_DELIVERY_PLAN.md`: 夏の甲子園リリース計画
 
 ビルドツールはありません。HTML/CSS/JavaScriptだけで動きます。
 
@@ -69,6 +70,19 @@ http://127.0.0.1:4173
 現在の実データ保存は端末内の `localStorage` です。
 
 仲間内テストに向けて、設定画面にGoogle Sheets接続準備欄を追加しています。Apps Script URLとSpreadsheet IDを保存できますが、実際の同期通信は次の実装で追加します。詳細は `docs/GOOGLE_SHEETS_SYNC_PLAN.md` を見てください。
+
+## 直近の開発方針
+
+W杯2026のUIはプロトタイプとして残し、直近は夏の甲子園までの実用化を優先します。
+
+優先順位:
+
+1. Google Sheets連携
+2. 友達同士で同じリーグデータを共有できるWebアプリ化
+3. 夏の甲子園向けプリセット
+4. スマホで使える予想入力、結果入力、ランキング
+
+詳細なスケジュールは `docs/KOSHIEN_2026_DELIVERY_PLAN.md` を見てください。
 
 ## W杯2026プリセット
 

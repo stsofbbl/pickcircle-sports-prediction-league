@@ -6,6 +6,7 @@ YOSOアプリの共同開発に参加するときは、まず以下を読んで�
 2. `CLAUDE.md`
 3. `docs/WORKFLOW.md`
 4. `docs/GOOGLE_SHEETS_SYNC_PLAN.md`
+5. `docs/KOSHIEN_2026_DELIVERY_PLAN.md`
 
 ## 作業ブランチ
 
@@ -34,6 +35,7 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - 他メンバーのYOSOは締切後に公開する。
 - リアルマネー、決済、送金、ブックメーカー連携は入れない。
 - W杯2026は専用プリセットとして扱う。
+- 直近はW杯UIの完成より、Google Sheets同期と夏の甲子園リリースを優先する。
 
 ## 最低限の確認
 
