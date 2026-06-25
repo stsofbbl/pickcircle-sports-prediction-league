@@ -435,6 +435,10 @@ async function testSheetsConnection() {
   try {
     const response = await requestSheetsJsonp(connection, "ping");
     if (!response?.ok) {
+      if (isSheetsUnknownAction(response)) {
+        setConnectionMessage("Apps Scriptには届いていますが、デプロイ中のコードが古いです。最新版を貼り直し、「デプロイを管理」から新しいバージョンで再デプロイしてください。");
+        return;
+      }
       setConnectionMessage(response?.error || "Apps Scriptには届きましたが、Spreadsheetを開けませんでした。");
       return;
     }
@@ -584,6 +588,10 @@ function getSheetsScriptUrlProblem(scriptUrl = "") {
 function formatSheetsRequestError(error, actionLabel) {
   const detail = error?.message ? ` (${error.message})` : "";
   return `${actionLabel}に失敗しました${detail}。Apps Scriptのデプロイで「実行ユーザー: 自分」「アクセスできるユーザー: 全員」になっているか確認してください。`;
+}
+
+function isSheetsUnknownAction(response) {
+  return /unknown action/i.test(String(response?.error || ""));
 }
 
 function requestSheetsJsonp(connection, action) {
