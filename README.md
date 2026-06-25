@@ -141,3 +141,15 @@ git push origin feature/your-change
 GitHub上でPull Requestを作り、内容確認後に反映します。
 
 GitHubが分からない場合は、`docs/WORKFLOW.md` を見てください。
+
+## Supabase migration phase 1
+
+The online direction is now GitHub Pages + Supabase Auth + Supabase Postgres.
+
+- Setup: `docs/SUPABASE_SETUP.md`
+- Migration plan: `docs/SUPABASE_MIGRATION_PLAN.md`
+- Schema: `supabase/schema.sql`
+- RLS policies: `supabase/rls-policies.sql`
+- Optional Koshien seed: `supabase/seed.sql`
+
+Google Sheets files are still kept as paused/trial infrastructure. Do not put a Supabase `service_role` key in browser code. Use only the anon public key.

@@ -37,19 +37,19 @@ Files:
 
 ## Near-Term Online Plan
 
-The near-term practical target is friend-group use by the end of this month.
-
-For that stage, assume Google Sheets sync rather than a full backend:
+The online plan has changed. The primary path is now:
 
 ```text
 GitHub Pages
-+ Google Apps Script
-+ Google Sheets
++ Supabase Auth
++ Supabase Postgres
 ```
 
-Treat Google Sheets as the trial shared data store. Keep the UI and state shape easy to migrate later.
+The first online target is only the Summer Koshien preset. Do not migrate the entire app or the World Cup preset in one pass.
 
-If the app needs production-grade accounts, multi-device identity, strict permissions, and long-term scale, migrate to Supabase Auth + Supabase Postgres later.
+Google Sheets + Google Apps Script work stays in the repo as paused/trial infrastructure. Do not delete it unless the user explicitly asks.
+
+Use only the Supabase anon public key in browser code. Never place a service_role key in the frontend, docs, commits, or GitHub Pages.
 
 State is stored in localStorage:
 
