@@ -190,6 +190,7 @@ const els = {
   dataConnectionLeagueId: document.querySelector("#dataConnectionLeagueId"),
   dataConnectionLastSync: document.querySelector("#dataConnectionLastSync"),
   dataConnectionSaveButton: document.querySelector("#dataConnectionSaveButton"),
+  dataConnectionTestButton: document.querySelector("#dataConnectionTestButton"),
   dataConnectionSyncToButton: document.querySelector("#dataConnectionSyncToButton"),
   dataConnectionSyncFromButton: document.querySelector("#dataConnectionSyncFromButton"),
   dataConnectionCopyStateButton: document.querySelector("#dataConnectionCopyStateButton"),
@@ -410,7 +411,7 @@ function setConnectionMessage(message) {
 function handleConnectionSave() {
   state.connection = normalizeConnectionSettings({
     mode: els.dataConnectionMode?.value,
-    scriptUrl: els.dataConnectionScriptUrl?.value.trim(),
+    scriptUrl: normalizeSheetsScriptUrl(els.dataConnectionScriptUrl?.value),
     spreadsheetId: els.dataConnectionSpreadsheetId?.value.trim(),
     leagueId: els.dataConnectionLeagueId?.value.trim(),
     clientId: state.connection?.clientId,
@@ -422,9 +423,36 @@ function handleConnectionSave() {
   renderDashboard();
 }
 
+async function testSheetsConnection() {
+  const connection = ensureSheetsConnectionReady();
+  if (!connection) return;
+  const problem = getSheetsScriptUrlProblem(connection.scriptUrl);
+  if (problem) {
+    setConnectionMessage(problem);
+    return;
+  }
+  setConnectionMessage("Google Sheets接続を確認しています...");
+  try {
+    const response = await requestSheetsJsonp(connection, "ping");
+    if (!response?.ok) {
+      setConnectionMessage(response?.error || "Apps Scriptには届きましたが、Spreadsheetを開けませんでした。");
+      return;
+    }
+    const savedState = response.hasState ? "保存済みデータあり" : "保存済みデータなし";
+    setConnectionMessage(`接続OKです。${response.spreadsheetName || "Spreadsheet"} / ${savedState}`);
+  } catch (error) {
+    setConnectionMessage(formatSheetsRequestError(error, "接続テスト"));
+  }
+}
+
 async function syncStateToSheets() {
   const connection = ensureSheetsConnectionReady();
   if (!connection) return;
+  const problem = getSheetsScriptUrlProblem(connection.scriptUrl);
+  if (problem) {
+    setConnectionMessage(problem);
+    return;
+  }
   setConnectionMessage("Sheetsへ保存しています...");
   persist();
   const now = new Date().toISOString();
@@ -446,19 +474,30 @@ async function syncStateToSheets() {
       mode: "no-cors",
       body,
     });
-    state.connection.lastSyncAt = now;
+    await delay(900);
+    const verification = await requestSheetsJsonp(connection, "getState");
+    if (!verification?.ok || !verification.state) {
+      setConnectionMessage(verification?.error || "保存リクエスト後にSheetsのデータを確認できませんでした。Apps Scriptの公開範囲を確認してください。");
+      return;
+    }
+    state.connection.lastSyncAt = verification.updatedAt || now;
     persist();
     renderConnectionSettings();
     renderDashboard();
-    setConnectionMessage("Sheetsへ保存リクエストを送りました。別端末では「Sheetsから読込」で反映できます。");
-  } catch {
-    setConnectionMessage("Sheetsへ保存できませんでした。Apps Script URLと公開設定を確認してください。");
+    setConnectionMessage(`Sheetsへ保存し、読み戻し確認まで完了しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`);
+  } catch (error) {
+    setConnectionMessage(formatSheetsRequestError(error, "Sheetsへ保存"));
   }
 }
 
 async function syncStateFromSheets() {
   const connection = ensureSheetsConnectionReady();
   if (!connection) return;
+  const problem = getSheetsScriptUrlProblem(connection.scriptUrl);
+  if (problem) {
+    setConnectionMessage(problem);
+    return;
+  }
   setConnectionMessage("Sheetsから読み込んでいます...");
   try {
     const response = await requestSheetsJsonp(connection, "getState");
@@ -478,8 +517,8 @@ async function syncStateFromSheets() {
     renderAuthState();
     render();
     setConnectionMessage(`Sheetsから読み込みました。更新: ${formatDateTime(response.updatedAt || state.connection.lastSyncAt)}`);
-  } catch {
-    setConnectionMessage("Sheetsから読み込めませんでした。Apps Script URL、公開範囲、Spreadsheet IDを確認してください。");
+  } catch (error) {
+    setConnectionMessage(formatSheetsRequestError(error, "Sheetsから読込"));
   }
 }
 
@@ -487,7 +526,7 @@ function ensureSheetsConnectionReady() {
   state.connection = normalizeConnectionSettings({
     ...state.connection,
     mode: els.dataConnectionMode?.value || state.connection?.mode,
-    scriptUrl: els.dataConnectionScriptUrl?.value.trim() || state.connection?.scriptUrl,
+    scriptUrl: normalizeSheetsScriptUrl(els.dataConnectionScriptUrl?.value || state.connection?.scriptUrl),
     spreadsheetId: els.dataConnectionSpreadsheetId?.value.trim() || state.connection?.spreadsheetId,
     leagueId: els.dataConnectionLeagueId?.value.trim() || state.connection?.leagueId,
   });
@@ -502,6 +541,49 @@ function ensureSheetsConnectionReady() {
   persist();
   renderConnectionSettings();
   return state.connection;
+}
+
+function normalizeSheetsScriptUrl(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^AKfycb[\w-]+$/i.test(raw)) return `https://script.google.com/macros/s/${raw}/exec`;
+  const withProtocol = raw.startsWith("//") ? `https:${raw}` : raw;
+  try {
+    const url = new URL(withProtocol);
+    const deployment = url.pathname.match(/\/macros\/s\/([^/]+)(?:\/exec)?/);
+    if (url.hostname === "script.google.com" && deployment) {
+      return `https://script.google.com/macros/s/${deployment[1]}/exec`;
+    }
+  } catch {
+    return withProtocol;
+  }
+  return withProtocol;
+}
+
+function getSheetsScriptUrlProblem(scriptUrl = "") {
+  const raw = String(scriptUrl || "").trim();
+  if (!raw) return "Apps Script URLを入力してください。";
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return "Apps Script URLは https://script.google.com/macros/s/.../exec の形式で入力してください。";
+  }
+  if (url.hostname !== "script.google.com") {
+    return "Apps Script URLは script.google.com のWebアプリURLを入力してください。";
+  }
+  if (url.pathname.includes("/home/projects/") || url.pathname.endsWith("/edit")) {
+    return "Apps Scriptの編集URLではなく、デプロイ後に表示されるWebアプリURL（/macros/s/.../exec）を貼ってください。";
+  }
+  if (!/\/macros\/s\/[^/]+\/exec$/.test(url.pathname)) {
+    return "Apps Script URLは /macros/s/.../exec で終わるWebアプリURLを貼ってください。";
+  }
+  return "";
+}
+
+function formatSheetsRequestError(error, actionLabel) {
+  const detail = error?.message ? ` (${error.message})` : "";
+  return `${actionLabel}に失敗しました${detail}。Apps Scriptのデプロイで「実行ユーザー: 自分」「アクセスできるユーザー: 全員」になっているか確認してください。`;
 }
 
 function requestSheetsJsonp(connection, action) {
@@ -524,7 +606,7 @@ function requestSheetsJsonp(connection, action) {
     };
     script.onerror = () => {
       cleanup();
-      reject(new Error("Sheets script failed"));
+      reject(new Error("Apps Scriptにアクセスできません。URL、公開範囲、またはGoogle側の403拒否を確認してください"));
     };
     script.src = buildSheetsUrl(connection, {
       action,
@@ -539,9 +621,16 @@ function requestSheetsJsonp(connection, action) {
 }
 
 function buildSheetsUrl(connection, params) {
-  const url = new URL(connection.scriptUrl);
+  const normalizedScriptUrl = normalizeSheetsScriptUrl(connection.scriptUrl);
+  const problem = getSheetsScriptUrlProblem(normalizedScriptUrl);
+  if (problem) throw new Error(problem);
+  const url = new URL(normalizedScriptUrl);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   return url.toString();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function copyCurrentStateForSheets() {
@@ -3982,6 +4071,7 @@ els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
 els.accountPasswordButton?.addEventListener("click", handlePasswordChange);
 els.dataConnectionSaveButton?.addEventListener("click", handleConnectionSave);
+els.dataConnectionTestButton?.addEventListener("click", testSheetsConnection);
 els.dataConnectionSyncToButton?.addEventListener("click", syncStateToSheets);
 els.dataConnectionSyncFromButton?.addEventListener("click", syncStateFromSheets);
 els.dataConnectionCopyStateButton?.addEventListener("click", copyCurrentStateForSheets);

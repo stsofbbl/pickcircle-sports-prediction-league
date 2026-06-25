@@ -6,6 +6,9 @@ function doGet(e) {
   const params = e.parameter || {};
   const callback = params.callback || "";
   try {
+    if (params.action === "ping") {
+      return jsonResponse(ping_(params), callback);
+    }
     if (params.action === "getState") {
       return jsonResponse(getState_(params), callback);
     }
@@ -25,6 +28,21 @@ function doPost(e) {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) }, "");
   }
+}
+
+function ping_(params) {
+  const spreadsheet = openSpreadsheet_(params.spreadsheetId);
+  const leagueId = requireParam_(params, "leagueId");
+  const stateSheet = ensureSheet_(spreadsheet, STATE_SHEET, ["leagueId", "updatedAt", "clientId", "version", "payload"]);
+  const row = findLeagueRow_(stateSheet, leagueId);
+  return {
+    ok: true,
+    spreadsheetId: spreadsheet.getId(),
+    spreadsheetName: spreadsheet.getName(),
+    leagueId,
+    hasState: row > 0,
+    updatedAt: row > 0 ? stateSheet.getRange(row, 2).getValue() : "",
+  };
 }
 
 function getState_(params) {

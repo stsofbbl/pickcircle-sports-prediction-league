@@ -26,9 +26,10 @@ GitHub Pages
 - ホーム画面の保存先表示が接続設定に連動
 - 現在のローカルデータをJSONとしてコピー可能
 - `Sheetsへ保存` と `Sheetsから読込` のMVP導線を追加済み
+- `接続テスト` でApps Scriptから対象Spreadsheetを開けるか確認可能
 - Apps Scriptテンプレートを `scripts/google-sheets-web-app.gs` に追加済み
 
-保存は `no-cors POST`、読み込みはJSONPで行います。GitHub Pagesの静的アプリからApps Scriptへ直接アクセスするためのMVP方式です。
+保存は `no-cors POST`、読み込みと接続テストはJSONPで行います。GitHub Pagesの静的アプリからApps Scriptへ直接アクセスするためのMVP方式です。保存後は読み戻し確認を行い、リクエストを送っただけで成功扱いにしないようにします。
 
 ## Google側で必要な手動作業
 
@@ -43,7 +44,15 @@ GitHub Pages
 7. アクセスできるユーザー: リンクを知っている全員、または全員
 8. 発行されたWebアプリURLをYOSOの設定画面に貼る
 9. Spreadsheet IDとLeague IDを入力
-10. `Sheetsへ保存`、別端末で `Sheetsから読込` を確認
+10. `接続テスト` を実行
+11. `Sheetsへ保存`、別端末で `Sheetsから読込` を確認
+
+接続テストで失敗する場合、まずApps Scriptのデプロイ設定を確認します。
+
+- 実行ユーザー: 自分
+- アクセスできるユーザー: 全員
+- URLは編集画面URLではなく `/macros/s/.../exec` で終わるWebアプリURL
+- スクリプト更新後は「デプロイを管理」から新しいバージョンとして再デプロイ
 
 ## 現在のMVP制約
 
