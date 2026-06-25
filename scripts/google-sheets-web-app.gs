@@ -3,9 +3,16 @@ const AUDIT_SHEET = "audit_log";
 const MEMBERS_SHEET = "members";
 
 function doGet(e) {
-  const params = e.parameter || {};
+  const params = getParams_(e);
   const callback = params.callback || "";
   try {
+    if (!params.action) {
+      return jsonResponse({
+        ok: true,
+        app: "YOSO Sheets Sync",
+        message: "Deploy this Apps Script as a Web app, then call /exec?action=ping&spreadsheetId=...&leagueId=...",
+      }, callback);
+    }
     if (params.action === "ping") {
       return jsonResponse(ping_(params), callback);
     }
@@ -19,7 +26,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  const params = e.parameter || {};
+  const params = getParams_(e);
   try {
     if (params.action === "saveState") {
       return jsonResponse(saveState_(params), "");
@@ -28,6 +35,10 @@ function doPost(e) {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) }, "");
   }
+}
+
+function getParams_(e) {
+  return e && e.parameter ? e.parameter : {};
 }
 
 function ping_(params) {
