@@ -262,6 +262,8 @@ function loadState() {
 let authSession = loadAuthSession();
 let authMode = "login";
 let lastAuthActivityWrite = 0;
+let onlineAuthUser = null;
+let pendingKoshienSyncTimer = null;
 
 function loadAuthUsers() {
   try {
@@ -308,6 +310,7 @@ function saveAuthSession(session, remember = session?.remember) {
 }
 
 function currentAuthUser() {
+  if (isSupabaseAuthEnabled()) return onlineAuthUser;
   if (!authSession?.userId) return null;
   if (isAuthSessionExpired(authSession)) {
     saveAuthSession(null);
@@ -356,6 +359,27 @@ function renderAuthState() {
   }
   ensureParticipantForAuth(user);
   renderAccountSettings(user);
+}
+
+function isSupabaseAuthEnabled() {
+  return Boolean(window.YosoDataService?.isAuthEnabled?.());
+}
+
+function applyOnlineAuthUser(user) {
+  onlineAuthUser = user || null;
+  if (onlineAuthUser) ensureParticipantForAuth(onlineAuthUser);
+}
+
+async function bootstrapSupabaseAuth() {
+  if (!isSupabaseAuthEnabled()) return;
+  try {
+    applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+  } catch (error) {
+    console.warn("Supabase auth bootstrap failed", error);
+    applyOnlineAuthUser(null);
+  }
+  renderAuthState();
+  render();
 }
 
 function setAuthMode(mode) {
@@ -657,7 +681,7 @@ function setAuthMessage(message) {
 
 async function handleAuthSubmit(event) {
   event.preventDefault();
-  if (!crypto?.subtle) {
+  if (!isSupabaseAuthEnabled() && !crypto?.subtle) {
     setAuthMessage("このブラウザではWeb Crypto APIが使えないため登録できません。");
     return;
   }
@@ -670,6 +694,10 @@ async function handleAuthSubmit(event) {
 }
 
 async function registerAuthUser(username, displayName, password, remember = true) {
+  if (isSupabaseAuthEnabled()) {
+    await registerSupabaseAuthUser(username, displayName, password);
+    return;
+  }
   const users = loadAuthUsers();
   if (username.length < 3) {
     setAuthMessage("ユーザーIDは3文字以上で入力してください。");
@@ -711,6 +739,10 @@ async function registerAuthUser(username, displayName, password, remember = true
 }
 
 async function loginAuthUser(username, password, remember = true) {
+  if (isSupabaseAuthEnabled()) {
+    await loginSupabaseAuthUser(username, password);
+    return;
+  }
   const user = loadAuthUsers().find((candidate) => candidate.username === username);
   if (!user) {
     setAuthMessage("ユーザーIDまたはパスワードが違います。");
@@ -730,7 +762,47 @@ async function loginAuthUser(username, password, remember = true) {
   render();
 }
 
-function logoutAuthUser() {
+async function registerSupabaseAuthUser(username, displayName, password) {
+  if (username.length < 3 || !displayName || password.length < 6) {
+    setAuthMessage("Supabase auth requires a username, display name, and 6+ character password.");
+    return;
+  }
+  try {
+    setAuthMessage("Supabase auth...");
+    const user = await window.YosoDataService.auth.signUp({ username, password, displayName });
+    applyOnlineAuthUser(user);
+    if (els.authPassword) els.authPassword.value = "";
+    renderAuthState();
+    render();
+    setAuthMessage(user ? "" : "Supabase signup completed. Check email confirmation settings if login does not continue.");
+  } catch (error) {
+    setAuthMessage(error?.message || "Supabase signup failed.");
+  }
+}
+
+async function loginSupabaseAuthUser(username, password) {
+  try {
+    setAuthMessage("Supabase auth...");
+    const user = await window.YosoDataService.auth.signIn({ username, password });
+    applyOnlineAuthUser(user);
+    if (els.authPassword) els.authPassword.value = "";
+    renderAuthState();
+    render();
+    setAuthMessage("");
+  } catch (error) {
+    setAuthMessage(error?.message || "Supabase login failed.");
+  }
+}
+
+async function logoutAuthUser() {
+  if (isSupabaseAuthEnabled()) {
+    try {
+      await window.YosoDataService.auth.signOut();
+    } catch (error) {
+      console.warn("Supabase signout failed", error);
+    }
+    applyOnlineAuthUser(null);
+  }
   saveAuthSession(null);
   renderAuthState();
 }
@@ -973,7 +1045,25 @@ function normalizeResultFlow(flow, participants = state.participants || defaultS
 
 function persist() {
   syncActiveEvent();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  queueKoshienOnlineSave();
+}
+
+function queueKoshienOnlineSave() {
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
+  clearTimeout(pendingKoshienSyncTimer);
+  pendingKoshienSyncTimer = setTimeout(async () => {
+    try {
+      await window.YosoDataService.koshien.saveSnapshot({
+        state,
+        event: state.event,
+        participantName: currentParticipantName(),
+      });
+    } catch (error) {
+      console.warn("Koshien Supabase save skipped", error);
+    }
+  }, 900);
 }
 
 function syncActiveEvent() {
@@ -4090,5 +4180,6 @@ els.dataConnectionCopyStateButton?.addEventListener("click", copyCurrentStateFor
 setInterval(enforceAuthTimeout, 60000);
 
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+bootstrapSupabaseAuth();
 renderAuthState();
 render();
