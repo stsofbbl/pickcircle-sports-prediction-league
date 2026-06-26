@@ -162,13 +162,16 @@ const els = {
   authScreen: document.querySelector("#authScreen"),
   authForm: document.querySelector("#authForm"),
   authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
+  authIdentityLabel: document.querySelector("#authIdentityLabel"),
   authUsername: document.querySelector("#authUsername"),
   authDisplayName: document.querySelector("#authDisplayName"),
   authPassword: document.querySelector("#authPassword"),
+  authPasswordConfirm: document.querySelector("#authPasswordConfirm"),
   authRemember: document.querySelector("#authRemember"),
   authSubmitButton: document.querySelector("#authSubmitButton"),
   authResetButton: document.querySelector("#authResetButton"),
   authMessage: document.querySelector("#authMessage"),
+  authNote: document.querySelector("#authNote"),
   accountChip: document.querySelector("#accountChip"),
   accountName: document.querySelector("#accountName"),
   logoutButton: document.querySelector("#logoutButton"),
@@ -349,6 +352,7 @@ function enforceAuthTimeout() {
 
 function renderAuthState() {
   const user = currentAuthUser();
+  renderAuthFormMode();
   document.body.classList.toggle("auth-locked", !user);
   if (els.authScreen) els.authScreen.hidden = Boolean(user);
   if (els.accountChip) els.accountChip.hidden = !user;
@@ -386,10 +390,32 @@ function setAuthMode(mode) {
   authMode = mode === "register" ? "register" : "login";
   els.authModeButtons?.forEach((button) => button.classList.toggle("is-active", button.dataset.authMode === authMode));
   if (els.authScreen) els.authScreen.dataset.mode = authMode;
-  if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? "登録して入る" : "ログイン";
-  if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  renderAuthFormMode();
   if (els.authRemember && authMode === "register") els.authRemember.checked = true;
   setAuthMessage("");
+}
+
+function renderAuthFormMode() {
+  const online = isSupabaseAuthEnabled();
+  if (els.authIdentityLabel) els.authIdentityLabel.textContent = online ? "メールアドレス" : "ユーザーID";
+  if (els.authUsername) {
+    els.authUsername.type = online ? "email" : "text";
+    els.authUsername.autocomplete = online ? "email" : "username";
+    els.authUsername.placeholder = online ? "you@example.com" : "";
+  }
+  if (els.authDisplayName) els.authDisplayName.required = online && authMode === "register";
+  if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  if (els.authPasswordConfirm) {
+    els.authPasswordConfirm.required = online && authMode === "register";
+    els.authPasswordConfirm.autocomplete = "new-password";
+  }
+  if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? (online ? "確認メールを送信" : "登録して入る") : "ログイン";
+  if (els.authResetButton) els.authResetButton.textContent = online ? "パスワード再設定メールを送る" : "パスワードを忘れた";
+  if (els.authNote) {
+    els.authNote.textContent = online
+      ? "実在するメールアドレスで登録します。確認メールのリンクを開いた後にログインできます。"
+      : "ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。";
+  }
 }
 
 function renderAccountSettings(user = currentAuthUser()) {
@@ -688,14 +714,15 @@ async function handleAuthSubmit(event) {
   const username = normalizeUsername(els.authUsername?.value || "");
   const displayName = (els.authDisplayName?.value || "").trim();
   const password = els.authPassword?.value || "";
+  const passwordConfirm = els.authPasswordConfirm?.value || "";
   const remember = Boolean(els.authRemember?.checked);
-  if (authMode === "register") await registerAuthUser(username, displayName, password, remember);
+  if (authMode === "register") await registerAuthUser(username, displayName, password, remember, passwordConfirm);
   else await loginAuthUser(username, password, remember);
 }
 
-async function registerAuthUser(username, displayName, password, remember = true) {
+async function registerAuthUser(username, displayName, password, remember = true, passwordConfirm = "") {
   if (isSupabaseAuthEnabled()) {
-    await registerSupabaseAuthUser(username, displayName, password);
+    await registerSupabaseAuthUser(username, displayName, password, passwordConfirm);
     return;
   }
   const users = loadAuthUsers();
@@ -762,36 +789,98 @@ async function loginAuthUser(username, password, remember = true) {
   render();
 }
 
-async function registerSupabaseAuthUser(username, displayName, password) {
-  if (username.length < 3 || !displayName || password.length < 6) {
-    setAuthMessage("Supabase auth requires a username, display name, and 6+ character password.");
+async function registerSupabaseAuthUser(email, displayName, password, passwordConfirm) {
+  if (!isValidEmail(email)) {
+    setAuthMessage("実在するメールアドレスを入力してください。");
+    return;
+  }
+  if (!displayName) {
+    setAuthMessage("表示名を入力してください。");
+    return;
+  }
+  if (password.length < 6) {
+    setAuthMessage("パスワードは6文字以上で入力してください。");
+    return;
+  }
+  if (password !== passwordConfirm) {
+    setAuthMessage("パスワード確認が一致しません。");
     return;
   }
   try {
-    setAuthMessage("Supabase auth...");
-    const user = await window.YosoDataService.auth.signUp({ username, password, displayName });
-    applyOnlineAuthUser(user);
+    setAuthMessage("確認メールを送信しています...");
+    const result = await window.YosoDataService.auth.signUp({ email, password, displayName });
+    applyOnlineAuthUser(null);
     if (els.authPassword) els.authPassword.value = "";
+    if (els.authPasswordConfirm) els.authPasswordConfirm.value = "";
+    setAuthMode("login");
+    if (els.authUsername) els.authUsername.value = email;
     renderAuthState();
-    render();
-    setAuthMessage(user ? "" : "Supabase signup completed. Check email confirmation settings if login does not continue.");
+    setAuthMessage(result?.message || "確認メールを送信しました。メール内のリンクを開いた後、この画面からログインしてください。");
   } catch (error) {
-    setAuthMessage(error?.message || "Supabase signup failed.");
+    setAuthMessage(formatSupabaseAuthError(error, "新規登録に失敗しました。"));
   }
 }
 
-async function loginSupabaseAuthUser(username, password) {
+async function loginSupabaseAuthUser(email, password) {
+  if (!isValidEmail(email)) {
+    setAuthMessage("メールアドレスを入力してください。");
+    return;
+  }
   try {
-    setAuthMessage("Supabase auth...");
-    const user = await window.YosoDataService.auth.signIn({ username, password });
+    setAuthMessage("ログインしています...");
+    const user = await window.YosoDataService.auth.signIn({ email, password });
     applyOnlineAuthUser(user);
     if (els.authPassword) els.authPassword.value = "";
     renderAuthState();
     render();
     setAuthMessage("");
   } catch (error) {
-    setAuthMessage(error?.message || "Supabase login failed.");
+    setAuthMessage(formatSupabaseAuthError(error, "ログインに失敗しました。"));
   }
+}
+
+async function sendSupabasePasswordReset() {
+  const email = normalizeUsername(els.authUsername?.value || "");
+  if (!isValidEmail(email)) {
+    setAuthMessage("パスワード再設定メールを送るメールアドレスを入力してください。");
+    return;
+  }
+  try {
+    setAuthMessage("パスワード再設定メールを送信しています...");
+    await window.YosoDataService.auth.sendPasswordResetEmail(email);
+    setAuthMessage("パスワード再設定メールを送信しました。メール内のリンクから再設定してください。");
+  } catch (error) {
+    setAuthMessage(formatSupabaseAuthError(error, "パスワード再設定メールを送信できませんでした。"));
+  }
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function formatSupabaseAuthError(error, fallback) {
+  const message = String(error?.message || "");
+  if (/email not confirmed|not confirmed|confirm/i.test(message)) {
+    return "メール確認がまだ完了していません。確認メールのリンクを開いてからログインしてください。";
+  }
+  if (/invalid login credentials|invalid credentials/i.test(message)) {
+    return "メールアドレスまたはパスワードが違います。";
+  }
+  if (/already registered|already been registered|user already/i.test(message)) {
+    return "このメールアドレスは登録済みです。ログインするか、パスワード再設定を使ってください。";
+  }
+  if (/rate limit|too many/i.test(message)) {
+    return "短時間に試行回数が多すぎます。少し待ってから再度お試しください。";
+  }
+  return message || fallback;
+}
+
+async function handleAuthReset() {
+  if (isSupabaseAuthEnabled()) {
+    await sendSupabasePasswordReset();
+    return;
+  }
+  resetLocalAuth();
 }
 
 async function logoutAuthUser() {
@@ -4163,7 +4252,7 @@ els.authModeButtons?.forEach((button) => {
 });
 
 els.authForm?.addEventListener("submit", handleAuthSubmit);
-els.authResetButton?.addEventListener("click", resetLocalAuth);
+els.authResetButton?.addEventListener("click", handleAuthReset);
 els.logoutButton?.addEventListener("click", logoutAuthUser);
 els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);

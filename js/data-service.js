@@ -19,22 +19,16 @@
     return isConfigured() && current.sync?.autoSaveKoshien === true;
   }
 
-  function authEmail(username) {
-    const value = String(username || "").trim().toLowerCase();
-    if (value.includes("@")) return value;
-    return `${value}@users.yoso.local`;
+  function displayNameFromUser(user, profile) {
+    return profile?.display_name || user?.user_metadata?.display_name || user?.email?.split("@")[0] || "YOSO member";
   }
 
-  function displayNameFromUser(user) {
-    return user?.user_metadata?.display_name || user?.email?.split("@")[0] || "YOSO member";
-  }
-
-  function toAppUser(user, membership) {
+  function toAppUser(user, membership, profile) {
     if (!user) return null;
     return {
       id: user.id,
       username: user.email || user.id,
-      displayName: displayNameFromUser(user),
+      displayName: displayNameFromUser(user, profile),
       email: user.email || "",
       role: membership?.role === "admin" ? "admin" : "member",
       provider: "supabase",
@@ -42,6 +36,18 @@
       idleTimeoutMinutes: 0,
       createdAt: user.created_at || new Date().toISOString(),
     };
+  }
+
+  function appUrl() {
+    return window.location.href.split("#")[0].split("?")[0];
+  }
+
+  function emailRedirectTo() {
+    return config().emailRedirectTo || config().redirectTo || appUrl();
+  }
+
+  function passwordResetRedirectTo() {
+    return config().passwordResetRedirectTo || config().redirectTo || appUrl();
   }
 
   async function supabaseClient() {
@@ -68,40 +74,73 @@
     return data;
   }
 
+  async function getProfile(userId) {
+    const supabase = await supabaseClient();
+    if (!supabase || !userId) return null;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", userId)
+      .maybeSingle();
+    if (error) return null;
+    return data;
+  }
+
   async function currentUser() {
     if (!isAuthEnabled()) return null;
     const user = await window.YosoSupabase.sessionUser();
-    return toAppUser(user, await getCurrentMembership(user?.id));
+    const [membership, profile] = await Promise.all([
+      getCurrentMembership(user?.id),
+      getProfile(user?.id),
+    ]);
+    return toAppUser(user, membership, profile);
   }
 
-  async function signUp({ username, password, displayName }) {
+  async function signUp({ email, password, displayName }) {
     const supabase = await supabaseClient();
     if (!supabase) throw new Error("Supabase is not configured");
-    const email = authEmail(username);
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: String(email || "").trim().toLowerCase(),
       password,
       options: {
+        emailRedirectTo: emailRedirectTo(),
         data: {
-          display_name: displayName || username,
+          display_name: displayName || String(email || "").split("@")[0],
         },
       },
     });
     if (error) throw error;
-    await ensureLeagueMembership({ createIfMissing: true });
-    return toAppUser(data.user || (await window.YosoSupabase.sessionUser()), await getCurrentMembership(data.user?.id));
+    return {
+      ok: true,
+      user: data.user || null,
+      message: "確認メールを送信しました。メール内のリンクを開いた後、この画面からログインしてください。",
+    };
   }
 
-  async function signIn({ username, password }) {
+  async function signIn({ email, password }) {
     const supabase = await supabaseClient();
     if (!supabase) throw new Error("Supabase is not configured");
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: authEmail(username),
+      email: String(email || "").trim().toLowerCase(),
       password,
     });
     if (error) throw error;
-    await ensureLeagueMembership();
-    return toAppUser(data.user, await getCurrentMembership(data.user?.id));
+    await ensureLeagueMembership({ createIfMissing: true });
+    const [membership, profile] = await Promise.all([
+      getCurrentMembership(data.user?.id),
+      getProfile(data.user?.id),
+    ]);
+    return toAppUser(data.user, membership, profile);
+  }
+
+  async function sendPasswordResetEmail(email) {
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { error } = await supabase.auth.resetPasswordForEmail(String(email || "").trim().toLowerCase(), {
+      redirectTo: passwordResetRedirectTo(),
+    });
+    if (error) throw error;
+    return { ok: true };
   }
 
   async function signOut() {
@@ -241,6 +280,7 @@
       currentUser,
       signUp,
       signIn,
+      sendPasswordResetEmail,
       signOut,
     },
     league: {

@@ -1,18 +1,18 @@
 # Supabase セットアップ手順
 
-YOSO のオンライン化第1段階は、GitHub Pages の静的フロントエンドから Supabase Auth と Supabase Postgres を使う構成です。既存の localStorage 保存は残します。
+YOSO のオンライン化第1段階は、GitHub Pages の静的フロントエンドから Supabase Auth と Supabase Postgres を使う構成です。既存の localStorage 保存とGoogle Sheets同期UIはフォールバックとして残します。
 
 手動必須タスクとCodexで代行できる作業は `docs/SUPABASE_MANUAL_TASKS.md` も参照してください。
 
-## 1. Supabase プロジェクトを作る
+## 1. Supabase プロジェクト
 
-1. Supabase で新規プロジェクトを作成します。
+1. Supabase でプロジェクトを作成します。
 2. Project Settings > API で以下を確認します。
    - Project URL
    - anon public key
-3. service_role key はブラウザ側に置かないでください。RLSを無視できる管理者キーなので、GitHub Pages、`supabase-config.js`、`app.js`、README、Issue、PRに貼ってはいけません。
+3. `service_role` key はブラウザ側に置かないでください。RLSを無視できる管理者キーなので、GitHub Pages、`supabase-config.js`、`app.js`、README、Issue、PRに貼ってはいけません。
 
-## 2. SQLを実行する
+## 2. SQL
 
 Supabase SQL Editor で次の順番に貼り付けて実行します。
 
@@ -22,38 +22,26 @@ Supabase SQL Editor で次の順番に貼り付けて実行します。
 
 SQL Editorではブラウザ翻訳をオフにしてください。SQLが `create extension if not exists pgcrypto;` ではなく「pgcrypto が存在しない場合は、拡張機能を作成します。」のような日本語文に変わると実行できません。
 
-`seed.sql` は `ADMIN_USER_ID` を Supabase Auth > Users のユーザーIDに置き換えてから実行します。未置換のまま実行すると停止します。
+`profiles.display_name` は `auth.users` 作成時のトリガーで保存します。フロント側は登録時に Supabase Auth の `data.display_name` へ表示名を渡します。
 
-## 3. Auth設定
+## 3. Email Auth
 
 Authentication > Providers で Email provider を有効にします。
 
-初期テストを簡単にする場合は、Authentication > Sign In / Providers のメール確認設定を確認してください。メール確認が必須のままだと、登録直後にセッションが作られないことがあります。
+このブランチでは Confirm Email をONのまま使います。登録直後はログイン済みにならず、「確認メールを送信しました」と表示します。ユーザーはメール内の確認リンクを開いた後に、同じ画面からメールアドレスとパスワードでログインします。
 
-YOSOのログインフォームは現時点ではユーザーID入力です。Supabase接続時は、`@` を含まないユーザーIDを `ユーザーID@users.yoso.local` としてSupabase Authへ送ります。次の段階でメール入力UIに変えるか判断します。
+## 4. URL Configuration
 
-## 4. ローカルで使う
+Supabase管理画面の Authentication > URL Configuration を設定します。
 
-1. `supabase-config.example.js` を `supabase-config.js` にコピーします。
-2. `url` と `anonKey` を入力します。
-3. Auth接続を試す場合は `auth.enabled` を `true` にします。
-4. 甲子園データの自動保存を試す場合は `sync.autoSaveKoshien` を `true` にします。
+### ローカル検証
 
-`supabase-config.js` は `.gitignore` に入っています。ローカルで実キーを入れても通常のコミット対象にはなりません。
+- Site URL: `http://127.0.0.1:4173/`
+- Redirect URLs:
+  - `http://127.0.0.1:4173/`
+  - `http://localhost:4173/`
 
-## 5. GitHub Pagesで使う
-
-GitHub PagesでSupabaseへ接続するには、公開ページから読み込める場所に `supabase-config.js` が必要です。
-
-選択肢:
-
-- `gh-pages` ブランチに `supabase-config.js` を置く
-- deploy時に `supabase-config.js` を生成する
-- `index.html` より前に `window.YOSO_SUPABASE_CONFIG` を定義する別の公開スクリプトを読み込む
-
-anon public key はブラウザで使う公開キーです。ただし、公開してよいのは anon key だけです。DB保護はRLSで行います。service_role key は絶対に公開しません。
-
-## 6. 設定例
+`supabase-config.js` も同じ戻り先を指定します。
 
 ```js
 window.YOSO_SUPABASE_CONFIG = {
@@ -61,6 +49,10 @@ window.YOSO_SUPABASE_CONFIG = {
   anonKey: "YOUR_SUPABASE_ANON_PUBLIC_KEY",
   inviteCode: "g-unit-koshien-2026",
   leagueName: "G-UNIT YOSO League",
+  sdkUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+  redirectTo: "http://127.0.0.1:4173/",
+  emailRedirectTo: "http://127.0.0.1:4173/",
+  passwordResetRedirectTo: "http://127.0.0.1:4173/",
   auth: {
     enabled: true
   },
@@ -70,7 +62,40 @@ window.YOSO_SUPABASE_CONFIG = {
 };
 ```
 
-## 7. 動作確認
+### GitHub Pages公開URLの例
+
+GitHub Pagesで公開する場合は、以下のように実際の公開URLを使います。
+
+- Site URL: `https://stsofbbl.github.io/pickcircle-sports-prediction-league/`
+- Redirect URLs:
+  - `https://stsofbbl.github.io/pickcircle-sports-prediction-league/`
+  - `http://127.0.0.1:4173/`
+  - `http://localhost:4173/`
+
+メール確認後の戻り先URL:
+
+```js
+emailRedirectTo: "https://stsofbbl.github.io/pickcircle-sports-prediction-league/"
+```
+
+パスワード再設定後の戻り先URL:
+
+```js
+passwordResetRedirectTo: "https://stsofbbl.github.io/pickcircle-sports-prediction-league/"
+```
+
+GitHub Pagesへ反映するまでは、`gh-pages` ブランチには入れずローカルの `supabase-config.js` で検証してください。
+
+## 5. ローカルで使う
+
+1. `supabase-config.example.js` を `supabase-config.js` にコピーします。
+2. `url` と `anonKey` を入力します。
+3. `auth.enabled` を `true` にします。
+4. 甲子園データの自動保存を試す場合は `sync.autoSaveKoshien` を `true` にします。
+
+`supabase-config.js` は `.gitignore` に入っています。ローカルで実キーを入れても通常のコミット対象にはなりません。ブラウザに入れてよいのは anon public key だけです。
+
+## 6. 動作確認
 
 設定が無い場合:
 
@@ -80,11 +105,15 @@ window.YOSO_SUPABASE_CONFIG = {
 
 設定がある場合:
 
-- Supabase Authで登録・ログイン・ログアウトできます。
-- ログイン中ユーザー情報を `window.YosoDataService.auth.currentUser()` で取得できます。
+- 新規登録フォームは、表示名、メールアドレス、パスワード、パスワード確認を使います。
+- 登録後は確認メール送信の案内を表示します。
+- メール確認前のログイン失敗時は、確認メールを開くよう案内します。
+- メール確認後はログイン、ログアウト、再ログイン、セッション維持ができます。
+- パスワード再設定メールを送信できます。
+- `profiles.display_name` に表示名が保存されます。
 - `sync.autoSaveKoshien` を `true` にすると、甲子園イベントだけSupabase保存を試みます。Adminは `events`、`event_teams`、`results`、自分の `predictions`、memberは自分の `predictions` だけを保存します。
 
-## 8. RLSの最低確認
+## 7. RLSの最低確認
 
 Supabase管理画面で2ユーザーを作り、次を確認します。
 

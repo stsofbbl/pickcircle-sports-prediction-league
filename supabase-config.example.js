@@ -6,6 +6,9 @@ window.YOSO_SUPABASE_CONFIG = {
   inviteCode: "g-unit-koshien-2026",
   leagueName: "G-UNIT YOSO League",
   sdkUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+  redirectTo: "http://127.0.0.1:4173/",
+  emailRedirectTo: "http://127.0.0.1:4173/",
+  passwordResetRedirectTo: "http://127.0.0.1:4173/",
   auth: {
     enabled: true
   },
