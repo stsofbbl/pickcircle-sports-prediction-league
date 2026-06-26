@@ -143,6 +143,21 @@
     return { ok: true };
   }
 
+  async function updatePassword(password) {
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    return { ok: true, user: data.user || null };
+  }
+
+  async function onAuthStateChange(callback) {
+    const supabase = await supabaseClient();
+    if (!supabase) return null;
+    const { data } = supabase.auth.onAuthStateChange(callback);
+    return data?.subscription || null;
+  }
+
   async function signOut() {
     const supabase = await supabaseClient();
     if (!supabase) return;
@@ -281,6 +296,8 @@
       signUp,
       signIn,
       sendPasswordResetEmail,
+      updatePassword,
+      onAuthStateChange,
       signOut,
     },
     league: {

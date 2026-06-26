@@ -26,7 +26,7 @@
           <h1>ログイン</h1>
           <p>この端末のYOSOメンバーとして入ります。</p>
         </div>
-        <div class="auth-mode-switch" role="tablist" aria-label="認証モード">
+        <div class="auth-mode-switch" id="authModeSwitch" role="tablist" aria-label="認証モード">
           <button class="is-active" type="button" data-auth-mode="login">ログイン</button>
           <button type="button" data-auth-mode="register">新規登録</button>
         </div>
@@ -54,7 +54,19 @@
           <button class="primary-button" id="authSubmitButton" type="submit">ログイン</button>
           <p class="auth-message" id="authMessage" role="status"></p>
         </form>
-        <div class="auth-help">
+        <form class="auth-form auth-recovery-form" id="authRecoveryForm" hidden>
+          <label class="field">
+            <span>新しいパスワード</span>
+            <input id="authRecoveryPassword" type="password" autocomplete="new-password" />
+          </label>
+          <label class="field">
+            <span>新しいパスワード確認</span>
+            <input id="authRecoveryPasswordConfirm" type="password" autocomplete="new-password" />
+          </label>
+          <button class="primary-button" id="authRecoverySubmitButton" type="submit">パスワードを更新</button>
+          <button class="ghost-button small-button" id="authRecoveryCancelButton" type="button">ログインへ戻る</button>
+        </form>
+        <div class="auth-help" id="authHelp">
           <button class="ghost-button small-button" id="authResetButton" type="button">パスワードを忘れた</button>
         </div>
         <p class="auth-note" id="authNote">ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。</p>

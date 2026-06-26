@@ -197,6 +197,12 @@ body.auth-locked .app-shell {
   gap: 12px;
 }
 
+.auth-form[hidden],
+.auth-mode-switch[hidden],
+.auth-help[hidden] {
+  display: none;
+}
+
 .auth-check {
   display: flex;
   align-items: center;

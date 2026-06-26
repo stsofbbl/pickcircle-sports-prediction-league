@@ -4,6 +4,7 @@ const AUTH_SESSION_KEY = "yoso-auth-session-v1";
 const AUTH_PBKDF2_ITERATIONS = 120000;
 const AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES = 10080;
 const AUTH_ACTIVITY_THROTTLE_MS = 30000;
+const AUTH_MIN_PASSWORD_LENGTH = 6;
 const SHEETS_SYNC_TIMEOUT_MS = 12000;
 
 const templates = {
@@ -161,14 +162,21 @@ const els = {
   themeOptions: [...document.querySelectorAll("[data-theme-label]")],
   authScreen: document.querySelector("#authScreen"),
   authForm: document.querySelector("#authForm"),
+  authRecoveryForm: document.querySelector("#authRecoveryForm"),
   authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
+  authModeSwitch: document.querySelector("#authModeSwitch"),
   authIdentityLabel: document.querySelector("#authIdentityLabel"),
   authUsername: document.querySelector("#authUsername"),
   authDisplayName: document.querySelector("#authDisplayName"),
   authPassword: document.querySelector("#authPassword"),
   authPasswordConfirm: document.querySelector("#authPasswordConfirm"),
+  authRecoveryPassword: document.querySelector("#authRecoveryPassword"),
+  authRecoveryPasswordConfirm: document.querySelector("#authRecoveryPasswordConfirm"),
+  authRecoverySubmitButton: document.querySelector("#authRecoverySubmitButton"),
+  authRecoveryCancelButton: document.querySelector("#authRecoveryCancelButton"),
   authRemember: document.querySelector("#authRemember"),
   authSubmitButton: document.querySelector("#authSubmitButton"),
+  authHelp: document.querySelector("#authHelp"),
   authResetButton: document.querySelector("#authResetButton"),
   authMessage: document.querySelector("#authMessage"),
   authNote: document.querySelector("#authNote"),
@@ -264,6 +272,7 @@ function loadState() {
 
 let authSession = loadAuthSession();
 let authMode = "login";
+let authRecoveryMode = false;
 let lastAuthActivityWrite = 0;
 let onlineAuthUser = null;
 let pendingKoshienSyncTimer = null;
@@ -313,6 +322,7 @@ function saveAuthSession(session, remember = session?.remember) {
 }
 
 function currentAuthUser() {
+  if (authRecoveryMode) return null;
   if (isSupabaseAuthEnabled()) return onlineAuthUser;
   if (!authSession?.userId) return null;
   if (isAuthSessionExpired(authSession)) {
@@ -358,7 +368,7 @@ function renderAuthState() {
   if (els.accountChip) els.accountChip.hidden = !user;
   if (els.accountName) els.accountName.textContent = user ? `${user.displayName}${user.role === "admin" ? " / Admin" : ""}` : "";
   if (!user) {
-    setAuthMode(loadAuthUsers().length ? "login" : "register");
+    if (!authRecoveryMode && !isSupabaseAuthEnabled()) setAuthMode(loadAuthUsers().length ? "login" : "register");
     return;
   }
   ensureParticipantForAuth(user);
@@ -377,6 +387,7 @@ function applyOnlineAuthUser(user) {
 async function bootstrapSupabaseAuth() {
   if (!isSupabaseAuthEnabled()) return;
   try {
+    await window.YosoDataService.auth.onAuthStateChange?.(handleSupabaseAuthEvent);
     applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
   } catch (error) {
     console.warn("Supabase auth bootstrap failed", error);
@@ -384,6 +395,32 @@ async function bootstrapSupabaseAuth() {
   }
   renderAuthState();
   render();
+}
+
+async function handleSupabaseAuthEvent(event) {
+  if (event === "PASSWORD_RECOVERY") {
+    authRecoveryMode = true;
+    applyOnlineAuthUser(null);
+    renderAuthState();
+    setAuthMessage("新しいパスワードを入力してください。");
+    return;
+  }
+  if (authRecoveryMode) return;
+  if (event === "SIGNED_OUT") {
+    applyOnlineAuthUser(null);
+    renderAuthState();
+    render();
+    return;
+  }
+  if (event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") {
+    try {
+      applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+      renderAuthState();
+      render();
+    } catch (error) {
+      console.warn("Supabase auth state sync failed", error);
+    }
+  }
 }
 
 function setAuthMode(mode) {
@@ -397,6 +434,11 @@ function setAuthMode(mode) {
 
 function renderAuthFormMode() {
   const online = isSupabaseAuthEnabled();
+  const recovering = online && authRecoveryMode;
+  if (els.authForm) els.authForm.hidden = recovering;
+  if (els.authRecoveryForm) els.authRecoveryForm.hidden = !recovering;
+  if (els.authModeSwitch) els.authModeSwitch.hidden = recovering;
+  if (els.authHelp) els.authHelp.hidden = recovering;
   if (els.authIdentityLabel) els.authIdentityLabel.textContent = online ? "メールアドレス" : "ユーザーID";
   if (els.authUsername) {
     els.authUsername.type = online ? "email" : "text";
@@ -409,12 +451,15 @@ function renderAuthFormMode() {
     els.authPasswordConfirm.required = online && authMode === "register";
     els.authPasswordConfirm.autocomplete = "new-password";
   }
+  if (els.authRecoveryPassword) els.authRecoveryPassword.required = recovering;
+  if (els.authRecoveryPasswordConfirm) els.authRecoveryPasswordConfirm.required = recovering;
   if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? (online ? "確認メールを送信" : "登録して入る") : "ログイン";
   if (els.authResetButton) els.authResetButton.textContent = online ? "パスワード再設定メールを送る" : "パスワードを忘れた";
   if (els.authNote) {
     els.authNote.textContent = online
       ? "実在するメールアドレスで登録します。確認メールのリンクを開いた後にログインできます。"
       : "ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。";
+    if (recovering) els.authNote.textContent = "メール内のリンク確認が完了しました。新しいパスワードを設定してください。";
   }
 }
 
@@ -854,6 +899,54 @@ async function sendSupabasePasswordReset() {
   }
 }
 
+async function handlePasswordRecoverySubmit(event) {
+  event.preventDefault();
+  if (!isSupabaseAuthEnabled()) {
+    setAuthMessage("Supabase接続が有効ではありません。設定を確認してください。");
+    return;
+  }
+  const newPassword = els.authRecoveryPassword?.value || "";
+  const passwordConfirm = els.authRecoveryPasswordConfirm?.value || "";
+  if (!newPassword || !passwordConfirm) {
+    setAuthMessage("新しいパスワードと確認欄を入力してください。");
+    return;
+  }
+  if (newPassword.length < AUTH_MIN_PASSWORD_LENGTH) {
+    setAuthMessage(`新しいパスワードは${AUTH_MIN_PASSWORD_LENGTH}文字以上で入力してください。`);
+    return;
+  }
+  if (newPassword !== passwordConfirm) {
+    setAuthMessage("新しいパスワードと確認欄が一致しません。");
+    return;
+  }
+  try {
+    setAuthMessage("パスワードを更新しています...");
+    await window.YosoDataService.auth.updatePassword(newPassword);
+    if (els.authRecoveryPassword) els.authRecoveryPassword.value = "";
+    if (els.authRecoveryPasswordConfirm) els.authRecoveryPasswordConfirm.value = "";
+    await finishPasswordRecovery("パスワードを更新しました。新しいパスワードでログインしてください。");
+  } catch (error) {
+    setAuthMessage(formatSupabaseAuthError(error, "パスワードを更新できませんでした。再設定メールのリンクを開き直してください。"));
+  }
+}
+
+async function cancelPasswordRecovery() {
+  await finishPasswordRecovery("ログイン画面へ戻りました。必要ならもう一度パスワード再設定メールを送信してください。");
+}
+
+async function finishPasswordRecovery(message) {
+  try {
+    await window.YosoDataService.auth.signOut();
+  } catch (error) {
+    console.warn("Supabase recovery signout failed", error);
+  }
+  authRecoveryMode = false;
+  applyOnlineAuthUser(null);
+  setAuthMode("login");
+  renderAuthState();
+  setAuthMessage(message);
+}
+
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
@@ -871,6 +964,12 @@ function formatSupabaseAuthError(error, fallback) {
   }
   if (/rate limit|too many/i.test(message)) {
     return "短時間に試行回数が多すぎます。少し待ってから再度お試しください。";
+  }
+  if (/session|token|expired|invalid/i.test(message)) {
+    return "再設定リンクの有効期限が切れているか、セッションを確認できません。もう一度パスワード再設定メールを送信してください。";
+  }
+  if (/password/i.test(message)) {
+    return "パスワードを更新できませんでした。文字数や入力内容を確認してください。";
   }
   return message || fallback;
 }
@@ -4252,6 +4351,8 @@ els.authModeButtons?.forEach((button) => {
 });
 
 els.authForm?.addEventListener("submit", handleAuthSubmit);
+els.authRecoveryForm?.addEventListener("submit", handlePasswordRecoverySubmit);
+els.authRecoveryCancelButton?.addEventListener("click", cancelPasswordRecovery);
 els.authResetButton?.addEventListener("click", handleAuthReset);
 els.logoutButton?.addEventListener("click", logoutAuthUser);
 els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);

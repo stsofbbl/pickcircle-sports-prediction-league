@@ -39,9 +39,13 @@ Supabase管理画面の Authentication > URL Configuration を設定します。
 - Site URL: `http://127.0.0.1:4173/`
 - Redirect URLs:
   - `http://127.0.0.1:4173/`
+  - `http://127.0.0.1:4173/index.html`
   - `http://localhost:4173/`
+  - `http://localhost:4173/index.html`
 
-`supabase-config.js` も同じ戻り先を指定します。
+メール確認後とパスワード再設定後の戻り先は、どちらも現在のアプリURLにします。ローカル検証では専用の `/reset-password` パスを作りません。
+
+`supabase-config.js` も同じ戻り先を指定します。通常はルートURLで十分です。
 
 ```js
 window.YOSO_SUPABASE_CONFIG = {
@@ -69,8 +73,11 @@ GitHub Pagesで公開する場合は、以下のように実際の公開URLを�
 - Site URL: `https://stsofbbl.github.io/pickcircle-sports-prediction-league/`
 - Redirect URLs:
   - `https://stsofbbl.github.io/pickcircle-sports-prediction-league/`
+  - `https://stsofbbl.github.io/pickcircle-sports-prediction-league/index.html`
   - `http://127.0.0.1:4173/`
+  - `http://127.0.0.1:4173/index.html`
   - `http://localhost:4173/`
+  - `http://localhost:4173/index.html`
 
 メール確認後の戻り先URL:
 
@@ -83,6 +90,8 @@ emailRedirectTo: "https://stsofbbl.github.io/pickcircle-sports-prediction-league
 ```js
 passwordResetRedirectTo: "https://stsofbbl.github.io/pickcircle-sports-prediction-league/"
 ```
+
+GitHub Pagesはサブディレクトリ配信なので、パスワード再設定用の別パスは使いません。Supabaseのリンクは上記URLへ戻し、アプリ側が `PASSWORD_RECOVERY` イベントを検出して同じ `index.html` 内に新しいパスワード入力欄を表示します。
 
 GitHub Pagesへ反映するまでは、`gh-pages` ブランチには入れずローカルの `supabase-config.js` で検証してください。
 
