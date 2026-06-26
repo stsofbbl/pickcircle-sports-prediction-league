@@ -28,7 +28,9 @@ Google Sheets関連のコードとドキュメントは削除しません。現�
 - Supabase Authのブラウザ接続ラッパー
 - RLSポリシー
 - ローカル保存を残す data-service 層
-- 甲子園イベントを次にオンライン保存できる `saveKoshienSnapshot` の土台
+- 甲子園イベントをオンライン保存できる `saveKoshienSnapshot` の土台
+- 管理者は甲子園の大会、出場校、結果を保存
+- メンバーは自分の甲子園予想だけ保存
 
 ## 第1段階でまだ実装しない範囲
 
@@ -37,7 +39,7 @@ Google Sheets関連のコードとドキュメントは削除しません。現�
 - W杯など他プリセットのオンライン化
 - 全localStorage状態の一括Supabase移行
 - 甲子園のオンライン読込UI
-- 甲子園の管理画面からのSupabase直接編集
+- 甲子園の管理画面からのSupabase直接読込/編集UI
 - メールアドレス前提のAuth UI刷新
 
 ## データ対応方針
@@ -84,3 +86,13 @@ RLSは次を満たす方針です。
 7. 締切前後で他メンバー予想が取得できない/できることをRLSで検証する
 8. 結果入力を `results` に接続する
 9. localStorageからSupabaseへ初回移行する明示ボタンを用意する
+
+## 実装メモ
+
+`sync.autoSaveKoshien` を `true` にすると、`persist()` の後に甲子園イベントだけSupabase保存を試みます。
+
+- Admin: `events`、`event_teams`、`results`、自分の `predictions` を保存
+- member: 既存の `events` に対して自分の `predictions` だけ保存
+- memberが先に保存しようとしてイベントが存在しない場合はスキップ
+
+この分離により、UIで隠すだけでなくRLSとフロント保存処理の両方で「管理者だけ大会・結果」「本人だけ予想」を守ります。

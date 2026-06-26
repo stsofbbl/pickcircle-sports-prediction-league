@@ -13,6 +13,7 @@
 - ローカル簡易ログイン/ユーザー登録
 - 設定画面のデータ接続準備
 - Google Sheets同期MVP
+- Supabase Auth/Postgres 移行フェーズ1
 - 夏の甲子園8校ピックプリセット
 - GitHub Pages公開
 
@@ -20,19 +21,19 @@
 
 W杯2026のUIはプロトタイプとして残し、直近は夏の甲子園までの実用化を優先します。
 
-仲間内で使う試験運用は、Google Sheetsを共有データ置き場にする想定で進めます。
+仲間内で使う試験運用は、Supabase Auth + Supabase Postgres を共有データ置き場にする想定へ切り替えています。
 
 想定構成:
 
 ```text
 GitHub Pages
-+ Google Apps Script
-+ Google Sheets
++ Supabase Auth
++ Supabase Postgres
 ```
 
-まずはローカル保存のUI/運用フローを磨き、次にGoogle Sheets同期を追加します。現在は設定画面にApps Script URL、Spreadsheet ID、League IDを保存し、Sheetsへ保存/Sheetsから読込できるMVP導線まで入っています。
+まずはローカル保存を残しつつ、夏の甲子園プリセットからSupabaseへ段階移行します。現在はSupabase Auth接続ラッパー、DB/RLS SQL、甲子園イベント/自分の予想を保存する土台が入っています。
 
-本格的な多人数/長期運用が必要になった場合は、Supabase Auth + Supabase Postgresへの移行を検討します。
+Google Sheets同期は保留ルートとして残しています。
 
 ## ログイン仕様
 
@@ -71,7 +72,7 @@ GitHub Pages
 ## まだ粗いところ
 
 - ローカル認証なので、友達同士で同じデータを共有するには不十分
-- Google Sheets同期はMVPで、実Googleアカウント上のApps Scriptデプロイ確認が必要
+- Supabaseは実プロジェクト作成、SQL実行、anon key設定、RLS検証が必要
 - 夏の甲子園プリセットは8校ピックの土台実装済み。実代表校への差し替えと友達内テストが必要
 - W杯出場国リストは仮置き
 - 第2回の複勝/個人賞UXは改善中で、実利用しながらさらに磨ける
@@ -80,13 +81,15 @@ GitHub Pages
 
 ## 次におすすめの作業
 
-1. 実Google Sheetsで同期MVPを確認
-2. 夏の甲子園プリセットを実代表校でテスト
-3. ランキング画面の期間/大会別フィルターを実装
-4. スマホ主要導線の実利用テスト
-5. Playwrightの簡易スモークテストを追加
+1. Supabaseプロジェクトで `schema.sql` と `rls-policies.sql` を実行
+2. Supabase Authの登録/ログイン/ログアウトを実機確認
+3. 夏の甲子園プリセットをSupabase保存でテスト
+4. RLSで締切前の他メンバー予想が取得できないことを確認
+5. スマホ主要導線の実利用テスト
 
 ## 関連メモ
 
 - `docs/GOOGLE_SHEETS_SYNC_PLAN.md`
+- `docs/SUPABASE_SETUP.md`
+- `docs/SUPABASE_MIGRATION_PLAN.md`
 - `docs/KOSHIEN_2026_DELIVERY_PLAN.md`

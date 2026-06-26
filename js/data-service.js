@@ -121,7 +121,15 @@
       .select("id, name, invite_code")
       .eq("invite_code", current.inviteCode)
       .limit(1);
-    if (existingLeagues?.length) return existingLeagues[0];
+    if (existingLeagues?.length) {
+      const existingLeague = existingLeagues[0];
+      const membership = await getCurrentMembership(user.id);
+      if (membership) return existingLeague;
+
+      const joined = await supabase.rpc("join_league_by_invite", { p_invite_code: current.inviteCode });
+      if (joined.error) throw joined.error;
+      return joined.data || existingLeague;
+    }
 
     const rpcName = createIfMissing ? "create_league_with_admin" : "join_league_by_invite";
     const args = createIfMissing
@@ -148,41 +156,64 @@
 
     const league = await ensureLeagueMembership({ createIfMissing: true });
     if (!league?.id) return { skipped: true, reason: "league is not ready" };
+    const membership = await getCurrentMembership(user.id);
+    const isAdmin = membership?.role === "admin";
 
     const deadline = event.deadline ? new Date(event.deadline).toISOString() : null;
-    const eventPayload = {
-      id: String(event.id),
-      league_id: league.id,
-      name: event.name,
-      preset_type: "koshien",
-      status: event.status || "open",
-      prediction_deadline: deadline,
-      rules: {
-        approvalPolicy: event.approvalPolicy || state.approvalPolicy,
-        config: event.config || {},
-        localEventId: event.id,
-      },
-      created_by: user.id,
-    };
-    const { error: eventError } = await supabase.from("events").upsert(eventPayload);
-    if (eventError) throw eventError;
+    const eventId = String(event.id);
+    const { data: existingEvent, error: existingEventError } = await supabase
+      .from("events")
+      .select("id")
+      .eq("id", eventId)
+      .maybeSingle();
+    if (existingEventError) throw existingEventError;
 
-    const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
-    if (teams.length) {
-      const teamRows = teams.map((name, index) => ({
-        event_id: String(event.id),
-        name,
-        seed: index + 1,
-        metadata: { source: "localStorage" },
-      }));
-      const { error: teamsError } = await supabase.from("event_teams").upsert(teamRows, { onConflict: "event_id,name" });
-      if (teamsError) throw teamsError;
+    if (isAdmin) {
+      const eventPayload = {
+        id: eventId,
+        league_id: league.id,
+        name: event.name,
+        preset_type: "koshien",
+        status: event.status || "open",
+        prediction_deadline: deadline,
+        rules: {
+          approvalPolicy: event.approvalPolicy || state.approvalPolicy,
+          config: event.config || {},
+          localEventId: event.id,
+        },
+        created_by: user.id,
+      };
+      const { error: eventError } = await supabase.from("events").upsert(eventPayload);
+      if (eventError) throw eventError;
+
+      const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
+      if (teams.length) {
+        const teamRows = teams.map((name, index) => ({
+          event_id: eventId,
+          name,
+          seed: index + 1,
+          metadata: { source: "localStorage" },
+        }));
+        const { error: teamsError } = await supabase.from("event_teams").upsert(teamRows, { onConflict: "event_id,name" });
+        if (teamsError) throw teamsError;
+      }
+
+      if (event.results) {
+        const { error: resultsError } = await supabase.from("results").upsert({
+          event_id: eventId,
+          payload: event.results,
+          updated_by: user.id,
+        }, { onConflict: "event_id" });
+        if (resultsError) throw resultsError;
+      }
+    } else if (!existingEvent) {
+      return { skipped: true, reason: "admin must create the Koshien event before members can save predictions" };
     }
 
     const myPrediction = event.predictions?.[participantName];
     if (myPrediction) {
       const { error: predictionError } = await supabase.from("predictions").upsert({
-        event_id: String(event.id),
+        event_id: eventId,
         user_id: user.id,
         payload: myPrediction,
         submitted_at: new Date().toISOString(),

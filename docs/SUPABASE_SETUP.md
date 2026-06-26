@@ -78,4 +78,18 @@ window.YOSO_SUPABASE_CONFIG = {
 
 - Supabase Authで登録・ログイン・ログアウトできます。
 - ログイン中ユーザー情報を `window.YosoDataService.auth.currentUser()` で取得できます。
-- `sync.autoSaveKoshien` を `true` にすると、甲子園イベントだけ `events`、`event_teams`、自分の `predictions` へ保存する土台が動きます。
+- `sync.autoSaveKoshien` を `true` にすると、甲子園イベントだけSupabase保存を試みます。Adminは `events`、`event_teams`、`results`、自分の `predictions`、memberは自分の `predictions` だけを保存します。
+
+## 8. RLSの最低確認
+
+Supabase管理画面で2ユーザーを作り、次を確認します。
+
+1. Adminユーザーで登録/ログインする。
+2. Adminが甲子園イベントを保存できる。
+3. memberユーザーで登録/ログインする。
+4. memberが自分の予想を保存できる。
+5. memberが `events`、`event_teams`、`results` を更新できない。
+6. 締切前は、memberが他メンバーの `predictions` をSELECTできない。
+7. 締切後または `resultWait` / `finalized` では、同じリーグの `predictions` をSELECTできる。
+
+RLS検証が終わるまで、`service_role` keyを使った動作確認結果を「ユーザー側でも動いた」と見なさないでください。`service_role` はRLSを迂回します。
