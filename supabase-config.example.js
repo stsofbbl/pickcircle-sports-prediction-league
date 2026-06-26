@@ -7,9 +7,9 @@ window.YOSO_SUPABASE_CONFIG = {
   leagueName: "G-UNIT YOSO League",
   sdkUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
   auth: {
-    enabled: false
+    enabled: true
   },
   sync: {
-    autoSaveKoshien: false
+    autoSaveKoshien: true
   }
 };

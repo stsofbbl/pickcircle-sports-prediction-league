@@ -22,6 +22,7 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - `docs/KOSHIEN_2026_DELIVERY_PLAN.md`: 夏の甲子園リリース計画
 - `docs/SUPABASE_SETUP.md`: Supabase Auth/Postgres セットアップ手順
 - `docs/SUPABASE_MIGRATION_PLAN.md`: Supabase移行計画
+- `docs/SUPABASE_MANUAL_TASKS.md`: Supabase管理画面で必要な手動作業とCodex代行範囲
 
 ビルドツールはありません。HTML/CSS/JavaScriptだけで動きます。
 

@@ -2,6 +2,8 @@
 
 YOSO のオンライン化第1段階は、GitHub Pages の静的フロントエンドから Supabase Auth と Supabase Postgres を使う構成です。既存の localStorage 保存は残します。
 
+手動必須タスクとCodexで代行できる作業は `docs/SUPABASE_MANUAL_TASKS.md` も参照してください。
+
 ## 1. Supabase プロジェクトを作る
 
 1. Supabase で新規プロジェクトを作成します。
@@ -33,7 +35,7 @@ YOSOのログインフォームは現時点ではユーザーID入力です。Su
 1. `supabase-config.example.js` を `supabase-config.js` にコピーします。
 2. `url` と `anonKey` を入力します。
 3. Auth接続を試す場合は `auth.enabled` を `true` にします。
-4. 甲子園データの自動保存はまだ既定で無効です。次の作業で接続するまでは `sync.autoSaveKoshien` は `false` のままにします。
+4. 甲子園データの自動保存を試す場合は `sync.autoSaveKoshien` を `true` にします。
 
 `supabase-config.js` は `.gitignore` に入っています。ローカルで実キーを入れても通常のコミット対象にはなりません。
 
@@ -61,7 +63,7 @@ window.YOSO_SUPABASE_CONFIG = {
     enabled: true
   },
   sync: {
-    autoSaveKoshien: false
+    autoSaveKoshien: true
   }
 };
 ```
