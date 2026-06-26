@@ -278,6 +278,80 @@
     return { ok: true };
   }
 
+  function isPredictionPublic(event) {
+    const status = event?.status || "open";
+    if (status === "resultWait" || status === "finalized" || status === "archive") return true;
+    if (!event?.prediction_deadline) return false;
+    return Date.now() >= Date.parse(event.prediction_deadline);
+  }
+
+  async function loadKoshienSnapshot() {
+    if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
+
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase.sessionUser();
+    if (!supabase || !user) return { skipped: true, reason: "Supabase session is not ready" };
+
+    const league = await ensureLeagueMembership();
+    if (!league?.id) return { skipped: true, reason: "league is not ready" };
+    const membership = await getCurrentMembership(user.id);
+    const profile = await getProfile(user.id);
+
+    const { data: events, error: eventError } = await supabase
+      .from("events")
+      .select("id, league_id, name, preset_type, status, prediction_deadline, rules, created_by, updated_at")
+      .eq("league_id", league.id)
+      .eq("preset_type", "koshien")
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    if (eventError) throw eventError;
+    const event = events?.[0];
+    if (!event) return { skipped: true, reason: "koshien event is not found", league, membership };
+
+    const [{ data: teams, error: teamsError }, { data: results, error: resultsError }] = await Promise.all([
+      supabase
+        .from("event_teams")
+        .select("name, seed, metadata")
+        .eq("event_id", event.id)
+        .order("seed", { ascending: true }),
+      supabase
+        .from("results")
+        .select("payload, updated_at")
+        .eq("event_id", event.id)
+        .maybeSingle(),
+    ]);
+    if (teamsError) throw teamsError;
+    if (resultsError) throw resultsError;
+
+    const predictionSelect = isPredictionPublic(event)
+      ? supabase
+        .from("predictions")
+        .select("user_id, payload, submitted_at, profiles(display_name)")
+        .eq("event_id", event.id)
+      : supabase
+        .from("predictions")
+        .select("user_id, payload, submitted_at, profiles(display_name)")
+        .eq("event_id", event.id)
+        .eq("user_id", user.id);
+    const { data: predictions, error: predictionError } = await predictionSelect;
+    if (predictionError) throw predictionError;
+
+    return {
+      ok: true,
+      league,
+      membership,
+      currentUser: {
+        id: user.id,
+        displayName: profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "あなた",
+      },
+      event,
+      teams: teams || [],
+      predictions: predictions || [],
+      results: results || null,
+      predictionsPublic: isPredictionPublic(event),
+    };
+  }
+
   function loadLocalState(storageKey) {
     const stored = localStorage.getItem(storageKey);
     return stored ? JSON.parse(stored) : null;
@@ -305,6 +379,7 @@
     },
     koshien: {
       saveSnapshot: saveKoshienSnapshot,
+      loadSnapshot: loadKoshienSnapshot,
     },
     local: {
       loadState: loadLocalState,

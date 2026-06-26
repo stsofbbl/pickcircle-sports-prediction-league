@@ -276,6 +276,8 @@ let authRecoveryMode = false;
 let lastAuthActivityWrite = 0;
 let onlineAuthUser = null;
 let pendingKoshienSyncTimer = null;
+let pendingKoshienLoadPromise = null;
+let lastKoshienOnlineLoadUserId = "";
 
 function loadAuthUsers() {
   try {
@@ -389,6 +391,7 @@ async function bootstrapSupabaseAuth() {
   try {
     await window.YosoDataService.auth.onAuthStateChange?.(handleSupabaseAuthEvent);
     applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+    if (onlineAuthUser) await loadKoshienOnlineState();
   } catch (error) {
     console.warn("Supabase auth bootstrap failed", error);
     applyOnlineAuthUser(null);
@@ -408,13 +411,15 @@ async function handleSupabaseAuthEvent(event) {
   if (authRecoveryMode) return;
   if (event === "SIGNED_OUT") {
     applyOnlineAuthUser(null);
+    lastKoshienOnlineLoadUserId = "";
     renderAuthState();
     render();
     return;
   }
-  if (event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") {
+  if (event === "SIGNED_IN" || event === "USER_UPDATED") {
     try {
       applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+      if (onlineAuthUser) await loadKoshienOnlineState();
       renderAuthState();
       render();
     } catch (error) {
@@ -876,6 +881,7 @@ async function loginSupabaseAuthUser(email, password) {
     const user = await window.YosoDataService.auth.signIn({ email, password });
     applyOnlineAuthUser(user);
     if (els.authPassword) els.authPassword.value = "";
+    await loadKoshienOnlineState();
     renderAuthState();
     render();
     setAuthMessage("");
@@ -992,6 +998,7 @@ async function logoutAuthUser() {
     applyOnlineAuthUser(null);
   }
   saveAuthSession(null);
+  lastKoshienOnlineLoadUserId = "";
   renderAuthState();
 }
 
@@ -1252,6 +1259,108 @@ function queueKoshienOnlineSave() {
       console.warn("Koshien Supabase save skipped", error);
     }
   }, 900);
+}
+
+async function loadKoshienOnlineState({ force = false } = {}) {
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.loadSnapshot) return null;
+  const userId = currentAuthUser()?.id || "";
+  if (!force && userId && lastKoshienOnlineLoadUserId === userId) return null;
+  if (pendingKoshienLoadPromise) return pendingKoshienLoadPromise;
+  setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
+  pendingKoshienLoadPromise = (async () => {
+    try {
+      const snapshot = await window.YosoDataService.koshien.loadSnapshot();
+      if (snapshot?.ok) {
+        applyKoshienOnlineSnapshot(snapshot);
+        lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
+        render();
+        setConnectionMessage(`Supabaseから甲子園データを読み込みました。${snapshot.predictionsPublic ? "締切後のため他メンバーの予想も取得しています。" : "締切前のため自分の予想だけ取得しています。"}`);
+      } else if (snapshot?.skipped) {
+        setConnectionMessage(koshienLoadSkipMessage(snapshot.reason));
+      }
+      return snapshot;
+    } catch (error) {
+      console.warn("Koshien Supabase load failed", error);
+      setConnectionMessage(`Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。${error?.message ? ` (${error.message})` : ""}`);
+      return null;
+    } finally {
+      pendingKoshienLoadPromise = null;
+    }
+  })();
+  return pendingKoshienLoadPromise;
+}
+
+function koshienLoadSkipMessage(reason) {
+  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期は無効です。ローカル保存を表示しています。";
+  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できないため、ローカル保存を表示しています。";
+  if (reason === "league is not ready") return "参加リーグを確認できませんでした。ローカル保存を表示しています。";
+  if (reason === "koshien event is not found") return "Supabaseに甲子園大会がまだありません。管理者が大会を保存すると別端末で読み込めます。";
+  return "Supabaseから読み込むデータがないため、ローカル保存を表示しています。";
+}
+
+function applyKoshienOnlineSnapshot(snapshot) {
+  const eventRow = snapshot.event;
+  const currentName = snapshot.currentUser?.displayName || currentParticipantName();
+  const predictionNames = (snapshot.predictions || [])
+    .map((row) => row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`))
+    .filter(Boolean);
+  const participants = uniqueStrings([...state.participants, currentName, ...predictionNames]);
+  const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
+  const rules = eventRow.rules || {};
+  const onlineEvent = normalizeEvent({
+    ...createEvent("koshien", participants, { id: eventRow.id, name: eventRow.name }),
+    id: eventRow.id,
+    name: eventRow.name || templates.koshien.eventName,
+    templateId: "koshien",
+    sport: "baseball",
+    status: eventRow.status || "open",
+    deadline: eventRow.prediction_deadline || "",
+    approvalPolicy: rules.approvalPolicy || state.approvalPolicy,
+    config: {
+      ...createConfig("koshien"),
+      ...(rules.config || {}),
+      teams: teams.length ? teams : (rules.config?.teams || createConfig("koshien").teams),
+    },
+    predictions: Object.fromEntries(participants.map((name) => [name, createPrediction("koshien")])),
+    results: snapshot.results?.payload || createResults("koshien"),
+    resultFlow: statusToResultFlow(eventRow.status),
+  }, { ...state, participants });
+
+  (snapshot.predictions || []).forEach((row) => {
+    const name = row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`);
+    if (!name) return;
+    onlineEvent.predictions[name] = row.payload || createPrediction("koshien");
+    normalizeKoshienPrediction(onlineEvent, name);
+  });
+
+  state.participants = participants;
+  state.events = mergeEventList(state.events || [], onlineEvent);
+  state.event = onlineEvent;
+  state.activeEventId = onlineEvent.id;
+  state.activeTemplate = "koshien";
+  state.connection = normalizeConnectionSettings({
+    ...state.connection,
+    leagueId: snapshot.league?.invite_code || state.connection?.leagueId,
+    lastSyncAt: new Date().toISOString(),
+  });
+  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function mergeEventList(events, nextEvent) {
+  const normalized = (events || []).filter((event) => event.id !== nextEvent.id);
+  normalized.unshift(nextEvent);
+  return normalized;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function statusToResultFlow(status) {
+  if (status === "finalized") return { ...createResultFlow(), status: "finalized", finalizedAt: new Date().toISOString() };
+  if (status === "resultWait") return { ...createResultFlow(), status: "submitted" };
+  return createResultFlow();
 }
 
 function syncActiveEvent() {
