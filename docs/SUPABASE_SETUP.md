@@ -20,6 +20,8 @@ Supabase SQL Editor で次の順番に貼り付けて実行します。
 2. `supabase/rls-policies.sql`
 3. 必要なら `supabase/seed.sql`
 
+SQL Editorではブラウザ翻訳をオフにしてください。SQLが `create extension if not exists pgcrypto;` ではなく「pgcrypto が存在しない場合は、拡張機能を作成します。」のような日本語文に変わると実行できません。
+
 `seed.sql` は `ADMIN_USER_ID` を Supabase Auth > Users のユーザーIDに置き換えてから実行します。未置換のまま実行すると停止します。
 
 ## 3. Auth設定
