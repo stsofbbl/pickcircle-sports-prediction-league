@@ -19,6 +19,10 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - `CLAUDE.md`: Claude Code / Codex などAI開発メンバー向けの作業ルール
 - `docs/WORKFLOW.md`: GitHubが分からない人向けの共同作業手順
 - `docs/GOOGLE_SHEETS_SYNC_PLAN.md`: Google Sheets同期の設計メモ
+- `docs/KOSHIEN_2026_DELIVERY_PLAN.md`: 夏の甲子園リリース計画
+- `docs/SUPABASE_SETUP.md`: Supabase Auth/Postgres セットアップ手順
+- `docs/SUPABASE_MIGRATION_PLAN.md`: Supabase移行計画
+- `docs/SUPABASE_MANUAL_TASKS.md`: Supabase管理画面で必要な手動作業とCodex代行範囲
 
 ビルドツールはありません。HTML/CSS/JavaScriptだけで動きます。
 
@@ -69,9 +73,22 @@ http://127.0.0.1:4173
 
 現在の実データ保存は端末内の `localStorage` です。
 
-仲間内テストに向けて、設定画面にGoogle Sheets同期欄を追加しています。Apps Script URL、Spreadsheet ID、League IDを保存し、`Sheetsへ保存` / `Sheetsから読込` を実行できます。
+仲間内テストに向けて、主方針を Supabase Auth + Supabase Postgres へ切り替えています。第1段階では既存の `localStorage` を残したまま、Supabase Auth、リーグ/参加者/大会/予想/結果テーブル、RLS、夏の甲子園データ保存の土台を追加しています。
 
-Google側のスプレッドシート作成とApps ScriptのWebアプリ公開だけは、ユーザーのGoogleアカウントで行う必要があります。テンプレートは `scripts/google-sheets-web-app.gs` にあります。詳細は `docs/GOOGLE_SHEETS_SYNC_PLAN.md` を見てください。
+Google Sheets同期は試作・保留ルートとして残しています。テンプレートは `scripts/google-sheets-web-app.gs` にあります。
+
+## 直近の開発方針
+
+W杯2026のUIはプロトタイプとして残し、直近は夏の甲子園までの実用化を優先します。
+
+優先順位:
+
+1. Supabase接続とAuth/RLS検証
+2. 夏の甲子園プリセットのオンライン保存
+3. 夏の甲子園向けプリセット
+4. スマホで使える予想入力、結果入力、ランキング
+
+詳細なスケジュールは `docs/KOSHIEN_2026_DELIVERY_PLAN.md` を見てください。
 
 ## W杯2026プリセット
 
@@ -127,3 +144,15 @@ git push origin feature/your-change
 GitHub上でPull Requestを作り、内容確認後に反映します。
 
 GitHubが分からない場合は、`docs/WORKFLOW.md` を見てください。
+
+## Supabase migration phase 1
+
+The online direction is now GitHub Pages + Supabase Auth + Supabase Postgres.
+
+- Setup: `docs/SUPABASE_SETUP.md`
+- Migration plan: `docs/SUPABASE_MIGRATION_PLAN.md`
+- Schema: `supabase/schema.sql`
+- RLS policies: `supabase/rls-policies.sql`
+- Optional Koshien seed: `supabase/seed.sql`
+
+Google Sheets files are still kept as paused/trial infrastructure. Do not put a Supabase `service_role` key in browser code. Use only the anon public key.

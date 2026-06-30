@@ -26,13 +26,13 @@
           <h1>ログイン</h1>
           <p>この端末のYOSOメンバーとして入ります。</p>
         </div>
-        <div class="auth-mode-switch" role="tablist" aria-label="認証モード">
+        <div class="auth-mode-switch" id="authModeSwitch" role="tablist" aria-label="認証モード">
           <button class="is-active" type="button" data-auth-mode="login">ログイン</button>
           <button type="button" data-auth-mode="register">新規登録</button>
         </div>
         <form class="auth-form" id="authForm">
           <label class="field">
-            <span>ユーザーID</span>
+            <span id="authIdentityLabel">ユーザーID</span>
             <input id="authUsername" type="text" autocomplete="username" required />
           </label>
           <label class="field auth-register-only">
@@ -43,6 +43,10 @@
             <span>パスワード</span>
             <input id="authPassword" type="password" autocomplete="current-password" required />
           </label>
+          <label class="field auth-register-only">
+            <span>パスワード確認</span>
+            <input id="authPasswordConfirm" type="password" autocomplete="new-password" />
+          </label>
           <label class="auth-check">
             <input id="authRemember" type="checkbox" checked />
             <span>ログイン状態を保持する</span>
@@ -50,10 +54,22 @@
           <button class="primary-button" id="authSubmitButton" type="submit">ログイン</button>
           <p class="auth-message" id="authMessage" role="status"></p>
         </form>
-        <div class="auth-help">
+        <form class="auth-form auth-recovery-form" id="authRecoveryForm" hidden>
+          <label class="field">
+            <span>新しいパスワード</span>
+            <input id="authRecoveryPassword" type="password" autocomplete="new-password" />
+          </label>
+          <label class="field">
+            <span>新しいパスワード確認</span>
+            <input id="authRecoveryPasswordConfirm" type="password" autocomplete="new-password" />
+          </label>
+          <button class="primary-button" id="authRecoverySubmitButton" type="submit">パスワードを更新</button>
+          <button class="ghost-button small-button" id="authRecoveryCancelButton" type="button">ログインへ戻る</button>
+        </form>
+        <div class="auth-help" id="authHelp">
           <button class="ghost-button small-button" id="authResetButton" type="button">パスワードを忘れた</button>
         </div>
-        <p class="auth-note">ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。</p>
+        <p class="auth-note" id="authNote">ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。</p>
       </div>
     </section>
     <div class="app-shell">
@@ -508,6 +524,9 @@
         </div>
       </form>
     </dialog>
+    <script src="./supabase-config.js"></script>
+    <script src="./js/supabase-client.js"></script>
+    <script src="./js/data-service.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

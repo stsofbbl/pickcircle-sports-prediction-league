@@ -4,6 +4,7 @@ const AUTH_SESSION_KEY = "yoso-auth-session-v1";
 const AUTH_PBKDF2_ITERATIONS = 120000;
 const AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES = 10080;
 const AUTH_ACTIVITY_THROTTLE_MS = 30000;
+const AUTH_MIN_PASSWORD_LENGTH = 6;
 const SHEETS_SYNC_TIMEOUT_MS = 12000;
 
 const templates = {
@@ -161,14 +162,24 @@ const els = {
   themeOptions: [...document.querySelectorAll("[data-theme-label]")],
   authScreen: document.querySelector("#authScreen"),
   authForm: document.querySelector("#authForm"),
+  authRecoveryForm: document.querySelector("#authRecoveryForm"),
   authModeButtons: [...document.querySelectorAll("[data-auth-mode]")],
+  authModeSwitch: document.querySelector("#authModeSwitch"),
+  authIdentityLabel: document.querySelector("#authIdentityLabel"),
   authUsername: document.querySelector("#authUsername"),
   authDisplayName: document.querySelector("#authDisplayName"),
   authPassword: document.querySelector("#authPassword"),
+  authPasswordConfirm: document.querySelector("#authPasswordConfirm"),
+  authRecoveryPassword: document.querySelector("#authRecoveryPassword"),
+  authRecoveryPasswordConfirm: document.querySelector("#authRecoveryPasswordConfirm"),
+  authRecoverySubmitButton: document.querySelector("#authRecoverySubmitButton"),
+  authRecoveryCancelButton: document.querySelector("#authRecoveryCancelButton"),
   authRemember: document.querySelector("#authRemember"),
   authSubmitButton: document.querySelector("#authSubmitButton"),
+  authHelp: document.querySelector("#authHelp"),
   authResetButton: document.querySelector("#authResetButton"),
   authMessage: document.querySelector("#authMessage"),
+  authNote: document.querySelector("#authNote"),
   accountChip: document.querySelector("#accountChip"),
   accountName: document.querySelector("#accountName"),
   logoutButton: document.querySelector("#logoutButton"),
@@ -261,7 +272,12 @@ function loadState() {
 
 let authSession = loadAuthSession();
 let authMode = "login";
+let authRecoveryMode = false;
 let lastAuthActivityWrite = 0;
+let onlineAuthUser = null;
+let pendingKoshienSyncTimer = null;
+let pendingKoshienLoadPromise = null;
+let lastKoshienOnlineLoadUserId = "";
 
 function loadAuthUsers() {
   try {
@@ -308,6 +324,8 @@ function saveAuthSession(session, remember = session?.remember) {
 }
 
 function currentAuthUser() {
+  if (authRecoveryMode) return null;
+  if (isSupabaseAuthEnabled()) return onlineAuthUser;
   if (!authSession?.userId) return null;
   if (isAuthSessionExpired(authSession)) {
     saveAuthSession(null);
@@ -346,26 +364,108 @@ function enforceAuthTimeout() {
 
 function renderAuthState() {
   const user = currentAuthUser();
+  renderAuthFormMode();
   document.body.classList.toggle("auth-locked", !user);
   if (els.authScreen) els.authScreen.hidden = Boolean(user);
   if (els.accountChip) els.accountChip.hidden = !user;
   if (els.accountName) els.accountName.textContent = user ? `${user.displayName}${user.role === "admin" ? " / Admin" : ""}` : "";
   if (!user) {
-    setAuthMode(loadAuthUsers().length ? "login" : "register");
+    if (!authRecoveryMode && !isSupabaseAuthEnabled()) setAuthMode(loadAuthUsers().length ? "login" : "register");
     return;
   }
   ensureParticipantForAuth(user);
   renderAccountSettings(user);
 }
 
+function isSupabaseAuthEnabled() {
+  return Boolean(window.YosoDataService?.isAuthEnabled?.());
+}
+
+function applyOnlineAuthUser(user) {
+  onlineAuthUser = user || null;
+  if (onlineAuthUser) ensureParticipantForAuth(onlineAuthUser);
+}
+
+async function bootstrapSupabaseAuth() {
+  if (!isSupabaseAuthEnabled()) return;
+  try {
+    await window.YosoDataService.auth.onAuthStateChange?.(handleSupabaseAuthEvent);
+    applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+    if (onlineAuthUser) await loadKoshienOnlineState();
+  } catch (error) {
+    console.warn("Supabase auth bootstrap failed", error);
+    applyOnlineAuthUser(null);
+  }
+  renderAuthState();
+  render();
+}
+
+async function handleSupabaseAuthEvent(event) {
+  if (event === "PASSWORD_RECOVERY") {
+    authRecoveryMode = true;
+    applyOnlineAuthUser(null);
+    renderAuthState();
+    setAuthMessage("新しいパスワードを入力してください。");
+    return;
+  }
+  if (authRecoveryMode) return;
+  if (event === "SIGNED_OUT") {
+    applyOnlineAuthUser(null);
+    lastKoshienOnlineLoadUserId = "";
+    renderAuthState();
+    render();
+    return;
+  }
+  if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+    try {
+      applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+      if (onlineAuthUser) await loadKoshienOnlineState();
+      renderAuthState();
+      render();
+    } catch (error) {
+      console.warn("Supabase auth state sync failed", error);
+    }
+  }
+}
+
 function setAuthMode(mode) {
   authMode = mode === "register" ? "register" : "login";
   els.authModeButtons?.forEach((button) => button.classList.toggle("is-active", button.dataset.authMode === authMode));
   if (els.authScreen) els.authScreen.dataset.mode = authMode;
-  if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? "登録して入る" : "ログイン";
-  if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  renderAuthFormMode();
   if (els.authRemember && authMode === "register") els.authRemember.checked = true;
   setAuthMessage("");
+}
+
+function renderAuthFormMode() {
+  const online = isSupabaseAuthEnabled();
+  const recovering = online && authRecoveryMode;
+  if (els.authForm) els.authForm.hidden = recovering;
+  if (els.authRecoveryForm) els.authRecoveryForm.hidden = !recovering;
+  if (els.authModeSwitch) els.authModeSwitch.hidden = recovering;
+  if (els.authHelp) els.authHelp.hidden = recovering;
+  if (els.authIdentityLabel) els.authIdentityLabel.textContent = online ? "メールアドレス" : "ユーザーID";
+  if (els.authUsername) {
+    els.authUsername.type = online ? "email" : "text";
+    els.authUsername.autocomplete = online ? "email" : "username";
+    els.authUsername.placeholder = online ? "you@example.com" : "";
+  }
+  if (els.authDisplayName) els.authDisplayName.required = online && authMode === "register";
+  if (els.authPassword) els.authPassword.autocomplete = authMode === "register" ? "new-password" : "current-password";
+  if (els.authPasswordConfirm) {
+    els.authPasswordConfirm.required = online && authMode === "register";
+    els.authPasswordConfirm.autocomplete = "new-password";
+  }
+  if (els.authRecoveryPassword) els.authRecoveryPassword.required = recovering;
+  if (els.authRecoveryPasswordConfirm) els.authRecoveryPasswordConfirm.required = recovering;
+  if (els.authSubmitButton) els.authSubmitButton.textContent = authMode === "register" ? (online ? "確認メールを送信" : "登録して入る") : "ログイン";
+  if (els.authResetButton) els.authResetButton.textContent = online ? "パスワード再設定メールを送る" : "パスワードを忘れた";
+  if (els.authNote) {
+    els.authNote.textContent = online
+      ? "実在するメールアドレスで登録します。確認メールのリンクを開いた後にログインできます。"
+      : "ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。";
+    if (recovering) els.authNote.textContent = "メール内のリンク確認が完了しました。新しいパスワードを設定してください。";
+  }
 }
 
 function renderAccountSettings(user = currentAuthUser()) {
@@ -657,19 +757,24 @@ function setAuthMessage(message) {
 
 async function handleAuthSubmit(event) {
   event.preventDefault();
-  if (!crypto?.subtle) {
+  if (!isSupabaseAuthEnabled() && !crypto?.subtle) {
     setAuthMessage("このブラウザではWeb Crypto APIが使えないため登録できません。");
     return;
   }
   const username = normalizeUsername(els.authUsername?.value || "");
   const displayName = (els.authDisplayName?.value || "").trim();
   const password = els.authPassword?.value || "";
+  const passwordConfirm = els.authPasswordConfirm?.value || "";
   const remember = Boolean(els.authRemember?.checked);
-  if (authMode === "register") await registerAuthUser(username, displayName, password, remember);
+  if (authMode === "register") await registerAuthUser(username, displayName, password, remember, passwordConfirm);
   else await loginAuthUser(username, password, remember);
 }
 
-async function registerAuthUser(username, displayName, password, remember = true) {
+async function registerAuthUser(username, displayName, password, remember = true, passwordConfirm = "") {
+  if (isSupabaseAuthEnabled()) {
+    await registerSupabaseAuthUser(username, displayName, password, passwordConfirm);
+    return;
+  }
   const users = loadAuthUsers();
   if (username.length < 3) {
     setAuthMessage("ユーザーIDは3文字以上で入力してください。");
@@ -711,6 +816,10 @@ async function registerAuthUser(username, displayName, password, remember = true
 }
 
 async function loginAuthUser(username, password, remember = true) {
+  if (isSupabaseAuthEnabled()) {
+    await loginSupabaseAuthUser(username, password);
+    return;
+  }
   const user = loadAuthUsers().find((candidate) => candidate.username === username);
   if (!user) {
     setAuthMessage("ユーザーIDまたはパスワードが違います。");
@@ -730,8 +839,166 @@ async function loginAuthUser(username, password, remember = true) {
   render();
 }
 
-function logoutAuthUser() {
+async function registerSupabaseAuthUser(email, displayName, password, passwordConfirm) {
+  if (!isValidEmail(email)) {
+    setAuthMessage("実在するメールアドレスを入力してください。");
+    return;
+  }
+  if (!displayName) {
+    setAuthMessage("表示名を入力してください。");
+    return;
+  }
+  if (password.length < 6) {
+    setAuthMessage("パスワードは6文字以上で入力してください。");
+    return;
+  }
+  if (password !== passwordConfirm) {
+    setAuthMessage("パスワード確認が一致しません。");
+    return;
+  }
+  try {
+    setAuthMessage("確認メールを送信しています...");
+    const result = await window.YosoDataService.auth.signUp({ email, password, displayName });
+    applyOnlineAuthUser(null);
+    if (els.authPassword) els.authPassword.value = "";
+    if (els.authPasswordConfirm) els.authPasswordConfirm.value = "";
+    setAuthMode("login");
+    if (els.authUsername) els.authUsername.value = email;
+    renderAuthState();
+    setAuthMessage(result?.message || "確認メールを送信しました。メール内のリンクを開いた後、この画面からログインしてください。");
+  } catch (error) {
+    setAuthMessage(formatSupabaseAuthError(error, "新規登録に失敗しました。"));
+  }
+}
+
+async function loginSupabaseAuthUser(email, password) {
+  if (!isValidEmail(email)) {
+    setAuthMessage("メールアドレスを入力してください。");
+    return;
+  }
+  try {
+    setAuthMessage("ログインしています...");
+    const user = await window.YosoDataService.auth.signIn({ email, password });
+    applyOnlineAuthUser(user);
+    if (els.authPassword) els.authPassword.value = "";
+    await loadKoshienOnlineState();
+    renderAuthState();
+    render();
+    setAuthMessage("");
+  } catch (error) {
+    setAuthMessage(formatSupabaseAuthError(error, "ログインに失敗しました。"));
+  }
+}
+
+async function sendSupabasePasswordReset() {
+  const email = normalizeUsername(els.authUsername?.value || "");
+  if (!isValidEmail(email)) {
+    setAuthMessage("パスワード再設定メールを送るメールアドレスを入力してください。");
+    return;
+  }
+  try {
+    setAuthMessage("パスワード再設定メールを送信しています...");
+    await window.YosoDataService.auth.sendPasswordResetEmail(email);
+    setAuthMessage("パスワード再設定メールを送信しました。メール内のリンクから再設定してください。");
+  } catch (error) {
+    setAuthMessage(formatSupabaseAuthError(error, "パスワード再設定メールを送信できませんでした。"));
+  }
+}
+
+async function handlePasswordRecoverySubmit(event) {
+  event.preventDefault();
+  if (!isSupabaseAuthEnabled()) {
+    setAuthMessage("Supabase接続が有効ではありません。設定を確認してください。");
+    return;
+  }
+  const newPassword = els.authRecoveryPassword?.value || "";
+  const passwordConfirm = els.authRecoveryPasswordConfirm?.value || "";
+  if (!newPassword || !passwordConfirm) {
+    setAuthMessage("新しいパスワードと確認欄を入力してください。");
+    return;
+  }
+  if (newPassword.length < AUTH_MIN_PASSWORD_LENGTH) {
+    setAuthMessage(`新しいパスワードは${AUTH_MIN_PASSWORD_LENGTH}文字以上で入力してください。`);
+    return;
+  }
+  if (newPassword !== passwordConfirm) {
+    setAuthMessage("新しいパスワードと確認欄が一致しません。");
+    return;
+  }
+  try {
+    setAuthMessage("パスワードを更新しています...");
+    await window.YosoDataService.auth.updatePassword(newPassword);
+    if (els.authRecoveryPassword) els.authRecoveryPassword.value = "";
+    if (els.authRecoveryPasswordConfirm) els.authRecoveryPasswordConfirm.value = "";
+    await finishPasswordRecovery("パスワードを更新しました。新しいパスワードでログインしてください。");
+  } catch (error) {
+    setAuthMessage(formatSupabaseAuthError(error, "パスワードを更新できませんでした。再設定メールのリンクを開き直してください。"));
+  }
+}
+
+async function cancelPasswordRecovery() {
+  await finishPasswordRecovery("ログイン画面へ戻りました。必要ならもう一度パスワード再設定メールを送信してください。");
+}
+
+async function finishPasswordRecovery(message) {
+  try {
+    await window.YosoDataService.auth.signOut();
+  } catch (error) {
+    console.warn("Supabase recovery signout failed", error);
+  }
+  authRecoveryMode = false;
+  applyOnlineAuthUser(null);
+  setAuthMode("login");
+  renderAuthState();
+  setAuthMessage(message);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function formatSupabaseAuthError(error, fallback) {
+  const message = String(error?.message || "");
+  if (/email not confirmed|not confirmed|confirm/i.test(message)) {
+    return "メール確認がまだ完了していません。確認メールのリンクを開いてからログインしてください。";
+  }
+  if (/invalid login credentials|invalid credentials/i.test(message)) {
+    return "メールアドレスまたはパスワードが違います。";
+  }
+  if (/already registered|already been registered|user already/i.test(message)) {
+    return "このメールアドレスは登録済みです。ログインするか、パスワード再設定を使ってください。";
+  }
+  if (/rate limit|too many/i.test(message)) {
+    return "短時間に試行回数が多すぎます。少し待ってから再度お試しください。";
+  }
+  if (/session|token|expired|invalid/i.test(message)) {
+    return "再設定リンクの有効期限が切れているか、セッションを確認できません。もう一度パスワード再設定メールを送信してください。";
+  }
+  if (/password/i.test(message)) {
+    return "パスワードを更新できませんでした。文字数や入力内容を確認してください。";
+  }
+  return message || fallback;
+}
+
+async function handleAuthReset() {
+  if (isSupabaseAuthEnabled()) {
+    await sendSupabasePasswordReset();
+    return;
+  }
+  resetLocalAuth();
+}
+
+async function logoutAuthUser() {
+  if (isSupabaseAuthEnabled()) {
+    try {
+      await window.YosoDataService.auth.signOut();
+    } catch (error) {
+      console.warn("Supabase signout failed", error);
+    }
+    applyOnlineAuthUser(null);
+  }
   saveAuthSession(null);
+  lastKoshienOnlineLoadUserId = "";
   renderAuthState();
 }
 
@@ -973,7 +1240,127 @@ function normalizeResultFlow(flow, participants = state.participants || defaultS
 
 function persist() {
   syncActiveEvent();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  queueKoshienOnlineSave();
+}
+
+function queueKoshienOnlineSave() {
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
+  clearTimeout(pendingKoshienSyncTimer);
+  pendingKoshienSyncTimer = setTimeout(async () => {
+    try {
+      await window.YosoDataService.koshien.saveSnapshot({
+        state,
+        event: state.event,
+        participantName: currentParticipantName(),
+      });
+    } catch (error) {
+      console.warn("Koshien Supabase save skipped", error);
+    }
+  }, 900);
+}
+
+async function loadKoshienOnlineState({ force = false } = {}) {
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.loadSnapshot) return null;
+  const userId = currentAuthUser()?.id || "";
+  if (!force && userId && lastKoshienOnlineLoadUserId === userId) return null;
+  if (pendingKoshienLoadPromise) return pendingKoshienLoadPromise;
+  setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
+  pendingKoshienLoadPromise = (async () => {
+    try {
+      const snapshot = await window.YosoDataService.koshien.loadSnapshot();
+      if (snapshot?.ok) {
+        applyKoshienOnlineSnapshot(snapshot);
+        lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
+        render();
+        setConnectionMessage(`Supabaseから甲子園データを読み込みました。${snapshot.predictionsPublic ? "締切後のため他メンバーの予想も取得しています。" : "締切前のため自分の予想だけ取得しています。"}`);
+      } else if (snapshot?.skipped) {
+        setConnectionMessage(koshienLoadSkipMessage(snapshot.reason));
+      }
+      return snapshot;
+    } catch (error) {
+      console.warn("Koshien Supabase load failed", error);
+      setConnectionMessage(`Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。${error?.message ? ` (${error.message})` : ""}`);
+      return null;
+    } finally {
+      pendingKoshienLoadPromise = null;
+    }
+  })();
+  return pendingKoshienLoadPromise;
+}
+
+function koshienLoadSkipMessage(reason) {
+  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期は無効です。ローカル保存を表示しています。";
+  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できないため、ローカル保存を表示しています。";
+  if (reason === "league is not ready") return "参加リーグを確認できませんでした。ローカル保存を表示しています。";
+  if (reason === "koshien event is not found") return "Supabaseに甲子園大会がまだありません。管理者が大会を保存すると別端末で読み込めます。";
+  return "Supabaseから読み込むデータがないため、ローカル保存を表示しています。";
+}
+
+function applyKoshienOnlineSnapshot(snapshot) {
+  const eventRow = snapshot.event;
+  const currentName = snapshot.currentUser?.displayName || currentParticipantName();
+  const predictionNames = (snapshot.predictions || [])
+    .map((row) => row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`))
+    .filter(Boolean);
+  const participants = uniqueStrings([...state.participants, currentName, ...predictionNames]);
+  const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
+  const rules = eventRow.rules || {};
+  const onlineEvent = normalizeEvent({
+    ...createEvent("koshien", participants, { id: eventRow.id, name: eventRow.name }),
+    id: eventRow.id,
+    name: eventRow.name || templates.koshien.eventName,
+    templateId: "koshien",
+    sport: "baseball",
+    status: eventRow.status || "open",
+    deadline: eventRow.prediction_deadline || "",
+    approvalPolicy: rules.approvalPolicy || state.approvalPolicy,
+    config: {
+      ...createConfig("koshien"),
+      ...(rules.config || {}),
+      teams: teams.length ? teams : (rules.config?.teams || createConfig("koshien").teams),
+    },
+    predictions: Object.fromEntries(participants.map((name) => [name, createPrediction("koshien")])),
+    results: snapshot.results?.payload || createResults("koshien"),
+    resultFlow: statusToResultFlow(eventRow.status),
+  }, { ...state, participants });
+
+  (snapshot.predictions || []).forEach((row) => {
+    const name = row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`);
+    if (!name) return;
+    onlineEvent.predictions[name] = row.payload || createPrediction("koshien");
+    normalizeKoshienPrediction(onlineEvent, name);
+  });
+
+  state.participants = participants;
+  state.events = mergeEventList(state.events || [], onlineEvent);
+  state.event = onlineEvent;
+  state.activeEventId = onlineEvent.id;
+  state.activeTemplate = "koshien";
+  state.connection = normalizeConnectionSettings({
+    ...state.connection,
+    leagueId: snapshot.league?.invite_code || state.connection?.leagueId,
+    lastSyncAt: new Date().toISOString(),
+  });
+  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function mergeEventList(events, nextEvent) {
+  const normalized = (events || []).filter((event) => event.id !== nextEvent.id);
+  normalized.unshift(nextEvent);
+  return normalized;
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function statusToResultFlow(status) {
+  if (status === "finalized") return { ...createResultFlow(), status: "finalized", finalizedAt: new Date().toISOString() };
+  if (status === "resultWait") return { ...createResultFlow(), status: "submitted" };
+  return createResultFlow();
 }
 
 function syncActiveEvent() {
@@ -4073,7 +4460,9 @@ els.authModeButtons?.forEach((button) => {
 });
 
 els.authForm?.addEventListener("submit", handleAuthSubmit);
-els.authResetButton?.addEventListener("click", resetLocalAuth);
+els.authRecoveryForm?.addEventListener("submit", handlePasswordRecoverySubmit);
+els.authRecoveryCancelButton?.addEventListener("click", cancelPasswordRecovery);
+els.authResetButton?.addEventListener("click", handleAuthReset);
 els.logoutButton?.addEventListener("click", logoutAuthUser);
 els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
@@ -4090,5 +4479,6 @@ els.dataConnectionCopyStateButton?.addEventListener("click", copyCurrentStateFor
 setInterval(enforceAuthTimeout, 60000);
 
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+bootstrapSupabaseAuth();
 renderAuthState();
 render();
