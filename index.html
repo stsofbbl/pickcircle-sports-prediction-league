@@ -417,15 +417,16 @@
                     <span>保存モード</span>
                     <select id="dataConnectionMode">
                       <option value="local">この端末のみ</option>
+                      <option value="supabase">Supabaseオンライン</option>
                       <option value="sheets">Google Sheets準備</option>
                     </select>
                   </label>
                   <label class="field">
-                    <span>Apps Script URL</span>
+                    <span id="dataConnectionScriptUrlLabel">Apps Script URL</span>
                     <input id="dataConnectionScriptUrl" type="url" placeholder="https://script.google.com/..." />
                   </label>
                   <label class="field">
-                    <span>Spreadsheet ID</span>
+                    <span id="dataConnectionSpreadsheetIdLabel">Spreadsheet ID</span>
                     <input id="dataConnectionSpreadsheetId" type="text" placeholder="スプレッドシートID" />
                   </label>
                   <label class="field">
@@ -437,7 +438,7 @@
                     <input id="dataConnectionLastSync" type="text" disabled />
                   </label>
                 </div>
-                <p class="field-note">Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。</p>
+                <p class="field-note" id="dataConnectionNote">Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。</p>
                 <div class="account-action-row">
                   <button class="primary-button" id="dataConnectionSaveButton" type="button">接続設定を保存</button>
                   <button class="ghost-button" id="dataConnectionTestButton" type="button">接続テスト</button>
