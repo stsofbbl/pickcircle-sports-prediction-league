@@ -104,6 +104,27 @@ GitHub Pagesへ反映するまでは、`gh-pages` ブランチには入れずロ
 
 `supabase-config.js` は `.gitignore` に入っています。ローカルで実キーを入れても通常のコミット対象にはなりません。ブラウザに入れてよいのは anon public key だけです。
 
+## 5.1 公開URLでSupabaseを有効にする
+
+公開URLに `supabase-config.js` が無い場合でも、アプリ内の設定画面から端末ごとにSupabaseを有効化できます。
+
+1. 設定 > データ接続を開きます。
+2. 保存モードを `Supabaseオンライン` にします。
+3. `Supabase Project URL` に `https://YOUR_PROJECT_REF.supabase.co` を入れます。
+4. `anon public key` にSupabaseのanon public keyを入れます。
+5. `League ID` に `g-unit-koshien-2026` を入れます。
+6. `接続設定を保存` を押します。
+7. メールアドレスでログインし直します。
+8. 甲子園大会を選び、`Supabaseへ保存` / `Supabaseから読込` で端末間同期を確認します。
+
+同じ設定を複数端末へ配る場合は、次の形式のURLを一度だけ開くと、その端末のlocalStorageへSupabase設定が保存されます。
+
+```text
+https://stsofbbl.github.io/pickcircle-sports-prediction-league/?supabaseUrl=https%3A%2F%2FYOUR_PROJECT_REF.supabase.co&supabaseAnonKey=YOUR_SUPABASE_ANON_PUBLIC_KEY&inviteCode=g-unit-koshien-2026
+```
+
+anon public keyはブラウザで使う公開キーです。ただし、`service_role` key、secret key、Supabaseアカウントのパスワードは絶対にURLやGitHubへ入れないでください。
+
 ## 6. 動作確認
 
 設定が無い場合:

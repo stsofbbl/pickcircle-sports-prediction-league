@@ -196,7 +196,9 @@ const els = {
   settingsLogoutButton: document.querySelector("#settingsLogoutButton"),
   accountMessage: document.querySelector("#accountMessage"),
   dataConnectionMode: document.querySelector("#dataConnectionMode"),
+  dataConnectionScriptUrlLabel: document.querySelector("#dataConnectionScriptUrlLabel"),
   dataConnectionScriptUrl: document.querySelector("#dataConnectionScriptUrl"),
+  dataConnectionSpreadsheetIdLabel: document.querySelector("#dataConnectionSpreadsheetIdLabel"),
   dataConnectionSpreadsheetId: document.querySelector("#dataConnectionSpreadsheetId"),
   dataConnectionLeagueId: document.querySelector("#dataConnectionLeagueId"),
   dataConnectionLastSync: document.querySelector("#dataConnectionLastSync"),
@@ -208,6 +210,7 @@ const els = {
   dataConnectionStatus: document.querySelector("#dataConnectionStatus"),
   dataConnectionSummary: document.querySelector("#dataConnectionSummary"),
   dataConnectionBadge: document.querySelector("#dataConnectionBadge"),
+  dataConnectionNote: document.querySelector("#dataConnectionNote"),
   dataConnectionMessage: document.querySelector("#dataConnectionMessage"),
   homeClubLine: document.querySelector("#homeClubLine"),
   homeParticipantName: document.querySelector("#homeParticipantName"),
@@ -483,24 +486,50 @@ function renderConnectionSettings() {
   state.connection = normalizeConnectionSettings(state.connection);
   const connection = state.connection;
   const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
+  const isSupabaseReady = connection.mode === "supabase" && window.YosoSupabase?.hasConfig?.();
   if (els.dataConnectionMode) els.dataConnectionMode.value = connection.mode;
-  if (els.dataConnectionScriptUrl) els.dataConnectionScriptUrl.value = connection.scriptUrl;
-  if (els.dataConnectionSpreadsheetId) els.dataConnectionSpreadsheetId.value = connection.spreadsheetId;
+  if (els.dataConnectionScriptUrlLabel) els.dataConnectionScriptUrlLabel.textContent = connection.mode === "supabase" ? "Supabase Project URL" : "Apps Script URL";
+  if (els.dataConnectionSpreadsheetIdLabel) els.dataConnectionSpreadsheetIdLabel.textContent = connection.mode === "supabase" ? "anon public key" : "Spreadsheet ID";
+  if (els.dataConnectionScriptUrl) {
+    els.dataConnectionScriptUrl.value = connection.mode === "supabase" ? connection.supabaseUrl : connection.scriptUrl;
+    els.dataConnectionScriptUrl.placeholder = connection.mode === "supabase" ? "https://YOUR_PROJECT_REF.supabase.co" : "https://script.google.com/...";
+  }
+  if (els.dataConnectionSpreadsheetId) {
+    els.dataConnectionSpreadsheetId.value = connection.mode === "supabase" ? connection.supabaseAnonKey : connection.spreadsheetId;
+    els.dataConnectionSpreadsheetId.placeholder = connection.mode === "supabase" ? "Supabase anon public key" : "スプレッドシートID";
+  }
   if (els.dataConnectionLeagueId) els.dataConnectionLeagueId.value = connection.leagueId;
   if (els.dataConnectionLastSync) els.dataConnectionLastSync.value = connection.lastSyncAt ? formatDateTime(connection.lastSyncAt) : "未同期";
   if (els.dataConnectionStatus) {
-    els.dataConnectionStatus.textContent = connection.mode === "sheets" ? "Google Sheets同期" : "この端末に保存中";
+    els.dataConnectionStatus.textContent = connection.mode === "supabase" ? "Supabaseオンライン" : connection.mode === "sheets" ? "Google Sheets同期" : "この端末に保存中";
   }
   if (els.dataConnectionSummary) {
-    els.dataConnectionSummary.textContent = isSheetsReady
+    els.dataConnectionSummary.textContent = isSupabaseReady
+      ? `League ID: ${connection.leagueId || "未設定"} / Supabaseへ保存・読込できます。`
+      : connection.mode === "supabase"
+        ? "Project URL、anon public key、League IDを入れて保存してください。"
+        : isSheetsReady
       ? `League ID: ${connection.leagueId || "未設定"} / Sheetsへ保存・読込できます。`
       : connection.mode === "sheets"
         ? "Apps Script URL、Spreadsheet ID、League IDを入れると同期できます。"
         : "友達と共有する前に、次のステップでSheets同期を追加します。";
   }
   if (els.dataConnectionBadge) {
-    els.dataConnectionBadge.textContent = isSheetsReady ? "SYNC READY" : connection.mode === "sheets" ? "SETUP" : "LOCAL";
-    els.dataConnectionBadge.className = `status-label ${isSheetsReady ? "open" : "pending"}`;
+    const ready = isSupabaseReady || isSheetsReady;
+    els.dataConnectionBadge.textContent = isSupabaseReady ? "ONLINE READY" : isSheetsReady ? "SYNC READY" : connection.mode === "supabase" || connection.mode === "sheets" ? "SETUP" : "LOCAL";
+    els.dataConnectionBadge.className = `status-label ${ready ? "open" : "pending"}`;
+  }
+  if (els.dataConnectionNote) {
+    els.dataConnectionNote.textContent = connection.mode === "supabase"
+      ? "SupabaseのProject URLとanon public keyを保存すると、この端末はオンライン認証・甲子園データ同期を使います。anon keyだけを使い、service_role keyは入れません。"
+      : "Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。";
+  }
+  if (els.dataConnectionTestButton) els.dataConnectionTestButton.textContent = connection.mode === "supabase" ? "Supabase接続テスト" : "接続テスト";
+  if (els.dataConnectionSyncToButton) {
+    els.dataConnectionSyncToButton.textContent = connection.mode === "supabase" ? "Supabaseへ保存" : "Sheetsへ保存";
+  }
+  if (els.dataConnectionSyncFromButton) {
+    els.dataConnectionSyncFromButton.textContent = connection.mode === "supabase" ? "Supabaseから読込" : "Sheetsから読込";
   }
 }
 
@@ -508,12 +537,54 @@ function setConnectionMessage(message) {
   if (els.dataConnectionMessage) els.dataConnectionMessage.textContent = message;
 }
 
-function handleConnectionSave() {
+function handleConnectionModeChange() {
   state.connection = normalizeConnectionSettings({
+    ...state.connection,
     mode: els.dataConnectionMode?.value,
-    scriptUrl: normalizeSheetsScriptUrl(els.dataConnectionScriptUrl?.value),
-    spreadsheetId: els.dataConnectionSpreadsheetId?.value.trim(),
-    leagueId: els.dataConnectionLeagueId?.value.trim(),
+  });
+  renderConnectionSettings();
+}
+
+function handleConnectionSave() {
+  const mode = els.dataConnectionMode?.value;
+  const primaryValue = els.dataConnectionScriptUrl?.value.trim();
+  const secondaryValue = els.dataConnectionSpreadsheetId?.value.trim();
+  const leagueId = els.dataConnectionLeagueId?.value.trim() || "g-unit-koshien-2026";
+  if (mode === "supabase") {
+    const problem = getSupabaseConfigProblem(primaryValue, secondaryValue);
+    if (problem) {
+      setConnectionMessage(problem);
+      return;
+    }
+    const savedConfig = window.YosoSupabase?.saveConfig?.({
+      url: primaryValue,
+      anonKey: secondaryValue,
+      inviteCode: leagueId,
+      leagueName: state.leagueName || "G-UNIT YOSO League",
+      emailRedirectTo: window.location.href.split("#")[0].split("?")[0],
+      passwordResetRedirectTo: window.location.href.split("#")[0].split("?")[0],
+      auth: { enabled: true },
+      sync: { autoSaveKoshien: true },
+    });
+    state.connection = normalizeConnectionSettings({
+      ...state.connection,
+      mode: "supabase",
+      supabaseUrl: savedConfig?.url || primaryValue,
+      supabaseAnonKey: savedConfig?.anonKey || secondaryValue,
+      leagueId,
+      lastSyncAt: state.connection?.lastSyncAt || "",
+    });
+    persist();
+    renderConnectionSettings();
+    renderAuthState();
+    setConnectionMessage("Supabase接続設定を保存しました。オンラインログインに切り替わります。ログイン後に甲子園データを保存・読込できます。");
+    return;
+  }
+  state.connection = normalizeConnectionSettings({
+    mode,
+    scriptUrl: normalizeSheetsScriptUrl(primaryValue),
+    spreadsheetId: secondaryValue,
+    leagueId,
     clientId: state.connection?.clientId,
     lastSyncAt: state.connection?.lastSyncAt || "",
   });
@@ -521,6 +592,35 @@ function handleConnectionSave() {
   renderConnectionSettings();
   setConnectionMessage("接続設定を保存しました。Google側のWebアプリ公開が済んでいれば同期できます。");
   renderDashboard();
+}
+
+async function handleConnectionTest() {
+  if (state.connection?.mode === "supabase" || els.dataConnectionMode?.value === "supabase") {
+    await testSupabaseConnection();
+    return;
+  }
+  await testSheetsConnection();
+}
+
+async function testSupabaseConnection() {
+  if (!window.YosoSupabase?.hasConfig?.()) {
+    setConnectionMessage("Supabase接続設定が未保存です。Project URLとanon public keyを入力して保存してください。");
+    return;
+  }
+  setConnectionMessage("Supabase接続を確認しています...");
+  try {
+    const client = await window.YosoSupabase.client();
+    if (!client) {
+      setConnectionMessage("Supabaseクライアントを作成できませんでした。Project URLとanon public keyを確認してください。");
+      return;
+    }
+    const user = await window.YosoDataService?.auth?.currentUser?.();
+    setConnectionMessage(user
+      ? `Supabase接続OKです。ログイン中: ${user.displayName || user.email || "ユーザー"}`
+      : "Supabase接続OKです。オンライン同期にはメールアドレスでログインしてください。");
+  } catch (error) {
+    setConnectionMessage(`Supabase接続に失敗しました。Project URLとanon public keyを確認してください。${error?.message ? ` (${error.message})` : ""}`);
+  }
 }
 
 async function testSheetsConnection() {
@@ -547,6 +647,56 @@ async function testSheetsConnection() {
   } catch (error) {
     setConnectionMessage(formatSheetsRequestError(error, "接続テスト"));
   }
+}
+
+async function handleConnectionSyncTo() {
+  if (state.connection?.mode === "supabase" || els.dataConnectionMode?.value === "supabase") {
+    await syncKoshienToSupabaseNow();
+    return;
+  }
+  await syncStateToSheets();
+}
+
+async function syncKoshienToSupabaseNow() {
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.saveSnapshot) {
+    setConnectionMessage("Supabase接続が有効ではありません。接続設定を保存してからログインしてください。");
+    return;
+  }
+  if (!currentAuthUser()) {
+    setConnectionMessage("Supabaseへ保存するには、メールアドレスでログインしてください。");
+    return;
+  }
+  if (baseTemplateId(state.event?.templateId) !== "koshien") {
+    setConnectionMessage("現在選択中の大会は甲子園プリセットではありません。甲子園大会を選んでから保存してください。");
+    return;
+  }
+  setConnectionMessage("Supabaseへ甲子園データを保存しています...");
+  try {
+    const result = await window.YosoDataService.koshien.saveSnapshot({
+      state,
+      event: state.event,
+      participantName: currentParticipantName(),
+    });
+    if (result?.skipped) {
+      setConnectionMessage(koshienSaveSkipMessage(result.reason));
+      return;
+    }
+    state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
+    if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+    renderConnectionSettings();
+    setConnectionMessage(`Supabaseへ保存しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`);
+  } catch (error) {
+    setConnectionMessage(`Supabaseへの保存に失敗しました。${error?.message ? ` (${error.message})` : ""}`);
+  }
+}
+
+function koshienSaveSkipMessage(reason) {
+  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期が無効です。接続設定を保存してください。";
+  if (reason === "event is not koshien") return "甲子園大会を選択してから保存してください。";
+  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できません。メールアドレスでログインしてください。";
+  if (reason === "league is not ready") return "参加リーグを確認できませんでした。League IDを確認してください。";
+  if (reason === "admin must create the Koshien event before members can save predictions") return "まだ管理者が甲子園大会をオンライン作成していません。先に管理者で保存してください。";
+  return "Supabaseへ保存できませんでした。設定とログイン状態を確認してください。";
 }
 
 async function syncStateToSheets() {
@@ -592,6 +742,14 @@ async function syncStateToSheets() {
   } catch (error) {
     setConnectionMessage(formatSheetsRequestError(error, "Sheetsへ保存"));
   }
+}
+
+async function handleConnectionSyncFrom() {
+  if (state.connection?.mode === "supabase" || els.dataConnectionMode?.value === "supabase") {
+    await loadKoshienOnlineState({ force: true });
+    return;
+  }
+  await syncStateFromSheets();
 }
 
 async function syncStateFromSheets() {
@@ -681,6 +839,28 @@ function getSheetsScriptUrlProblem(scriptUrl = "") {
   }
   if (!/\/macros\/s\/[^/]+\/exec$/.test(url.pathname)) {
     return "Apps Script URLは /macros/s/.../exec で終わるWebアプリURLを貼ってください。";
+  }
+  return "";
+}
+
+function getSupabaseConfigProblem(projectUrl = "", anonKey = "") {
+  const url = String(projectUrl || "").trim();
+  const key = String(anonKey || "").trim();
+  if (!url) return "Supabase Project URLを入力してください。";
+  if (!key) return "Supabase anon public keyを入力してください。";
+  try {
+    const parsed = new URL(url);
+    if (!/\.supabase\.co$/i.test(parsed.hostname)) {
+      return "Supabase Project URLは https://xxxx.supabase.co の形式で入力してください。";
+    }
+  } catch {
+    return "Supabase Project URLは https://xxxx.supabase.co の形式で入力してください。";
+  }
+  if (/service_role|secret/i.test(key) || /^sb_secret_/i.test(key) || /^sbp_/i.test(key)) {
+    return "secret keyやservice_role keyは入れないでください。ブラウザにはanon public keyだけを使います。";
+  }
+  if (!/^eyJ/i.test(key)) {
+    return "anon public keyの形式を確認してください。SupabaseのProject Settings > APIにあるanon public keyを使います。";
   }
   return "";
 }
@@ -1184,14 +1364,17 @@ function normalizeState(nextState) {
 }
 
 function normalizeConnectionSettings(connection = {}) {
-  const mode = connection.mode === "sheets" ? "sheets" : "local";
+  const mode = connection.mode === "sheets" || connection.mode === "supabase" ? connection.mode : "local";
+  const storedSupabaseConfig = window.YosoSupabase?.config?.() || {};
   const randomClientId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `client-${Date.now()}`;
   const clientId = connection.clientId || randomClientId;
   return {
     mode,
     scriptUrl: String(connection.scriptUrl || "").trim(),
     spreadsheetId: String(connection.spreadsheetId || "").trim(),
-    leagueId: String(connection.leagueId || "g-unit-koshien-2026").trim(),
+    supabaseUrl: String(connection.supabaseUrl || storedSupabaseConfig.url || "").trim(),
+    supabaseAnonKey: String(connection.supabaseAnonKey || storedSupabaseConfig.anonKey || "").trim(),
+    leagueId: String(connection.leagueId || storedSupabaseConfig.inviteCode || "g-unit-koshien-2026").trim(),
     clientId,
     lastSyncAt: String(connection.lastSyncAt || ""),
   };
@@ -4468,9 +4651,10 @@ els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
 els.accountPasswordButton?.addEventListener("click", handlePasswordChange);
 els.dataConnectionSaveButton?.addEventListener("click", handleConnectionSave);
-els.dataConnectionTestButton?.addEventListener("click", testSheetsConnection);
-els.dataConnectionSyncToButton?.addEventListener("click", syncStateToSheets);
-els.dataConnectionSyncFromButton?.addEventListener("click", syncStateFromSheets);
+els.dataConnectionMode?.addEventListener("change", handleConnectionModeChange);
+els.dataConnectionTestButton?.addEventListener("click", handleConnectionTest);
+els.dataConnectionSyncToButton?.addEventListener("click", handleConnectionSyncTo);
+els.dataConnectionSyncFromButton?.addEventListener("click", handleConnectionSyncFrom);
 els.dataConnectionCopyStateButton?.addEventListener("click", copyCurrentStateForSheets);
 
 ["click", "input", "keydown", "touchstart"].forEach((eventName) => {

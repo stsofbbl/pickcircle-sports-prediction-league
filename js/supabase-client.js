@@ -13,6 +13,40 @@
     }
   }
 
+  function saveConfig(nextConfig = {}) {
+    const normalized = {
+      ...fromStorage(),
+      ...nextConfig,
+      url: String(nextConfig.url || "").trim(),
+      anonKey: String(nextConfig.anonKey || "").trim(),
+      inviteCode: String(nextConfig.inviteCode || "g-unit-koshien-2026").trim(),
+      leagueName: String(nextConfig.leagueName || "G-UNIT YOSO League").trim(),
+      sdkUrl: nextConfig.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+      auth: { enabled: true, ...(nextConfig.auth || {}) },
+      sync: { autoSaveKoshien: true, ...(nextConfig.sync || {}) },
+    };
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+    clientPromise = null;
+    return normalized;
+  }
+
+  function applyConfigFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get("supabaseUrl");
+    const anonKey = params.get("supabaseAnonKey") || params.get("anonKey");
+    if (!url || !anonKey) return;
+    saveConfig({
+      url,
+      anonKey,
+      inviteCode: params.get("inviteCode") || "g-unit-koshien-2026",
+      leagueName: params.get("leagueName") || "G-UNIT YOSO League",
+      emailRedirectTo: window.location.href.split("#")[0].split("?")[0],
+      passwordResetRedirectTo: window.location.href.split("#")[0].split("?")[0],
+      auth: { enabled: true },
+      sync: { autoSaveKoshien: true },
+    });
+  }
+
   function config() {
     return {
       ...(window.YOSO_SUPABASE_CONFIG || {}),
@@ -76,8 +110,10 @@
   window.YosoSupabase = {
     config,
     hasConfig,
+    saveConfig,
     client,
     sessionUser,
     CONFIG_STORAGE_KEY,
   };
+  applyConfigFromUrl();
 })();
