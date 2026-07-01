@@ -108,6 +108,8 @@ GitHub Pagesへ反映するまでは、`gh-pages` ブランチには入れずロ
 
 公開URLに `supabase-config.js` が無い場合でも、アプリ内の設定画面から端末ごとにSupabaseを有効化できます。
 
+重要: 通常の公開URLを開くだけでは、スマホ側にSupabase Project URL / anon public key は入りません。その場合はローカル保存として動き、PCで作った大会は見えません。各端末で次の設定を行うか、PC側でコピーした設定URLをスマホで一度開いてください。
+
 1. 設定 > データ接続を開きます。
 2. 保存モードを `Supabaseオンライン` にします。
 3. `Supabase Project URL` に `https://YOUR_PROJECT_REF.supabase.co` を入れます。
@@ -116,6 +118,8 @@ GitHub Pagesへ反映するまでは、`gh-pages` ブランチには入れずロ
 6. `接続設定を保存` を押します。
 7. メールアドレスでログインし直します。
 8. 甲子園大会を選び、`Supabaseへ保存` / `Supabaseから読込` で端末間同期を確認します。
+
+PCで設定済みの場合は、保存モードを `Supabaseオンライン` にした状態で `設定URLをコピー` を押し、そのURLをスマホで一度開きます。その後スマホでメールログインすると同じリーグを読みに行きます。
 
 同じ設定を複数端末へ配る場合は、次の形式のURLを一度だけ開くと、その端末のlocalStorageへSupabase設定が保存されます。
 
