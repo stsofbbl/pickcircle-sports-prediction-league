@@ -442,6 +442,7 @@ function setAuthMode(mode) {
 
 function renderAuthFormMode() {
   const online = isSupabaseAuthEnabled();
+  const hasSupabaseConfig = Boolean(window.YosoSupabase?.hasConfig?.());
   const recovering = online && authRecoveryMode;
   if (els.authForm) els.authForm.hidden = recovering;
   if (els.authRecoveryForm) els.authRecoveryForm.hidden = !recovering;
@@ -466,7 +467,9 @@ function renderAuthFormMode() {
   if (els.authNote) {
     els.authNote.textContent = online
       ? "実在するメールアドレスで登録します。確認メールのリンクを開いた後にログインできます。"
-      : "ローカル保存の簡易アカウントです。メールアドレスは任意です。パスワードを忘れた場合は認証情報だけリセットして再登録できます。";
+      : hasSupabaseConfig
+        ? "Supabase設定はありますが認証が無効です。設定画面でオンライン設定を確認してください。"
+        : "オンライン未設定のため、この端末だけの簡易ログインです。複数端末で使うには設定画面でSupabaseオンラインを有効にしてください。";
     if (recovering) els.authNote.textContent = "メール内のリンク確認が完了しました。新しいパスワードを設定してください。";
   }
 }
@@ -530,6 +533,9 @@ function renderConnectionSettings() {
   }
   if (els.dataConnectionSyncFromButton) {
     els.dataConnectionSyncFromButton.textContent = connection.mode === "supabase" ? "Supabaseから読込" : "Sheetsから読込";
+  }
+  if (els.dataConnectionCopyStateButton) {
+    els.dataConnectionCopyStateButton.textContent = connection.mode === "supabase" ? "設定URLをコピー" : "現在のデータをコピー";
   }
 }
 
@@ -922,12 +928,36 @@ function delay(ms) {
 }
 
 async function copyCurrentStateForSheets() {
+  if (state.connection?.mode === "supabase") {
+    await copySupabaseSetupUrl();
+    return;
+  }
   const payload = JSON.stringify({ exportedAt: new Date().toISOString(), state }, null, 2);
   try {
     await navigator.clipboard.writeText(payload);
     setConnectionMessage("現在の大会データをクリップボードにコピーしました。");
   } catch {
     setConnectionMessage("コピーできませんでした。ブラウザの権限設定を確認してください。");
+  }
+}
+
+async function copySupabaseSetupUrl() {
+  const current = window.YosoSupabase?.config?.() || {};
+  const url = current.url || state.connection?.supabaseUrl || "";
+  const anonKey = current.anonKey || state.connection?.supabaseAnonKey || "";
+  if (!url || !anonKey) {
+    setConnectionMessage("Supabase設定URLを作るには、Project URLとanon public keyを保存してください。");
+    return;
+  }
+  const setupUrl = new URL(window.location.href.split("#")[0].split("?")[0]);
+  setupUrl.searchParams.set("supabaseUrl", url);
+  setupUrl.searchParams.set("supabaseAnonKey", anonKey);
+  setupUrl.searchParams.set("inviteCode", state.connection?.leagueId || current.inviteCode || "g-unit-koshien-2026");
+  try {
+    await navigator.clipboard.writeText(setupUrl.toString());
+    setConnectionMessage("Supabase設定URLをコピーしました。スマホでこのURLを一度開くとオンライン設定が入ります。");
+  } catch {
+    setConnectionMessage(`コピーできませんでした。次のURLをスマホで開いてください: ${setupUrl.toString()}`);
   }
 }
 
@@ -2389,6 +2419,7 @@ function addAndSelectEvent(event) {
   state.events.push(event);
   setActiveEvent(event.id);
   if (els.newTournamentName) els.newTournamentName.value = "";
+  persist();
 }
 
 function renderRankingEventOptions() {
