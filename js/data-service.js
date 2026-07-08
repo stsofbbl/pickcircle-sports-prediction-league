@@ -23,6 +23,27 @@
     return profile?.display_name || user?.user_metadata?.display_name || user?.email?.split("@")[0] || "YOSO member";
   }
 
+  function isMissingRelationError(error) {
+    return ["42P01", "42703"].includes(error?.code) || /relation .* does not exist|column .* does not exist/i.test(error?.message || "");
+  }
+
+  function koshienTeamMeta(event, name, index) {
+    const meta = event?.config?.teamMeta?.[name] || {};
+    const odds = Number(meta.odds) > 0 ? Number(meta.odds) : 1;
+    const startRound = Number(meta.startRound) === 2 || index < 15 ? 2 : 1;
+    return {
+      startRound,
+      odds,
+      sqrtOdds: Math.round(Math.sqrt(odds) * 10000) / 10000,
+    };
+  }
+
+  function fixedArray(value, count) {
+    const rows = Array.isArray(value) ? value.slice(0, count) : [];
+    while (rows.length < count) rows.push("");
+    return rows;
+  }
+
   function toAppUser(user, membership, profile) {
     if (!user) return null;
     return {
@@ -200,6 +221,157 @@
     return data;
   }
 
+  async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile }) {
+    const displayName = participantName || displayNameFromUser(user, profile);
+    const playerPayload = {
+      league_id: league.id,
+      profile_id: user.id,
+      display_name: displayName,
+      is_admin: membership?.role === "admin",
+    };
+    const { data: player, error: playerError } = await supabase
+      .from("players")
+      .upsert(playerPayload, { onConflict: "league_id,profile_id" })
+      .select("id")
+      .single();
+    if (playerError) throw playerError;
+
+    const eventId = String(event.id);
+    let teamRows = [];
+    const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
+    if (membership?.role === "admin" && teams.length) {
+      const rows = teams.map((name, index) => {
+        const meta = koshienTeamMeta(event, name, index);
+        return {
+          event_id: eventId,
+          name,
+          team_id: `koshien-2026-${index + 1}`,
+          school_name: name,
+          seed: index + 1,
+          start_round: meta.startRound,
+          odds: meta.odds,
+          metadata: { source: "yoso-koshien", sqrt_odds_snapshot: meta.sqrtOdds },
+        };
+      });
+      const { data, error } = await supabase
+        .from("teams")
+        .upsert(rows, { onConflict: "event_id,name" })
+        .select("id, name, odds, sqrt_odds");
+      if (error) throw error;
+      teamRows = data || [];
+    } else {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("id, name, odds, sqrt_odds")
+        .eq("event_id", eventId);
+      if (error) throw error;
+      teamRows = data || [];
+    }
+
+    const teamByName = new Map(teamRows.map((team) => [team.name, team]));
+    const prediction = event.predictions?.[participantName];
+    if (!prediction || !player?.id) return;
+
+    const phase1Picks = fixedArray(prediction.teams, Number(event.config?.pickCount) || 8)
+      .map((name, index) => ({ name, index }))
+      .filter((pick) => pick.name && teamByName.has(pick.name));
+    const { error: phase1DeleteError } = await supabase
+      .from("phase1_picks")
+      .delete()
+      .eq("event_id", eventId)
+      .eq("player_id", player.id);
+    if (phase1DeleteError) throw phase1DeleteError;
+    if (phase1Picks.length) {
+      const rows = phase1Picks.map((pick) => {
+        const team = teamByName.get(pick.name);
+        return {
+          event_id: eventId,
+          player_id: player.id,
+          team_id: team.id,
+          pick_order: pick.index + 1,
+          captain: prediction.captain === pick.name,
+          odds_snapshot: Number(team.odds) || null,
+          sqrt_odds_snapshot: Number(team.sqrt_odds) || null,
+        };
+      });
+      const { error } = await supabase.from("phase1_picks").insert(rows);
+      if (error) throw error;
+    }
+
+    const phase2Picks = fixedArray(prediction.phase2DraftPicks, Number(event.config?.phase2DraftCount) || 4)
+      .map((name, index) => ({ name, index }))
+      .filter((pick) => pick.name && teamByName.has(pick.name));
+    const { error: phase2DeleteError } = await supabase
+      .from("phase2_draft_picks")
+      .delete()
+      .eq("event_id", eventId)
+      .eq("player_id", player.id);
+    if (phase2DeleteError) throw phase2DeleteError;
+    if (phase2Picks.length) {
+      const rows = phase2Picks.map((pick) => {
+        const team = teamByName.get(pick.name);
+        return {
+          event_id: eventId,
+          player_id: player.id,
+          team_id: team.id,
+          draft_round: pick.index + 1,
+          odds_snapshot: Number(team.odds) || null,
+          sqrt_odds_snapshot: Number(team.sqrt_odds) || null,
+        };
+      });
+      const { error } = await supabase.from("phase2_draft_picks").insert(rows);
+      if (error) throw error;
+    }
+
+    const revengeTeam = teamByName.get(prediction.revengePick);
+    if (revengeTeam) {
+      const { error: revengeDeleteError } = await supabase
+        .from("revenge_picks")
+        .delete()
+        .eq("event_id", eventId)
+        .eq("player_id", player.id);
+      if (revengeDeleteError) throw revengeDeleteError;
+      const { error } = await supabase.from("revenge_picks").insert({
+        event_id: eventId,
+        player_id: player.id,
+        target_team_id: revengeTeam.id,
+        payload: { source_type: "app_selected" },
+      });
+      if (error) throw error;
+    }
+
+    const zombieTeam = teamByName.get(prediction.zombiePick);
+    if (zombieTeam) {
+      const { error: zombieDeleteError } = await supabase
+        .from("zombie_predictions")
+        .delete()
+        .eq("event_id", eventId)
+        .eq("player_id", player.id);
+      if (zombieDeleteError) throw zombieDeleteError;
+      const { error } = await supabase.from("zombie_predictions").insert({
+        event_id: eventId,
+        player_id: player.id,
+        team_id: zombieTeam.id,
+        payload: { target_team_name: prediction.zombiePick },
+      });
+      if (error) throw error;
+    }
+
+    const finalScore = prediction.finalScorePrediction || {};
+    const hasFinalScore = finalScore.champion || finalScore.runnerUp || finalScore.championScore !== "" || finalScore.runnerUpScore !== "";
+    if (hasFinalScore) {
+      const { error } = await supabase.from("final_score_predictions").upsert({
+        event_id: eventId,
+        player_id: player.id,
+        champion_team_id: teamByName.get(finalScore.champion)?.id || null,
+        runner_up_team_id: teamByName.get(finalScore.runnerUp)?.id || null,
+        champion_score: finalScore.championScore === "" ? null : Number(finalScore.championScore),
+        runner_up_score: finalScore.runnerUpScore === "" ? null : Number(finalScore.runnerUpScore),
+      }, { onConflict: "event_id,player_id" });
+      if (error) throw error;
+    }
+  }
+
   async function saveKoshienSnapshot({ state, event, participantName }) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
     if (!event || event.templateId !== "koshien") return { skipped: true, reason: "event is not koshien" };
@@ -211,6 +383,7 @@
     const league = await ensureLeagueMembership({ createIfMissing: true });
     if (!league?.id) return { skipped: true, reason: "league is not ready" };
     const membership = await getCurrentMembership(user.id);
+    const profile = await getProfile(user.id);
     const isAdmin = membership?.role === "admin";
 
     const deadline = event.deadline ? new Date(event.deadline).toISOString() : null;
@@ -273,6 +446,16 @@
         submitted_at: new Date().toISOString(),
       }, { onConflict: "event_id,user_id" });
       if (predictionError) throw predictionError;
+    }
+
+    try {
+      await saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile });
+    } catch (error) {
+      if (isMissingRelationError(error)) {
+        console.warn("Koshien structured tables are not installed yet. Run supabase/schema.sql and supabase/rls-policies.sql to enable them.", error);
+      } else {
+        throw error;
+      }
     }
 
     return { ok: true };
