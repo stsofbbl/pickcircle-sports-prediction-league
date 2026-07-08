@@ -156,3 +156,54 @@ The online direction is now GitHub Pages + Supabase Auth + Supabase Postgres.
 - Optional Koshien seed: `supabase/seed.sql`
 
 Google Sheets files are still kept as paused/trial infrastructure. Do not put a Supabase `service_role` key in browser code. Use only the anon public key.
+
+## YOSO Summer Koshien 2026 QA Notes
+
+YOSO Summer Koshien 2026 is a points-only prediction game for a private club. It does not handle real money, settlement, payment, payout, or cash betting.
+
+### Basic Flow
+
+1. Create or open a Koshien 2026 event.
+2. Enter 49 schools with `start_round` set to `1` or `2`.
+3. Set odds for each school. The app uses `sqrt_odds_capped = min(sqrt(odds), 50)` for scoring.
+4. Phase 1: each player picks 8 schools and selects 1 captain.
+5. Manager enters school finishes as the tournament progresses.
+6. Revenge card: only players whose Phase 1 schools are all eliminated by Best 16 can make a revenge pick.
+7. Phase 2: after Best 16 is fixed, run the 4-school snake draft.
+8. Zombie mode: if enabled, players whose Phase 2 schools are all eliminated by Best 4 can pick one opponent-owned Best 4 school to lose in the semifinal.
+9. Phase 3: after the final card is fixed, players predict the final score.
+10. Ranking shows total score plus Phase 1, revenge, Phase 2, zombie impact, and Phase 3 breakdowns.
+
+### Manager Order
+
+1. Confirm participants.
+2. Confirm all 49 schools and odds.
+3. Confirm Phase 1 picks are complete.
+4. Enter match and finish results.
+5. Open revenge card only when Best 16 is known.
+6. Run Phase 2 draft after Best 16 is known.
+7. Enable zombie mode only after Best 4 is known.
+8. Enter final score after the final ends.
+9. Check ranking and score breakdown before archiving the event.
+
+### Supabase SQL Editor Order
+
+Run these files in this order:
+
+1. `supabase/schema.sql`
+2. `supabase/rls-policies.sql`
+3. Optional: `supabase/seed.sql`
+
+`schema.sql` uses `create table if not exists` and `alter table ... add column if not exists` for the Koshien additions, so rerunning it is intended to be safe for existing data. The compatibility views `phase3_predictions`, `zombie_picks`, and `score_snapshots` map to the current physical tables `final_score_predictions`, `zombie_predictions`, and `scores`.
+
+### LocalStorage QA Mode
+
+For local-only QA, leave Supabase configuration unset and open `index.html` directly or through a local static server. The app continues to save state to browser `localStorage`; Supabase structured saves are skipped or gracefully ignored when the schema has not been applied.
+
+### Current Known Gaps
+
+- Full browser click-through QA still needs a human pass on the target browser/device.
+- Supabase read-back for every Koshien structured table should be verified after SQL is applied to the real project.
+- Tournament result entry is still manager-driven; no official result API integration is included.
+- Revenge and zombie eligibility should be rechecked with real bracket data once the 49 schools and matches are finalized.
+- Final score inputs are integer fields and tied scores are ignored by scoring, but the UI still needs an explicit warning when a tie is entered.

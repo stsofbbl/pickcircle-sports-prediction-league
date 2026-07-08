@@ -152,6 +152,15 @@ alter table public.events enable row level security;
 alter table public.event_teams enable row level security;
 alter table public.predictions enable row level security;
 alter table public.results enable row level security;
+alter table public.players enable row level security;
+alter table public.teams enable row level security;
+alter table public.matches enable row level security;
+alter table public.phase1_picks enable row level security;
+alter table public.phase2_draft_picks enable row level security;
+alter table public.final_score_predictions enable row level security;
+alter table public.scores enable row level security;
+alter table public.revenge_picks enable row level security;
+alter table public.zombie_predictions enable row level security;
 
 drop policy if exists profiles_select_members on public.profiles;
 create policy profiles_select_members on public.profiles
@@ -384,6 +393,272 @@ with check (
   )
 );
 
+drop policy if exists players_select_members on public.players;
+create policy players_select_members on public.players
+for select to authenticated
+using (public.is_league_member(league_id));
+
+drop policy if exists players_insert_self_member on public.players;
+create policy players_insert_self_member on public.players
+for insert to authenticated
+with check (
+  profile_id = (select auth.uid())
+  and public.is_league_member(league_id)
+);
+
+drop policy if exists players_update_self_or_admin on public.players;
+create policy players_update_self_or_admin on public.players
+for update to authenticated
+using (profile_id = (select auth.uid()) or public.is_league_admin(league_id))
+with check (profile_id = (select auth.uid()) or public.is_league_admin(league_id));
+
+drop policy if exists teams_select_members on public.teams;
+create policy teams_select_members on public.teams
+for select to authenticated
+using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_member(e.league_id)
+  )
+);
+
+drop policy if exists teams_admin_all on public.teams;
+create policy teams_admin_all on public.teams
+for all to authenticated
+using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_admin(e.league_id)
+  )
+)
+with check (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_admin(e.league_id)
+  )
+);
+
+drop policy if exists matches_select_members on public.matches;
+create policy matches_select_members on public.matches
+for select to authenticated
+using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_member(e.league_id)
+  )
+);
+
+drop policy if exists matches_admin_all on public.matches;
+create policy matches_admin_all on public.matches
+for all to authenticated
+using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_admin(e.league_id)
+  )
+)
+with check (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_admin(e.league_id)
+  )
+);
+
+drop policy if exists phase1_picks_select_owner_or_public on public.phase1_picks;
+create policy phase1_picks_select_owner_or_public on public.phase1_picks
+for select to authenticated
+using (
+  exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+  or public.is_prediction_public(event_id)
+);
+
+drop policy if exists phase1_picks_self_before_deadline on public.phase1_picks;
+create policy phase1_picks_self_before_deadline on public.phase1_picks
+for all to authenticated
+using (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+)
+with check (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+);
+
+drop policy if exists phase2_draft_picks_select_owner_or_public on public.phase2_draft_picks;
+create policy phase2_draft_picks_select_owner_or_public on public.phase2_draft_picks
+for select to authenticated
+using (
+  exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+  or public.is_prediction_public(event_id)
+);
+
+drop policy if exists phase2_draft_picks_self_before_deadline on public.phase2_draft_picks;
+create policy phase2_draft_picks_self_before_deadline on public.phase2_draft_picks
+for all to authenticated
+using (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+)
+with check (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+);
+
+drop policy if exists final_score_predictions_select_owner_or_public on public.final_score_predictions;
+create policy final_score_predictions_select_owner_or_public on public.final_score_predictions
+for select to authenticated
+using (
+  exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+  or public.is_prediction_public(event_id)
+);
+
+drop policy if exists final_score_predictions_self_before_deadline on public.final_score_predictions;
+create policy final_score_predictions_self_before_deadline on public.final_score_predictions
+for all to authenticated
+using (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+)
+with check (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+);
+
+drop policy if exists scores_select_members on public.scores;
+create policy scores_select_members on public.scores
+for select to authenticated
+using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_member(e.league_id)
+  )
+);
+
+drop policy if exists scores_admin_all on public.scores;
+create policy scores_admin_all on public.scores
+for all to authenticated
+using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_admin(e.league_id)
+  )
+)
+with check (
+  exists (
+    select 1 from public.events e
+    where e.id = event_id
+      and public.is_league_admin(e.league_id)
+  )
+);
+
+drop policy if exists revenge_picks_select_owner_or_public on public.revenge_picks;
+create policy revenge_picks_select_owner_or_public on public.revenge_picks
+for select to authenticated
+using (
+  exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+  or public.is_prediction_public(event_id)
+);
+
+drop policy if exists revenge_picks_self_before_deadline on public.revenge_picks;
+create policy revenge_picks_self_before_deadline on public.revenge_picks
+for all to authenticated
+using (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+)
+with check (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+);
+
+drop policy if exists zombie_predictions_select_owner_or_public on public.zombie_predictions;
+create policy zombie_predictions_select_owner_or_public on public.zombie_predictions
+for select to authenticated
+using (
+  exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+  or public.is_prediction_public(event_id)
+);
+
+drop policy if exists zombie_predictions_self_before_deadline on public.zombie_predictions;
+create policy zombie_predictions_self_before_deadline on public.zombie_predictions
+for all to authenticated
+using (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+)
+with check (
+  public.is_prediction_open(event_id)
+  and exists (
+    select 1 from public.players p
+    where p.id = player_id
+      and p.profile_id = (select auth.uid())
+  )
+);
+
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on
   public.profiles,
@@ -392,7 +667,21 @@ grant select, insert, update, delete on
   public.events,
   public.event_teams,
   public.predictions,
-  public.results
+  public.results,
+  public.players,
+  public.teams,
+  public.matches,
+  public.phase1_picks,
+  public.phase2_draft_picks,
+  public.final_score_predictions,
+  public.scores,
+  public.revenge_picks,
+  public.zombie_predictions
+to authenticated;
+grant select on
+  public.phase3_predictions,
+  public.zombie_picks,
+  public.score_snapshots
 to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 grant execute on function public.create_league_with_admin(text, text) to authenticated;

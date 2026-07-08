@@ -54,7 +54,12 @@ const templates = {
       "佐賀代表", "長崎代表", "熊本代表", "大分代表", "宮崎代表", "鹿児島代表", "沖縄代表",
     ],
     pickCount: 8,
-    stagePoints: { best32: 1, best16: 2, best8: 4, semifinal: 8, runnerUp: 16, champion: 32 },
+    stagePoints: { initial_loss: 0, first_win_then_loss: 1, best16: 1.5, best8: 2, best4: 2.5, runner_up: 3.5, champion: 5 },
+    phase2Points: { best16: 0, best8: 20, best4: 40, runner_up: 60, champion: 100 },
+    captainMultiplier: 1.2,
+    sqrtOddsCap: 50,
+    revengeMode: "full",
+    zombieEnabled: true,
   },
   fightCard: {
     id: "fightCard",
@@ -1667,7 +1672,15 @@ function createConfig(templateId) {
   if (base === "koshien") return {
     teams: [...(template.teams || templates.koshien.teams)],
     pickCount: template.pickCount || templates.koshien.pickCount,
+    phase2DraftCount: template.phase2DraftCount || 4,
+    activePhase: "phase1",
+    teamMeta: defaultKoshienTeamMeta(template.teams || templates.koshien.teams),
     stagePoints: { ...templates.koshien.stagePoints, ...(template.stagePoints || {}) },
+    phase2Points: { ...templates.koshien.phase2Points, ...(template.phase2Points || {}) },
+    captainMultiplier: template.captainMultiplier || templates.koshien.captainMultiplier,
+    sqrtOddsCap: template.sqrtOddsCap || templates.koshien.sqrtOddsCap,
+    revengeMode: template.revengeMode || templates.koshien.revengeMode,
+    zombieEnabled: template.zombieEnabled ?? templates.koshien.zombieEnabled,
     oddsBook: {},
   };
   if (base === "fightCard") return { markets: structuredClone(template.markets || templates.fightCard.markets), oddsBook: {} };
@@ -1682,7 +1695,15 @@ function createPrediction(templateId) {
   const base = baseTemplateId(templateId);
   if (base === "rankingOdds") return { picks: ["", "", "", ""], odds: [1, 1, 1, 1] };
   if (base === "draft") return { teams: ["", ""], bonusScore: "" };
-  if (base === "koshien") return { teams: Array(8).fill(""), captain: "", finalTotalScore: "" };
+  if (base === "koshien") return {
+    teams: Array(8).fill(""),
+    captain: "",
+    revengePick: "",
+    phase2DraftPicks: Array(4).fill(""),
+    zombiePick: "",
+    finalScorePrediction: { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" },
+    finalTotalScore: "",
+  };
   if (base === "fightCard") return { picks: {}, odds: {} };
   if (base === "worldCup") return {
     glPicks: {},
@@ -1701,7 +1722,7 @@ function createResults(templateId) {
   const base = baseTemplateId(templateId);
   if (base === "rankingOdds") return { finalTop4: ["", "", "", ""] };
   if (base === "draft") return { finishes: {}, scoreBonusWinner: "" };
-  if (base === "koshien") return { finishes: {}, finalTotalScore: "" };
+  if (base === "koshien") return { finishes: {}, directEliminators: {}, matches: [], finalScore: { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" }, finalTotalScore: "" };
   if (base === "fightCard") return { winners: {}, bonusWinner: "" };
   if (base === "worldCup") return {
     gl: {},
@@ -1723,10 +1744,21 @@ function normalizeKoshienEvent(event) {
   event.config ||= createConfig(event.templateId);
   event.config.teams = Array.isArray(event.config.teams) ? event.config.teams : [...templates.koshien.teams];
   event.config.pickCount = Number(event.config.pickCount) || template.pickCount || templates.koshien.pickCount;
+  event.config.phase2DraftCount = Number(event.config.phase2DraftCount) || template.phase2DraftCount || 4;
+  event.config.activePhase = ["phase1", "phase2", "phase3"].includes(event.config.activePhase) ? event.config.activePhase : "phase1";
+  event.config.teamMeta = normalizeKoshienTeamMeta(event.config.teams, event.config.teamMeta);
   event.config.stagePoints = { ...templates.koshien.stagePoints, ...(event.config.stagePoints || {}) };
+  event.config.phase2Points = { ...templates.koshien.phase2Points, ...(event.config.phase2Points || {}) };
+  event.config.captainMultiplier = Number(event.config.captainMultiplier) || templates.koshien.captainMultiplier;
+  event.config.sqrtOddsCap = Number(event.config.sqrtOddsCap) || templates.koshien.sqrtOddsCap;
+  event.config.revengeMode = event.config.revengeMode || templates.koshien.revengeMode;
+  event.config.zombieEnabled = event.config.zombieEnabled ?? templates.koshien.zombieEnabled;
   event.config.oddsBook ||= {};
   event.results ||= createResults(event.templateId);
   event.results.finishes ||= {};
+  event.results.directEliminators ||= {};
+  event.results.matches = Array.isArray(event.results.matches) ? event.results.matches : [];
+  event.results.finalScore ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
   event.results.finalTotalScore = event.results.finalTotalScore ?? "";
   Object.keys(event.predictions || {}).forEach((name) => normalizeKoshienPrediction(event, name));
 }
@@ -1738,8 +1770,38 @@ function normalizeKoshienPrediction(event, name) {
   const pickCount = Number(event.config?.pickCount) || templates.koshien.pickCount;
   prediction.teams = normalizeFixedArray(prediction.teams, pickCount);
   prediction.captain = prediction.captain || "";
+  prediction.revengePick = prediction.revengePick || "";
+  prediction.phase2DraftPicks = normalizeFixedArray(prediction.phase2DraftPicks, Number(event.config?.phase2DraftCount) || 4);
+  prediction.zombiePick = prediction.zombiePick || "";
+  prediction.finalScorePrediction ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
   prediction.finalTotalScore = prediction.finalTotalScore ?? "";
 }
+
+function defaultKoshienTeamMeta(teams) {
+  return Object.fromEntries((teams || []).map((name, index) => {
+    const odds = 1;
+    return [name, { startRound: index < 15 ? 2 : 1, odds, sqrtOdds: Math.sqrt(odds) }];
+  }));
+}
+
+function normalizeKoshienTeamMeta(teams, meta = {}) {
+  return Object.fromEntries((teams || []).map((name, index) => {
+    const current = meta?.[name] || {};
+    const odds = Number(current.odds) > 0 ? Number(current.odds) : 1;
+    const startRound = Number(current.startRound) === 2 || index < 15 ? 2 : 1;
+    return [name, {
+      startRound,
+      odds,
+      sqrtOdds: Math.round(Math.sqrt(odds) * 1000) / 1000,
+    }];
+  }));
+}
+
+const koshienPhases = [
+  { id: "phase1", label: "フェーズ1", caption: "8校ピック + キャプテン" },
+  { id: "phase2", label: "フェーズ2", caption: "ドラフト指名" },
+  { id: "phase3", label: "フェーズ3", caption: "決勝カード・スコア予想" },
+];
 
 function createWorldCupGroups(groupIds = templates.worldCup.groups, countries = []) {
   return groupIds.map((id, groupIndex) => ({
@@ -2018,11 +2080,17 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
       <div class="form-grid">
         <label class="field"><span>決勝合計得点 結果</span><input data-koshien-final-total-result type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalTotalScore)}" ${disabledResults}></label>
       </div>
+      <div class="form-grid">
+        <label class="field"><span>決勝 優勝校</span><select data-koshien-final-score-result="champion" ${disabledResults}>${optionList(teams, state.event.results.finalScore?.champion)}</select></label>
+        <label class="field"><span>決勝 準優勝校</span><select data-koshien-final-score-result="runnerUp" ${disabledResults}>${optionList(teams, state.event.results.finalScore?.runnerUp)}</select></label>
+        <label class="field"><span>優勝校得点</span><input data-koshien-final-score-result="championScore" type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalScore?.championScore)}" ${disabledResults}></label>
+        <label class="field"><span>準優勝校得点</span><input data-koshien-final-score-result="runnerUpScore" type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalScore?.runnerUpScore)}" ${disabledResults}></label>
+      </div>
       <div class="koshien-result-list">
         ${teams.map((team) => `
           <div class="draft-row koshien-result-row">
             <span class="pill">${escapeHtml(team)}</span>
-            <select data-koshien-finish="${escapeAttr(team)}" ${disabledResults}>${optionList(["", ...koshienStageOptions.map((stage) => stage.value)], state.event.results.finishes[team])}</select>
+            <select data-koshien-finish="${escapeAttr(team)}" ${disabledResults}>${optionList(["", ...koshienOfficialStageOptions.map((stage) => stage.value)], state.event.results.finishes[team])}</select>
             <span class="sub-label">${labelForOption(state.event.results.finishes[team])}</span>
           </div>
         `).join("")}
@@ -2031,7 +2099,37 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
     <details class="manager-details">
       <summary>49代表校を編集</summary>
       ${editableTeamsBlock("49代表校", teams)}
+      ${koshienTeamMetaEditor(teams)}
     </details>
+  `;
+}
+
+function koshienTeamMetaEditor(teams) {
+  normalizeKoshienEvent(state.event);
+  return `
+    <div class="entry-block koshien-results">
+      <div class="block-head">
+        <div>
+          <h3>開始ラウンド・倍率</h3>
+          <p class="helper-text">49校それぞれの開始ラウンド、オッズ、sqrt_oddsをSupabaseへ保存できる形で管理します。</p>
+        </div>
+      </div>
+      <div class="koshien-result-list">
+        ${teams.map((team) => {
+          const meta = state.event.config.teamMeta?.[team] || { startRound: 1, odds: 1, sqrtOdds: 1 };
+          return `
+            <div class="draft-row koshien-result-row">
+              <span class="pill">${escapeHtml(team)}</span>
+              <select data-koshien-team-start="${escapeAttr(team)}">
+                ${optionList(["1", "2"], String(meta.startRound || 1))}
+              </select>
+              <input data-koshien-team-odds="${escapeAttr(team)}" type="number" min="1" step="0.1" value="${escapeAttr(meta.odds)}">
+              <span class="sub-label">sqrt ${formatScore(meta.sqrtOdds || 1)}</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
   `;
 }
 
@@ -2104,6 +2202,47 @@ function bindActiveEventManagerInputs() {
     });
     input.addEventListener("change", () => {
       if (!canEditResults) return;
+      renderScoresOnly();
+    });
+  });
+  root.querySelectorAll("[data-koshien-final-score-result]").forEach((input) => {
+    input.disabled = !canEditResults;
+    const updateFinalScoreResult = () => {
+      if (!canEditResults) return;
+      state.event.results.finalScore ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
+      state.event.results.finalScore[input.dataset.koshienFinalScoreResult] = input.value;
+      renderScoresOnly();
+    };
+    input.addEventListener("input", updateFinalScoreResult);
+    input.addEventListener("change", updateFinalScoreResult);
+  });
+  root.querySelectorAll("[data-koshien-team-start]").forEach((input) => {
+    input.disabled = !canEditSettings;
+    input.addEventListener("change", () => {
+      if (!canEditSettings) return;
+      state.event.config.teamMeta ||= normalizeKoshienTeamMeta(getTeams(), state.event.config.teamMeta);
+      const team = input.dataset.koshienTeamStart;
+      state.event.config.teamMeta[team] ||= { startRound: 1, odds: 1, sqrtOdds: 1 };
+      state.event.config.teamMeta[team].startRound = Number(input.value) === 2 ? 2 : 1;
+      renderScoresOnly();
+    });
+  });
+  root.querySelectorAll("[data-koshien-team-odds]").forEach((input) => {
+    input.disabled = !canEditSettings;
+    input.addEventListener("input", () => {
+      if (!canEditSettings) return;
+      state.event.config.teamMeta ||= normalizeKoshienTeamMeta(getTeams(), state.event.config.teamMeta);
+      const team = input.dataset.koshienTeamOdds;
+      const odds = Number(input.value) > 0 ? Number(input.value) : 1;
+      state.event.config.teamMeta[team] = {
+        ...(state.event.config.teamMeta[team] || { startRound: 1 }),
+        odds,
+        sqrtOdds: Math.round(Math.sqrt(odds) * 1000) / 1000,
+      };
+      persist();
+    });
+    input.addEventListener("change", () => {
+      if (!canEditSettings) return;
       renderScoresOnly();
     });
   });
@@ -2683,6 +2822,7 @@ function renderKoshienForm() {
   normalizeKoshienEvent(state.event);
   const teams = getTeams();
   const participant = currentParticipantName();
+  const activePhase = state.event.config.activePhase || "phase1";
   const showPublic = state.event.status !== "open" || isResultFinalized(state.event);
   els.eventForm.innerHTML = `
     <div class="worldcup-phase-panel koshien-preset-panel">
@@ -2690,26 +2830,37 @@ function renderKoshienForm() {
       <h3>夏の甲子園 8校ピック</h3>
       <p>49代表から8校を選び、キャプテン校は2倍で加点します。準々決勝以降の再抽選に左右されない、甲子園向けのYOSOプリセットです。</p>
       <div class="koshien-score-strip">
-        ${koshienStageOptions.map((stage) => `<span>${stage.label} +${stage.points}</span>`).join("")}
+        ${koshienOfficialStageOptions.map((stage) => `<span>${stage.label} +${stage.points}</span>`).join("")}
+      </div>
+      <div class="worldcup-phase-tabs">
+        ${koshienPhases.map((phase) => `
+          <button type="button" class="phase-tab ${activePhase === phase.id ? "is-active" : ""}" data-koshien-phase="${phase.id}">
+            <strong>${escapeHtml(phase.label)}</strong>
+            <span>${escapeHtml(phase.caption)}</span>
+          </button>
+        `).join("")}
       </div>
     </div>
     <div class="active-manager-note">
       <strong>この画面は予想入力専用です</strong>
       <span>出場校編集と勝ち上がり結果は「大会編集」タブで管理します。</span>
     </div>
-    ${participantKoshienBlock(participant, teams)}
+    ${activePhase === "phase1" ? participantKoshienBlock(participant, teams) : ""}
+    ${activePhase === "phase2" ? participantKoshienDraftBlock(participant, teams) : ""}
+    ${activePhase === "phase3" ? participantKoshienFinalScoreBlock(participant, teams) : ""}
     ${showPublic ? koshienPublicPredictions(teams) : ""}
   `;
   bindGenericInputs();
 }
 
-const koshienStageOptions = [
-  { value: "best32", label: "32強", points: 1 },
-  { value: "best16", label: "16強", points: 2 },
-  { value: "best8", label: "8強", points: 4 },
-  { value: "semifinal", label: "4強", points: 8 },
-  { value: "runnerUp", label: "決勝", points: 16 },
-  { value: "champion", label: "優勝", points: 32 },
+const koshienOfficialStageOptions = [
+  { value: "initial_loss", label: "初戦敗退", points: 0 },
+  { value: "first_win_then_loss", label: "1勝後敗退", points: 1 },
+  { value: "best16", label: "ベスト16", points: 1.5 },
+  { value: "best8", label: "ベスト8", points: 2 },
+  { value: "best4", label: "ベスト4", points: 2.5 },
+  { value: "runner_up", label: "準優勝", points: 3.5 },
+  { value: "champion", label: "優勝", points: 5 },
 ];
 
 function koshienResultBlock(teams) {
@@ -2725,7 +2876,7 @@ function koshienResultBlock(teams) {
         ${teams.map((team) => `
           <div class="draft-row koshien-result-row">
             <span class="pill">${escapeHtml(team)}</span>
-            <select data-koshien-finish="${escapeAttr(team)}">${optionList(["", ...koshienStageOptions.map((stage) => stage.value)], state.event.results.finishes[team])}</select>
+            <select data-koshien-finish="${escapeAttr(team)}">${optionList(["", ...koshienOfficialStageOptions.map((stage) => stage.value)], state.event.results.finishes[team])}</select>
             <span class="sub-label">${labelForOption(state.event.results.finishes[team])}</span>
           </div>
         `).join("")}
@@ -2757,6 +2908,58 @@ function participantKoshienBlock(name, teams) {
       <div class="form-grid">
         <label class="field"><span>キャプテン校</span><select data-koshien-captain="${escapeAttr(name)}">${optionList(pickedTeams, prediction.captain)}</select></label>
         <label class="field"><span>決勝合計得点予想</span><input data-koshien-final-total="${escapeAttr(name)}" type="number" min="0" step="1" value="${escapeAttr(prediction.finalTotalScore)}"></label>
+      </div>
+    </div>
+  `;
+}
+
+function participantKoshienDraftBlock(name, teams) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  const picks = normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4);
+  const pickedTeams = [...new Set(picks.filter(Boolean))];
+  const revengeOptions = koshienRevengeOptions(prediction, teams);
+  return `
+    <div class="entry-block koshien-participant">
+      <div class="wc-participant-head">
+        <h3>${escapeHtml(name)} のYOSO</h3>
+        <span>${pickedTeams.length} / ${picks.length}</span>
+      </div>
+      <p class="wc-phase-intro">フェーズ2はドラフト指名です。クラブ内の重複不可制御はSupabaseの phase2_draft_picks で拡張できる構造にします。</p>
+      <div class="prediction-grid koshien-pick-grid">
+        ${picks.map((pick, index) => `
+          <label class="field">
+            <span>ドラフト${index + 1}巡目</span>
+            <select data-koshien-draft-pick="${escapeAttr(name)}:${index}">${optionList(teams, pick)}</select>
+          </label>
+        `).join("")}
+      </div>
+      <div class="form-grid">
+        <label class="field"><span>リベンジカード</span><select data-koshien-revenge-pick="${escapeAttr(name)}">${optionList(revengeOptions, prediction.revengePick)}</select></label>
+      </div>
+    </div>
+  `;
+}
+
+function participantKoshienFinalScoreBlock(name, teams) {
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  prediction.finalScorePrediction ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
+  const finalScore = prediction.finalScorePrediction;
+  const zombieOptions = koshienZombieOptions(name);
+  return `
+    <div class="entry-block koshien-participant">
+      <div class="wc-participant-head">
+        <h3>${escapeHtml(name)} のYOSO</h3>
+        <span>決勝スコア</span>
+      </div>
+      <p class="wc-phase-intro">フェーズ3は決勝カードとスコア予想です。第1・第2フェーズの得点とは別枠で集計します。</p>
+      <div class="form-grid">
+        <label class="field"><span>優勝校予想</span><select data-koshien-final-score="${escapeAttr(name)}:champion">${optionList(teams, finalScore.champion)}</select></label>
+        <label class="field"><span>準優勝校予想</span><select data-koshien-final-score="${escapeAttr(name)}:runnerUp">${optionList(teams, finalScore.runnerUp)}</select></label>
+        <label class="field"><span>優勝校得点</span><input data-koshien-final-score="${escapeAttr(name)}:championScore" type="number" min="0" step="1" value="${escapeAttr(finalScore.championScore)}"></label>
+        <label class="field"><span>準優勝校得点</span><input data-koshien-final-score="${escapeAttr(name)}:runnerUpScore" type="number" min="0" step="1" value="${escapeAttr(finalScore.runnerUpScore)}"></label>
+        <label class="field"><span>ゾンビ指定</span><select data-koshien-zombie-pick="${escapeAttr(name)}">${optionList(zombieOptions, prediction.zombiePick)}</select></label>
       </div>
     </div>
   `;
@@ -3310,6 +3513,12 @@ function worldCupPredictionDetails(name, phase, groups) {
 }
 
 function bindGenericInputs() {
+  els.eventForm.querySelectorAll("[data-koshien-phase]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.event.config.activePhase = button.dataset.koshienPhase;
+      render();
+    });
+  });
   els.eventForm.querySelectorAll("[data-wc-phase]").forEach((button) => {
     button.addEventListener("click", () => {
       state.event.config.activePhase = button.dataset.wcPhase;
@@ -3553,7 +3762,16 @@ function bindGenericInputs() {
     input.addEventListener("change", () => {
       const [name, index] = input.dataset.koshienPick.split(":");
       ensurePrediction(name);
+      const previous = state.event.predictions[name].teams[Number(index)] || "";
       state.event.predictions[name].teams[Number(index)] = input.value;
+      const picks = state.event.predictions[name].teams.filter(Boolean);
+      const duplicate = input.value && picks.filter((team) => team === input.value).length > 1;
+      const round2Count = picks.filter((team) => koshienStartRound(team) === 2).length;
+      if (duplicate || round2Count > 3) {
+        state.event.predictions[name].teams[Number(index)] = previous;
+        render();
+        return;
+      }
       if (state.event.predictions[name].captain && !state.event.predictions[name].teams.includes(state.event.predictions[name].captain)) {
         state.event.predictions[name].captain = "";
       }
@@ -3573,6 +3791,49 @@ function bindGenericInputs() {
       state.event.predictions[input.dataset.koshienFinalTotal].finalTotalScore = input.value;
       renderScoresOnly();
     });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-draft-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const [name, index] = input.dataset.koshienDraftPick.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].phase2DraftPicks = normalizeFixedArray(
+        state.event.predictions[name].phase2DraftPicks,
+        state.event.config.phase2DraftCount || 4,
+      );
+      const previous = state.event.predictions[name].phase2DraftPicks[Number(index)] || "";
+      state.event.predictions[name].phase2DraftPicks[Number(index)] = input.value;
+      if (input.value && koshienPhase2TakenByOther(input.value, name)) {
+        state.event.predictions[name].phase2DraftPicks[Number(index)] = previous;
+        render();
+        return;
+      }
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-revenge-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      ensurePrediction(input.dataset.koshienRevengePick);
+      state.event.predictions[input.dataset.koshienRevengePick].revengePick = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-zombie-pick]").forEach((input) => {
+    input.addEventListener("change", () => {
+      ensurePrediction(input.dataset.koshienZombiePick);
+      state.event.predictions[input.dataset.koshienZombiePick].zombiePick = input.value;
+      renderScoresOnly();
+    });
+  });
+  els.eventForm.querySelectorAll("[data-koshien-final-score]").forEach((input) => {
+    const updateFinalScorePrediction = () => {
+      const [name, key] = input.dataset.koshienFinalScore.split(":");
+      ensurePrediction(name);
+      state.event.predictions[name].finalScorePrediction ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
+      state.event.predictions[name].finalScorePrediction[key] = input.value;
+      renderScoresOnly();
+    };
+    input.addEventListener("input", updateFinalScorePrediction);
+    input.addEventListener("change", updateFinalScorePrediction);
   });
   els.eventForm.querySelectorAll("[data-market-result]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -3707,6 +3968,7 @@ function applyResultInputPermissions() {
     "[data-finish]",
     "[data-koshien-finish]",
     "[data-koshien-final-total-result]",
+    "[data-koshien-final-score-result]",
     "[data-market-result]",
     "[data-wc-top-result]",
     "[data-wc-gl-result]",
@@ -4255,7 +4517,7 @@ function calculateScores() {
       const row = koshienRows.find((item) => item.name === name);
       score = row?.score || 0;
       detail = row?.detail || "8校ピック + キャプテン2倍";
-      return { name, score, detail, tiebreakDelta: row?.tiebreakDelta };
+      return { name, score, detail, tiebreakDelta: row?.tiebreakDelta, breakdown: row?.breakdown };
     }
     if (templateId === "fightCard") {
       const prediction = state.event.predictions[name];
@@ -4304,31 +4566,222 @@ function koshienScoreRows() {
   return state.participants.map((name) => {
     ensurePrediction(name);
     const prediction = state.event.predictions[name];
-    const uniquePicks = [...new Set(normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean))];
-    let score = 0;
-    uniquePicks.forEach((team) => {
-      const teamScore = koshienTeamScore(state.event.results.finishes[team]);
-      score += prediction.captain === team ? teamScore * 2 : teamScore;
-    });
+    const phase1 = koshienPhase1Score(prediction);
+    const revenge = koshienRevengeScore(prediction);
+    const phase2 = koshienPhase2Score(name, prediction);
+    const phase3 = koshienPhase3Score(name, prediction);
+    const score = phase1 + revenge + phase2 + phase3;
     const predictedFinalTotal = Number(prediction.finalTotalScore);
     const tiebreakDelta = hasFinalTotal && Number.isFinite(predictedFinalTotal)
       ? Math.abs(actualFinalTotal - predictedFinalTotal)
       : Infinity;
-    const tiebreakText = hasFinalTotal && Number.isFinite(predictedFinalTotal) ? ` / 同点差 ${tiebreakDelta}` : "";
+    const tiebreakText = hasFinalTotal && Number.isFinite(predictedFinalTotal) ? ` / final total diff ${tiebreakDelta}` : "";
     return {
       name,
       score,
       tiebreakDelta,
-      detail: `8校ピック + キャプテン2倍${tiebreakText}`,
+      breakdown: { phase1, revenge, phase2, phase3 },
+      detail: `P1 ${formatScore(phase1)} / Revenge ${formatScore(revenge)} / P2 ${formatScore(phase2)} / P3 ${formatScore(phase3)}${tiebreakText}`,
     };
   });
 }
 
+function koshienPhase1Score(prediction) {
+  const uniquePicks = [...new Set(normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean))];
+  return uniquePicks.reduce((total, team) => {
+    const base = koshienTeamScore(state.event.results.finishes[team]) * koshienSqrtOdds(team);
+    const captainMultiplier = Number(state.event.config.captainMultiplier) || templates.koshien.captainMultiplier || 1.2;
+    return total + (prediction.captain === team ? base * captainMultiplier : base);
+  }, 0);
+}
+
+function koshienRevengeScore(prediction) {
+  if (!koshienRevengeEligible(prediction)) return 0;
+  const team = prediction.revengePick;
+  if (!team) return 0;
+  const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
+  if (!["best8", "best4", "runner_up", "champion"].includes(finish)) return 0;
+  return koshienTeamScore(finish) * koshienSqrtOdds(team);
+}
+
+function koshienPhase2Score(name, prediction) {
+  const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
+  return uniquePicks.reduce((total, team) => total + koshienPhase2TeamScore(name, team), 0);
+}
+
+function koshienPhase3Score(name, prediction) {
+  const pick = prediction.finalScorePrediction || {};
+  const actual = state.event.results.finalScore || {};
+  if (!koshienFinalScoreReady(actual) || !koshienFinalScoreReady(pick)) return 0;
+  if (koshienFinalScoreExact(pick, actual)) return 50;
+  const exactExists = state.participants.some((participant) => {
+    ensurePrediction(participant);
+    return koshienFinalScoreExact(state.event.predictions[participant].finalScorePrediction || {}, actual);
+  });
+  if (exactExists) return 0;
+  const closest = koshienClosestFinalScoreNames(actual);
+  return closest.includes(name) ? 30 : 0;
+}
+
+function koshienSqrtOdds(team) {
+  const meta = state.event.config.teamMeta?.[team];
+  const odds = Number(meta?.odds) > 0 ? Number(meta.odds) : 1;
+  const raw = Number(meta?.sqrtOdds) > 0 ? Number(meta.sqrtOdds) : Math.sqrt(odds);
+  const cap = Number(state.event.config.sqrtOddsCap) || templates.koshien.sqrtOddsCap || 50;
+  return Math.min(raw, cap);
+}
+
 function koshienTeamScore(finish) {
-  const order = ["best32", "best16", "best8", "semifinal", "runnerUp", "champion"];
-  const index = order.indexOf(finish);
-  if (index === -1) return 0;
-  return order.slice(0, index + 1).reduce((total, stage) => total + (state.event.config.stagePoints?.[stage] || templates.koshien.stagePoints[stage] || 0), 0);
+  const normalized = koshienNormalizeFinish(finish);
+  return Number(state.event.config.stagePoints?.[normalized] ?? templates.koshien.stagePoints?.[normalized] ?? 0);
+}
+
+function koshienPhase2TeamScore(ownerName, team) {
+  const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
+  let score = Number(state.event.config.phase2Points?.[finish] ?? templates.koshien.phase2Points?.[finish] ?? 0);
+  if (!state.event.config.zombieEnabled || finish !== "best4") return score;
+  const hits = koshienZombieHitCount(team, ownerName);
+  if (hits >= 2) return 0;
+  if (hits === 1) return 20;
+  return score;
+}
+
+function koshienNormalizeFinish(finish) {
+  const aliases = {
+    best32: "first_win_then_loss",
+    semifinal: "best4",
+    runnerUp: "runner_up",
+    quarterfinal: "best8",
+  };
+  return aliases[finish] || finish || "initial_loss";
+}
+
+function koshienFinishRank(finish) {
+  const order = ["initial_loss", "first_win_then_loss", "best16", "best8", "best4", "runner_up", "champion"];
+  return order.indexOf(koshienNormalizeFinish(finish));
+}
+
+function koshienStartRound(team) {
+  return Number(state.event.config.teamMeta?.[team]?.startRound) === 2 ? 2 : 1;
+}
+
+function koshienPhase1Validation(prediction) {
+  const picks = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean);
+  const uniqueCount = new Set(picks).size;
+  if (picks.length !== uniqueCount) return { ok: false, message: "同じ高校は1人の8校指名内で重複できません。" };
+  const round2Count = picks.filter((team) => koshienStartRound(team) === 2).length;
+  if (round2Count > 3) return { ok: false, message: "2回戦スタート校は最大3校までです。" };
+  if (picks.length === (state.event.config.pickCount || 8) && !prediction.captain) return { ok: false, message: "キャプテン校を1校選んでください。" };
+  if (prediction.captain && !picks.includes(prediction.captain)) return { ok: false, message: "キャプテン校は指名済み8校から選んでください。" };
+  return { ok: true, message: "" };
+}
+
+function koshienReachedAtLeast(team, finish) {
+  return koshienFinishRank(state.event.results.finishes[team]) >= koshienFinishRank(finish);
+}
+
+function koshienRevengeOptions(prediction, fallbackTeams = []) {
+  if (!koshienRevengeEligible(prediction)) return [];
+  const best16 = fallbackTeams.filter((team) => koshienReachedAtLeast(team, "best16"));
+  const direct = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8)
+    .map((team) => state.event.results.directEliminators?.[team])
+    .filter((team) => team && best16.includes(team));
+  const options = [...new Set(direct)];
+  return options.length ? options : best16;
+}
+
+function koshienZombieOptions(name) {
+  if (!state.event.config.zombieEnabled) return [];
+  ensurePrediction(name);
+  const prediction = state.event.predictions[name];
+  if (!koshienZombieEligible(prediction)) return [];
+  const ownedByOthers = state.participants.flatMap((participant) => {
+    if (participant === name) return [];
+    ensurePrediction(participant);
+    return normalizeFixedArray(state.event.predictions[participant].phase2DraftPicks, state.event.config.phase2DraftCount || 4);
+  });
+  return [...new Set(ownedByOthers.filter((team) => team && koshienReachedAtLeast(team, "best4")))];
+}
+
+function koshienPhase2TakenByOther(team, ownerName) {
+  return state.participants.some((name) => {
+    if (name === ownerName) return false;
+    ensurePrediction(name);
+    return normalizeFixedArray(state.event.predictions[name].phase2DraftPicks, state.event.config.phase2DraftCount || 4).includes(team);
+  });
+}
+
+function koshienRevengeEligible(prediction) {
+  const picks = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean);
+  return picks.length === (state.event.config.pickCount || 8) && picks.every((team) => !koshienReachedAtLeast(team, "best16"));
+}
+
+function koshienZombieEligible(prediction) {
+  const picks = normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean);
+  return picks.length === (state.event.config.phase2DraftCount || 4) && picks.every((team) => !koshienReachedAtLeast(team, "best4"));
+}
+
+function koshienZombieHitCount(team, ownerName) {
+  return state.participants.reduce((count, name) => {
+    if (name === ownerName) return count;
+    ensurePrediction(name);
+    const prediction = state.event.predictions[name];
+    if (!koshienZombieEligible(prediction)) return count;
+    return prediction.zombiePick === team ? count + 1 : count;
+  }, 0);
+}
+
+function koshienFinalScoreReady(score) {
+  return Boolean(score?.champion
+    && score?.runnerUp
+    && score.champion !== score.runnerUp
+    && score.championScore !== ""
+    && score.runnerUpScore !== ""
+    && Number(score.championScore) !== Number(score.runnerUpScore));
+}
+
+function koshienFinalScoreExact(pick, actual) {
+  return koshienFinalScoreReady(pick)
+    && pick.champion === actual.champion
+    && pick.runnerUp === actual.runnerUp
+    && Number(pick.championScore) === Number(actual.championScore)
+    && Number(pick.runnerUpScore) === Number(actual.runnerUpScore);
+}
+
+function koshienFinalScoreMetric(pick, actual) {
+  const pickWinnerScore = Number(pick.championScore);
+  const pickRunnerScore = Number(pick.runnerUpScore);
+  const actualWinnerScore = Number(actual.championScore);
+  const actualRunnerScore = Number(actual.runnerUpScore);
+  return {
+    totalError: Math.abs(pickWinnerScore - actualWinnerScore) + Math.abs(pickRunnerScore - actualRunnerScore),
+    winnerHit: pick.champion === actual.champion ? 0 : 1,
+    marginError: Math.abs((pickWinnerScore - pickRunnerScore) - (actualWinnerScore - actualRunnerScore)),
+    totalPointsError: Math.abs((pickWinnerScore + pickRunnerScore) - (actualWinnerScore + actualRunnerScore)),
+  };
+}
+
+function koshienClosestFinalScoreNames(actual) {
+  const rows = state.participants.map((name) => {
+    ensurePrediction(name);
+    const pick = state.event.predictions[name].finalScorePrediction || {};
+    if (!koshienFinalScoreReady(pick)) return null;
+    return { name, metric: koshienFinalScoreMetric(pick, actual) };
+  }).filter(Boolean);
+  if (!rows.length) return [];
+  rows.sort((a, b) => (
+    a.metric.totalError - b.metric.totalError
+    || a.metric.winnerHit - b.metric.winnerHit
+    || a.metric.marginError - b.metric.marginError
+    || a.metric.totalPointsError - b.metric.totalPointsError
+  ));
+  const best = rows[0].metric;
+  return rows
+    .filter((row) => row.metric.totalError === best.totalError
+      && row.metric.winnerHit === best.winnerHit
+      && row.metric.marginError === best.marginError
+      && row.metric.totalPointsError === best.totalPointsError)
+    .map((row) => row.name);
 }
 
 function worldCupGroupStageScore(prediction, results, groups) {
