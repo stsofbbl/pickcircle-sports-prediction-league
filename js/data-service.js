@@ -323,14 +323,14 @@
       if (error) throw error;
     }
 
+    const { error: revengeDeleteError } = await supabase
+      .from("revenge_picks")
+      .delete()
+      .eq("event_id", eventId)
+      .eq("player_id", player.id);
+    if (revengeDeleteError) throw revengeDeleteError;
     const revengeTeam = teamByName.get(prediction.revengePick);
     if (revengeTeam) {
-      const { error: revengeDeleteError } = await supabase
-        .from("revenge_picks")
-        .delete()
-        .eq("event_id", eventId)
-        .eq("player_id", player.id);
-      if (revengeDeleteError) throw revengeDeleteError;
       const { error } = await supabase.from("revenge_picks").insert({
         event_id: eventId,
         player_id: player.id,
@@ -340,14 +340,14 @@
       if (error) throw error;
     }
 
+    const { error: zombieDeleteError } = await supabase
+      .from("zombie_predictions")
+      .delete()
+      .eq("event_id", eventId)
+      .eq("player_id", player.id);
+    if (zombieDeleteError) throw zombieDeleteError;
     const zombieTeam = teamByName.get(prediction.zombiePick);
     if (zombieTeam) {
-      const { error: zombieDeleteError } = await supabase
-        .from("zombie_predictions")
-        .delete()
-        .eq("event_id", eventId)
-        .eq("player_id", player.id);
-      if (zombieDeleteError) throw zombieDeleteError;
       const { error } = await supabase.from("zombie_predictions").insert({
         event_id: eventId,
         player_id: player.id,
@@ -359,6 +359,14 @@
 
     const finalScore = prediction.finalScorePrediction || {};
     const hasFinalScore = finalScore.champion || finalScore.runnerUp || finalScore.championScore !== "" || finalScore.runnerUpScore !== "";
+    if (!hasFinalScore) {
+      const { error: finalScoreDeleteError } = await supabase
+        .from("final_score_predictions")
+        .delete()
+        .eq("event_id", eventId)
+        .eq("player_id", player.id);
+      if (finalScoreDeleteError) throw finalScoreDeleteError;
+    }
     if (hasFinalScore) {
       const { error } = await supabase.from("final_score_predictions").upsert({
         event_id: eventId,

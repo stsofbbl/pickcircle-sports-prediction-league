@@ -684,5 +684,26 @@ grant select on
   public.score_snapshots
 to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
+
+revoke execute on function public.create_league_with_admin(text, text) from anon, public;
+revoke execute on function public.join_league_by_invite(text) from anon, public;
+revoke execute on function public.handle_new_auth_user() from anon, authenticated, public;
+revoke execute on function public.is_league_admin(uuid) from anon, public;
+revoke execute on function public.is_league_member(uuid) from anon, public;
+revoke execute on function public.is_prediction_open(text) from anon, public;
+revoke execute on function public.is_prediction_public(text) from anon, public;
+do $$
+begin
+  if exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname = 'rls_auto_enable'
+      and pg_get_function_identity_arguments(p.oid) = ''
+  ) then
+    revoke execute on function public.rls_auto_enable() from anon, authenticated, public;
+  end if;
+end $$;
 grant execute on function public.create_league_with_admin(text, text) to authenticated;
 grant execute on function public.join_league_by_invite(text) to authenticated;
