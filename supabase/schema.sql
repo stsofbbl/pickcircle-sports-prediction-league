@@ -127,13 +127,29 @@ create table if not exists public.matches (
   team1_score integer,
   team2_score integer,
   winner_team_id uuid references public.teams(id) on delete set null,
+  loser_team_id uuid references public.teams(id) on delete set null,
   starts_at timestamptz,
-  status text not null default 'scheduled' check (status in ('scheduled', 'live', 'final', 'canceled')),
+  status text not null default 'scheduled' check (status in ('scheduled', 'completed')),
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (event_id, round_key, match_no)
 );
+
+alter table public.matches add column if not exists loser_team_id uuid references public.teams(id) on delete set null;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.matches'::regclass
+      and conname = 'matches_status_check'
+  ) then
+    alter table public.matches drop constraint matches_status_check;
+  end if;
+  alter table public.matches add constraint matches_status_check check (status in ('scheduled', 'completed'));
+end $$;
 
 create table if not exists public.phase1_picks (
   id uuid primary key default gen_random_uuid(),
