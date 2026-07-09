@@ -4,6 +4,10 @@
   const CONFIG_STORAGE_KEY = "yoso-supabase-config-v1";
   let clientPromise = null;
 
+  function defaultLeagueId() {
+    return window.YOSO_PUBLIC_CONFIG?.DEFAULT_LEAGUE_ID || "g-unit-koshien-2026";
+  }
+
   function fromStorage() {
     try {
       const stored = localStorage.getItem(CONFIG_STORAGE_KEY);
@@ -13,15 +17,23 @@
     }
   }
 
+  function publicConfig() {
+    return window.YOSO_SUPABASE_CONFIG || {};
+  }
+
   function saveConfig(nextConfig = {}) {
-    const normalized = {
+    const base = {
+      ...publicConfig(),
       ...fromStorage(),
+    };
+    const normalized = {
+      ...base,
       ...nextConfig,
-      url: String(nextConfig.url || "").trim(),
-      anonKey: String(nextConfig.anonKey || "").trim(),
-      inviteCode: String(nextConfig.inviteCode || "g-unit-koshien-2026").trim(),
-      leagueName: String(nextConfig.leagueName || "G-UNIT YOSO League").trim(),
-      sdkUrl: nextConfig.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+      url: String(nextConfig.url ?? base.url ?? "").trim(),
+      anonKey: String(nextConfig.anonKey ?? base.anonKey ?? "").trim(),
+      inviteCode: String(nextConfig.inviteCode ?? nextConfig.leagueId ?? base.inviteCode ?? defaultLeagueId()).trim(),
+      leagueName: String(nextConfig.leagueName ?? base.leagueName ?? "G-UNIT YOSO League").trim(),
+      sdkUrl: nextConfig.sdkUrl || base.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
       auth: { enabled: true, ...(nextConfig.auth || {}) },
       sync: { autoSaveKoshien: true, ...(nextConfig.sync || {}) },
     };
@@ -34,11 +46,12 @@
     const params = new URLSearchParams(window.location.search);
     const url = params.get("supabaseUrl");
     const anonKey = params.get("supabaseAnonKey") || params.get("anonKey");
-    if (!url || !anonKey) return;
+    const leagueId = params.get("league") || params.get("inviteCode") || params.get("leagueId");
+    if (!url && !anonKey && !leagueId) return;
     saveConfig({
-      url,
-      anonKey,
-      inviteCode: params.get("inviteCode") || "g-unit-koshien-2026",
+      ...(url ? { url } : {}),
+      ...(anonKey ? { anonKey } : {}),
+      inviteCode: leagueId || defaultLeagueId(),
       leagueName: params.get("leagueName") || "G-UNIT YOSO League",
       emailRedirectTo: window.location.href.split("#")[0].split("?")[0],
       passwordResetRedirectTo: window.location.href.split("#")[0].split("?")[0],
@@ -48,9 +61,17 @@
   }
 
   function config() {
+    const base = publicConfig();
+    const stored = fromStorage();
     return {
-      ...(window.YOSO_SUPABASE_CONFIG || {}),
-      ...fromStorage(),
+      ...base,
+      ...stored,
+      url: String(stored.url || base.url || "").trim(),
+      anonKey: String(stored.anonKey || base.anonKey || "").trim(),
+      inviteCode: String(stored.inviteCode || stored.leagueId || base.inviteCode || defaultLeagueId()).trim(),
+      sdkUrl: stored.sdkUrl || base.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+      auth: { enabled: true, ...(base.auth || {}), ...(stored.auth || {}) },
+      sync: { autoSaveKoshien: true, ...(base.sync || {}), ...(stored.sync || {}) },
     };
   }
 
@@ -116,4 +137,8 @@
     CONFIG_STORAGE_KEY,
   };
   applyConfigFromUrl();
+  if (!fromStorage().inviteCode && hasConfig()) {
+    const current = config();
+    saveConfig({ inviteCode: current.inviteCode || defaultLeagueId() });
+  }
 })();
