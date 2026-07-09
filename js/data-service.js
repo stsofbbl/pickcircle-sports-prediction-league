@@ -44,6 +44,82 @@
     return rows;
   }
 
+  function koshienNumericScore(value) {
+    return value === "" || value === null || value === undefined ? null : Number(value);
+  }
+
+  function koshienRoundMatchNo(match, index) {
+    return Number(match.match_no) || Number(String(match.match_id || "").split("-")[1]) || index + 1;
+  }
+
+  async function saveKoshienMatches({ supabase, eventId, event, teamByName }) {
+    const matches = Array.isArray(event.results?.matches) ? event.results.matches : [];
+    if (!matches.length) return;
+    const rows = matches.map((match, index) => {
+      const teamA = teamByName.get(match.team_a_id);
+      const teamB = teamByName.get(match.team_b_id);
+      const winner = teamByName.get(match.winner_id);
+      const loser = teamByName.get(match.loser_id);
+      return {
+        event_id: eventId,
+        round_key: match.round || "R1",
+        match_no: koshienRoundMatchNo(match, index),
+        team1_id: teamA?.id || null,
+        team2_id: teamB?.id || null,
+        team1_score: koshienNumericScore(match.score_a),
+        team2_score: koshienNumericScore(match.score_b),
+        winner_team_id: winner?.id || null,
+        loser_team_id: loser?.id || null,
+        status: match.status === "completed" ? "completed" : "scheduled",
+        metadata: {
+          match_id: match.match_id || null,
+          team_a_name: match.team_a_id || "",
+          team_b_name: match.team_b_id || "",
+          winner_name: match.winner_id || "",
+          loser_team_id: loser?.id || null,
+          loser_name: match.loser_id || "",
+          app_status: match.status || "scheduled",
+        },
+      };
+    });
+    const { error } = await supabase.from("matches").upsert(rows, { onConflict: "event_id,round_key,match_no" });
+    if (error) throw error;
+  }
+
+  async function saveKoshienScores({ supabase, eventId, leagueId, scoreRows }) {
+    if (!Array.isArray(scoreRows) || !scoreRows.length) return;
+    const { data: players, error: playersError } = await supabase
+      .from("players")
+      .select("id, display_name")
+      .eq("league_id", leagueId);
+    if (playersError) throw playersError;
+    const playerByName = new Map((players || []).map((player) => [player.display_name, player]));
+    const rows = scoreRows
+      .map((row) => {
+        const player = playerByName.get(row.name);
+        if (!player?.id) return null;
+        const breakdown = row.breakdown || {};
+        return {
+          event_id: eventId,
+          player_id: player.id,
+          phase1_score: Number(breakdown.phase1) || 0,
+          phase2_score: Number(breakdown.phase2) || 0,
+          phase3_score: Number(breakdown.phase3) || 0,
+          revenge_score: Number(breakdown.revenge) || 0,
+          zombie_score: Number(breakdown.zombie) || 0,
+          breakdown: {
+            ...breakdown,
+            total: Number(row.score) || 0,
+            detail: row.detail || "",
+          },
+        };
+      })
+      .filter(Boolean);
+    if (!rows.length) return;
+    const { error } = await supabase.from("scores").upsert(rows, { onConflict: "event_id,player_id" });
+    if (error) throw error;
+  }
+
   function toAppUser(user, membership, profile) {
     if (!user) return null;
     return {
@@ -221,7 +297,7 @@
     return data;
   }
 
-  async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile }) {
+  async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows }) {
     const displayName = participantName || displayNameFromUser(user, profile);
     const playerPayload = {
       league_id: league.id,
@@ -269,6 +345,11 @@
     }
 
     const teamByName = new Map(teamRows.map((team) => [team.name, team]));
+    if (membership?.role === "admin") {
+      await saveKoshienMatches({ supabase, eventId, event, teamByName });
+      await saveKoshienScores({ supabase, eventId, leagueId: league.id, scoreRows });
+    }
+
     const prediction = event.predictions?.[participantName];
     if (!prediction || !player?.id) return;
 
@@ -380,7 +461,7 @@
     }
   }
 
-  async function saveKoshienSnapshot({ state, event, participantName }) {
+  async function saveKoshienSnapshot({ state, event, participantName, scoreRows = [] }) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
     if (!event || event.templateId !== "koshien") return { skipped: true, reason: "event is not koshien" };
 
@@ -457,7 +538,7 @@
     }
 
     try {
-      await saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile });
+      await saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows });
     } catch (error) {
       if (isMissingRelationError(error)) {
         console.warn("Koshien structured tables are not installed yet. Run supabase/schema.sql and supabase/rls-policies.sql to enable them.", error);
