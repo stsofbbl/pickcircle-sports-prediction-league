@@ -504,11 +504,11 @@ function renderConnectionSettings() {
   if (els.dataConnectionMode) els.dataConnectionMode.value = connection.mode;
   if (els.dataConnectionScriptUrlLabel) els.dataConnectionScriptUrlLabel.textContent = connection.mode === "supabase" ? "Supabase Project URL" : "Apps Script URL";
   if (els.dataConnectionSpreadsheetIdLabel) els.dataConnectionSpreadsheetIdLabel.textContent = connection.mode === "supabase" ? "anon public key" : "Spreadsheet ID";
-  [els.dataConnectionMode, els.dataConnectionScriptUrl, els.dataConnectionSpreadsheetId].forEach((input) => {
+  [els.dataConnectionMode, els.dataConnectionScriptUrl, els.dataConnectionSpreadsheetId, els.dataConnectionLeagueId].forEach((input) => {
     const field = input?.closest?.(".field");
     if (field) field.hidden = !isDeveloperMode;
   });
-  [els.dataConnectionSyncToButton, els.dataConnectionSyncFromButton, els.dataConnectionCopyStateButton].forEach((button) => {
+  [els.dataConnectionSaveButton, els.dataConnectionTestButton, els.dataConnectionSyncToButton, els.dataConnectionSyncFromButton, els.dataConnectionCopyStateButton].forEach((button) => {
     if (button) button.hidden = !isDeveloperMode;
   });
   if (els.dataConnectionScriptUrl) {
@@ -541,6 +541,7 @@ function renderConnectionSettings() {
     els.dataConnectionBadge.className = `status-label ${ready ? "open" : "pending"}`;
   }
   if (els.dataConnectionNote) {
+    els.dataConnectionNote.hidden = !isDeveloperMode;
     els.dataConnectionNote.textContent = connection.mode === "supabase"
       ? "通常はSupabase URLやanon public keyの入力は不要です。接続できない場合は通信環境またはログイン状態を確認してください。"
       : "Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。";
