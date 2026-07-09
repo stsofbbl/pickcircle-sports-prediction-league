@@ -6,6 +6,9 @@ const AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES = 10080;
 const AUTH_ACTIVITY_THROTTLE_MS = 30000;
 const AUTH_MIN_PASSWORD_LENGTH = 6;
 const SHEETS_SYNC_TIMEOUT_MS = 12000;
+const PUBLIC_CONFIG = window.YOSO_PUBLIC_CONFIG || {};
+const DEFAULT_SAVE_MODE = PUBLIC_CONFIG.DEFAULT_SAVE_MODE || "supabase";
+const DEFAULT_LEAGUE_ID = PUBLIC_CONFIG.DEFAULT_LEAGUE_ID || "g-unit-koshien-2026";
 
 const templates = {
   rankingOdds: {
@@ -42,7 +45,7 @@ const templates = {
     id: "koshien",
     sport: "baseball",
     name: "夏の甲子園8校ピック",
-    subtitle: "49代表から8校を選び、キャプテン校は2倍で加点",
+    subtitle: "49代表から8校を選び、キャプテン校は1.2倍で加点",
     eventName: "夏の甲子園2026 YOSO",
     teams: [
       "北北海道代表", "南北海道代表", "青森代表", "岩手代表", "宮城代表", "秋田代表", "山形代表",
@@ -133,7 +136,7 @@ const presetRuleDescriptions = {
   rankingOdds: "優勝、準優勝、ベスト4などの順位を予想する型です。WBC、甲子園、W杯の上位予想に向いています。",
   playoff: "クライマックスシリーズやプレーオフの勝ち抜け、シリーズ勝者、注目枠を予想する型です。",
   draft: "参加者がチームや選手を指名し、到達成績に応じてポイントを得る型です。",
-  koshien: "夏の甲子園向けの8校ピック型です。49代表から8校を選び、キャプテン校は2倍、勝ち上がり段階ごとに累積加点します。",
+  koshien: "夏の甲子園向けの8校ピック型です。49代表から8校を選び、キャプテン校は1.2倍、正式到達ポイントと√オッズで加点します。",
   fightCard: "格闘技やボクシングの対戦カードごとに、勝者、KO、判定などを予想する型です。",
   scoreBonus: "決勝スコア、総得点、KOラウンドなど、単独のボーナス項目を予想する型です。",
   worldCup: "W杯2026専用の3フェーズ型です。第1回GL、第2回決勝T、第3回決勝スコアを段階ごとに扱います。",
@@ -147,10 +150,10 @@ const defaultState = {
   activeTemplate: "worldCup",
   approvalPolicy: "half",
   connection: {
-    mode: "local",
+    mode: DEFAULT_SAVE_MODE,
     scriptUrl: "",
     spreadsheetId: "",
-    leagueId: "g-unit-koshien-2026",
+    leagueId: DEFAULT_LEAGUE_ID,
     clientId: "",
     lastSyncAt: "",
   },
@@ -266,6 +269,8 @@ const els = {
   historyEventName: document.querySelector("#historyEventName"),
   resultEventName: document.querySelector("#resultEventName"),
 };
+
+if (els.newEventButton) els.newEventButton.hidden = true;
 
 function loadState() {
   try {
@@ -493,11 +498,19 @@ function renderAccountSettings(user = currentAuthUser()) {
 function renderConnectionSettings() {
   state.connection = normalizeConnectionSettings(state.connection);
   const connection = state.connection;
+  const isDeveloperMode = new URLSearchParams(window.location.search).get("dev") === "1";
   const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
   const isSupabaseReady = connection.mode === "supabase" && window.YosoSupabase?.hasConfig?.();
   if (els.dataConnectionMode) els.dataConnectionMode.value = connection.mode;
   if (els.dataConnectionScriptUrlLabel) els.dataConnectionScriptUrlLabel.textContent = connection.mode === "supabase" ? "Supabase Project URL" : "Apps Script URL";
   if (els.dataConnectionSpreadsheetIdLabel) els.dataConnectionSpreadsheetIdLabel.textContent = connection.mode === "supabase" ? "anon public key" : "Spreadsheet ID";
+  [els.dataConnectionMode, els.dataConnectionScriptUrl, els.dataConnectionSpreadsheetId].forEach((input) => {
+    const field = input?.closest?.(".field");
+    if (field) field.hidden = !isDeveloperMode;
+  });
+  [els.dataConnectionSyncToButton, els.dataConnectionSyncFromButton, els.dataConnectionCopyStateButton].forEach((button) => {
+    if (button) button.hidden = !isDeveloperMode;
+  });
   if (els.dataConnectionScriptUrl) {
     els.dataConnectionScriptUrl.value = connection.mode === "supabase" ? connection.supabaseUrl : connection.scriptUrl;
     els.dataConnectionScriptUrl.placeholder = connection.mode === "supabase" ? "https://YOUR_PROJECT_REF.supabase.co" : "https://script.google.com/...";
@@ -509,13 +522,13 @@ function renderConnectionSettings() {
   if (els.dataConnectionLeagueId) els.dataConnectionLeagueId.value = connection.leagueId;
   if (els.dataConnectionLastSync) els.dataConnectionLastSync.value = connection.lastSyncAt ? formatDateTime(connection.lastSyncAt) : "未同期";
   if (els.dataConnectionStatus) {
-    els.dataConnectionStatus.textContent = connection.mode === "supabase" ? "Supabaseオンライン" : connection.mode === "sheets" ? "Google Sheets同期" : "この端末に保存中";
+    els.dataConnectionStatus.textContent = connection.mode === "supabase" ? "データ接続：Supabaseオンライン" : connection.mode === "sheets" ? "データ接続：Google Sheets同期" : "データ接続：この端末のみ";
   }
   if (els.dataConnectionSummary) {
     els.dataConnectionSummary.textContent = isSupabaseReady
-      ? `League ID: ${connection.leagueId || "未設定"} / Supabaseへ保存・読込できます。`
+      ? `League ID: ${connection.leagueId || "未設定"} / URLを開いてログインすればオンライン保存できます。`
       : connection.mode === "supabase"
-        ? "Project URL、anon public key、League IDを入れて保存してください。"
+        ? "Supabaseに接続できません。通信環境またはログイン状態を確認してください。"
         : isSheetsReady
       ? `League ID: ${connection.leagueId || "未設定"} / Sheetsへ保存・読込できます。`
       : connection.mode === "sheets"
@@ -524,12 +537,12 @@ function renderConnectionSettings() {
   }
   if (els.dataConnectionBadge) {
     const ready = isSupabaseReady || isSheetsReady;
-    els.dataConnectionBadge.textContent = isSupabaseReady ? "ONLINE READY" : isSheetsReady ? "SYNC READY" : connection.mode === "supabase" || connection.mode === "sheets" ? "SETUP" : "LOCAL";
+    els.dataConnectionBadge.textContent = isSupabaseReady ? "ONLINE READY" : connection.mode === "supabase" ? "ERROR" : isSheetsReady ? "SYNC READY" : connection.mode === "sheets" ? "SETUP" : "LOCAL";
     els.dataConnectionBadge.className = `status-label ${ready ? "open" : "pending"}`;
   }
   if (els.dataConnectionNote) {
     els.dataConnectionNote.textContent = connection.mode === "supabase"
-      ? "SupabaseのProject URLとanon public keyを保存すると、この端末はオンライン認証・甲子園データ同期を使います。anon keyだけを使い、service_role keyは入れません。"
+      ? "通常はSupabase URLやanon public keyの入力は不要です。接続できない場合は通信環境またはログイン状態を確認してください。"
       : "Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。";
   }
   if (els.dataConnectionTestButton) els.dataConnectionTestButton.textContent = connection.mode === "supabase" ? "Supabase接続テスト" : "接続テスト";
@@ -683,11 +696,7 @@ async function syncKoshienToSupabaseNow() {
   }
   setConnectionMessage("Supabaseへ甲子園データを保存しています...");
   try {
-    const result = await window.YosoDataService.koshien.saveSnapshot({
-      state,
-      event: state.event,
-      participantName: currentParticipantName(),
-    });
+    const result = await saveKoshienOnlineNow();
     if (result?.skipped) {
       setConnectionMessage(koshienSaveSkipMessage(result.reason));
       return;
@@ -1398,9 +1407,18 @@ function normalizeState(nextState) {
   };
 }
 
+function requestedLeagueIdFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return String(params.get("league") || params.get("inviteCode") || params.get("leagueId") || "").trim();
+}
+
 function normalizeConnectionSettings(connection = {}) {
-  const mode = connection.mode === "sheets" || connection.mode === "supabase" ? connection.mode : "local";
   const storedSupabaseConfig = window.YosoSupabase?.config?.() || {};
+  const hasSupabaseConfig = Boolean(storedSupabaseConfig.url && storedSupabaseConfig.anonKey);
+  const fallbackMode = hasSupabaseConfig ? DEFAULT_SAVE_MODE : "local";
+  const requestedMode = connection.mode === "sheets" || connection.mode === "supabase" || connection.mode === "local" ? connection.mode : fallbackMode;
+  const mode = hasSupabaseConfig && requestedMode !== "sheets" ? "supabase" : requestedMode;
+  const requestedLeagueId = requestedLeagueIdFromUrl();
   const randomClientId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `client-${Date.now()}`;
   const clientId = connection.clientId || randomClientId;
   return {
@@ -1409,7 +1427,7 @@ function normalizeConnectionSettings(connection = {}) {
     spreadsheetId: String(connection.spreadsheetId || "").trim(),
     supabaseUrl: String(connection.supabaseUrl || storedSupabaseConfig.url || "").trim(),
     supabaseAnonKey: String(connection.supabaseAnonKey || storedSupabaseConfig.anonKey || "").trim(),
-    leagueId: String(connection.leagueId || storedSupabaseConfig.inviteCode || "g-unit-koshien-2026").trim(),
+    leagueId: String(requestedLeagueId || connection.leagueId || storedSupabaseConfig.inviteCode || DEFAULT_LEAGUE_ID).trim(),
     clientId,
     lastSyncAt: String(connection.lastSyncAt || ""),
   };
@@ -1463,16 +1481,38 @@ function persist() {
   queueKoshienOnlineSave();
 }
 
+function saveLocalStateOnly() {
+  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+async function saveKoshienOnlineNow({ participantName = currentParticipantName(), updateConnection = true } = {}) {
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.saveSnapshot) {
+    return { skipped: true, reason: "autoSaveKoshien is disabled" };
+  }
+  if (baseTemplateId(state.event?.templateId) !== "koshien") {
+    return { skipped: true, reason: "event is not koshien" };
+  }
+  clearTimeout(pendingKoshienSyncTimer);
+  const result = await window.YosoDataService.koshien.saveSnapshot({
+    state,
+    event: state.event,
+    participantName,
+  });
+  if (!result?.skipped && updateConnection) {
+    state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
+    saveLocalStateOnly();
+    renderConnectionSettings();
+  }
+  return result;
+}
+
 function queueKoshienOnlineSave() {
   if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
   clearTimeout(pendingKoshienSyncTimer);
   pendingKoshienSyncTimer = setTimeout(async () => {
     try {
-      await window.YosoDataService.koshien.saveSnapshot({
-        state,
-        event: state.event,
-        participantName: currentParticipantName(),
-      });
+      await saveKoshienOnlineNow({ updateConnection: false });
     } catch (error) {
       console.warn("Koshien Supabase save skipped", error);
     }
@@ -1593,6 +1633,7 @@ function syncActiveEvent() {
 
 const PAGE_IDS = new Set(["home", "active", "prediction", "ranking", "settings"]);
 const THEME_KEY = "yoso-theme";
+let lastRenderedPageId = "";
 
 function currentPageId() {
   const id = window.location.hash.replace("#", "") || "home";
@@ -1609,7 +1650,10 @@ function renderPage() {
     if (isActive) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
-  requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+  if (pageId !== lastRenderedPageId) {
+    lastRenderedPageId = pageId;
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+  }
 }
 
 function applyTheme(theme) {
@@ -1702,7 +1746,6 @@ function createPrediction(templateId) {
     phase2DraftPicks: Array(4).fill(""),
     zombiePick: "",
     finalScorePrediction: { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" },
-    finalTotalScore: "",
   };
   if (base === "fightCard") return { picks: {}, odds: {} };
   if (base === "worldCup") return {
@@ -1722,7 +1765,7 @@ function createResults(templateId) {
   const base = baseTemplateId(templateId);
   if (base === "rankingOdds") return { finalTop4: ["", "", "", ""] };
   if (base === "draft") return { finishes: {}, scoreBonusWinner: "" };
-  if (base === "koshien") return { finishes: {}, directEliminators: {}, matches: [], finalScore: { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" }, finalTotalScore: "" };
+  if (base === "koshien") return { finishes: {}, directEliminators: {}, matches: [], finalScore: { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" } };
   if (base === "fightCard") return { winners: {}, bonusWinner: "" };
   if (base === "worldCup") return {
     gl: {},
@@ -1759,7 +1802,7 @@ function normalizeKoshienEvent(event) {
   event.results.directEliminators ||= {};
   event.results.matches = Array.isArray(event.results.matches) ? event.results.matches : [];
   event.results.finalScore ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
-  event.results.finalTotalScore = event.results.finalTotalScore ?? "";
+  delete event.results.finalTotalScore;
   Object.keys(event.predictions || {}).forEach((name) => normalizeKoshienPrediction(event, name));
 }
 
@@ -1774,7 +1817,7 @@ function normalizeKoshienPrediction(event, name) {
   prediction.phase2DraftPicks = normalizeFixedArray(prediction.phase2DraftPicks, Number(event.config?.phase2DraftCount) || 4);
   prediction.zombiePick = prediction.zombiePick || "";
   prediction.finalScorePrediction ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
-  prediction.finalTotalScore = prediction.finalTotalScore ?? "";
+  delete prediction.finalTotalScore;
 }
 
 function defaultKoshienTeamMeta(teams) {
@@ -2034,7 +2077,7 @@ function renderActiveEventManager() {
         <div>
           <span class="match-kicker">${escapeHtml(sportMeta(event.templateId).label)} / ${escapeHtml(template.name || "ルール")}</span>
           <h3>${escapeHtml(event.name)}</h3>
-          <p>${base === "koshien" ? "出場校、勝ち上がり、決勝合計得点はここで管理します。YOSOタブには予想入力だけを表示します。" : "大会の状態を管理します。詳細入力は各プリセットの管理UIに合わせて順次整えます。"}</p>
+          <p>${base === "koshien" ? "出場校、勝ち上がり、決勝スコア結果はここで管理します。YOSOタブには予想入力だけを表示します。" : "大会の状態を管理します。詳細入力は各プリセットの管理UIに合わせて順次整えます。"}</p>
         </div>
         <span class="status-label ${finalized ? "open" : "pending"}">${escapeHtml(isResultFinalized(event) ? "結果確定" : statusLabel(event.status))}</span>
       </div>
@@ -2067,7 +2110,7 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
   return `
     <div class="active-manager-note ${canEditResults ? "" : "is-disabled"}">
       <strong>${canEditResults ? "管理者入力できます" : "結果入力はロック中"}</strong>
-      <span>${canEditResults ? "勝ち上がりと決勝合計得点を入力できます。入力後に結果を提出してください。" : "管理者権限、または確定状態を確認してください。"}</span>
+      <span>${canEditResults ? "勝ち上がりと決勝スコア結果を入力できます。入力後に結果を提出してください。" : "管理者権限、または確定状態を確認してください。"}</span>
     </div>
     ${resultFlowPanel()}
     <div class="entry-block koshien-results">
@@ -2076,9 +2119,6 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
           <h3>勝ち上がり結果</h3>
           <p class="helper-text">各校の最終到達段階を入力します。優勝校は「優勝」、準優勝校は「決勝」です。</p>
         </div>
-      </div>
-      <div class="form-grid">
-        <label class="field"><span>決勝合計得点 結果</span><input data-koshien-final-total-result type="number" min="0" step="1" value="${escapeAttr(state.event.results.finalTotalScore)}" ${disabledResults}></label>
       </div>
       <div class="form-grid">
         <label class="field"><span>決勝 優勝校</span><select data-koshien-final-score-result="champion" ${disabledResults}>${optionList(teams, state.event.results.finalScore?.champion)}</select></label>
@@ -2190,18 +2230,6 @@ function bindActiveEventManagerInputs() {
     input.addEventListener("change", () => {
       if (!canEditResults) return;
       state.event.results.finishes[input.dataset.koshienFinish] = input.value;
-      renderScoresOnly();
-    });
-  });
-  root.querySelectorAll("[data-koshien-final-total-result]").forEach((input) => {
-    input.disabled = !canEditResults;
-    input.addEventListener("input", () => {
-      if (!canEditResults) return;
-      state.event.results.finalTotalScore = input.value;
-      persist();
-    });
-    input.addEventListener("change", () => {
-      if (!canEditResults) return;
       renderScoresOnly();
     });
   });
@@ -2474,7 +2502,7 @@ function missingPredictionCountForEvent(event, name) {
     const pickCount = Number(event.config?.pickCount) || templates.koshien.pickCount;
     const picks = normalizeFixedArray(prediction.teams, pickCount);
     const pickMissing = picks.filter((team) => !team).length;
-    return pickMissing + (prediction.captain ? 0 : 1) + (prediction.finalTotalScore !== "" ? 0 : 1);
+    return pickMissing + (prediction.captain ? 0 : 1);
   }
   if (base === "fightCard") {
     return (event.config?.markets || templates.fightCard.markets).filter((market) => !prediction.picks[market.id]).length;
@@ -2828,7 +2856,7 @@ function renderKoshienForm() {
     <div class="worldcup-phase-panel koshien-preset-panel">
       <span class="match-kicker">KOSHIEN 2026 / 8 TEAM PICK</span>
       <h3>夏の甲子園 8校ピック</h3>
-      <p>49代表から8校を選び、キャプテン校は2倍で加点します。準々決勝以降の再抽選に左右されない、甲子園向けのYOSOプリセットです。</p>
+      <p>49代表から8校を選び、キャプテン校は1.2倍で加点します。準々決勝以降の再抽選に左右されない、甲子園向けのYOSOプリセットです。</p>
       <div class="koshien-score-strip">
         ${koshienOfficialStageOptions.map((stage) => `<span>${stage.label} +${stage.points}</span>`).join("")}
       </div>
@@ -2894,23 +2922,92 @@ function participantKoshienBlock(name, teams) {
     <div class="entry-block koshien-participant">
       <div class="wc-participant-head">
         <h3>${escapeHtml(name)} のYOSO</h3>
-        <span>${pickedTeams.length} / ${picks.length}</span>
+        <span data-koshien-pick-count="${escapeAttr(name)}">${koshienPickCountLabel(picks)}</span>
       </div>
-      <p class="wc-phase-intro">8校を選び、その中からキャプテンを1校選びます。友達同士で同じ学校を選んでもOKです。</p>
+      <p class="wc-phase-intro">8校を選び、その中からキャプテンを1校選びます。1回戦スタート校は最低5校、2回戦スタート校は最大3校までです。</p>
       <div class="prediction-grid koshien-pick-grid">
         ${picks.map((pick, index) => `
           <label class="field">
             <span>指名${index + 1}</span>
-            <select data-koshien-pick="${escapeAttr(name)}:${index}">${optionList(teams, pick)}</select>
+            <select data-koshien-pick="${escapeAttr(name)}:${index}">${koshienGroupedOptionList(koshienPickOptionsForSlot(teams, picks, index), pick)}</select>
           </label>
         `).join("")}
       </div>
       <div class="form-grid">
-        <label class="field"><span>キャプテン校</span><select data-koshien-captain="${escapeAttr(name)}">${optionList(pickedTeams, prediction.captain)}</select></label>
-        <label class="field"><span>決勝合計得点予想</span><input data-koshien-final-total="${escapeAttr(name)}" type="number" min="0" step="1" value="${escapeAttr(prediction.finalTotalScore)}"></label>
+        <label class="field"><span>キャプテン校</span><select data-koshien-captain="${escapeAttr(name)}">${koshienGroupedOptionList(pickedTeams, prediction.captain)}</select></label>
       </div>
+      <div class="create-submit-row">
+        <button class="primary-button" type="button" data-koshien-phase1-save="${escapeAttr(name)}">フェーズ1予想を保存</button>
+      </div>
+      <p class="helper-text" data-koshien-phase1-message="${escapeAttr(name)}"></p>
     </div>
   `;
+}
+
+function koshienPickOptionsForSlot(teams, picks, index) {
+  const current = picks[index] || "";
+  const selectedByOtherSlots = new Set(picks.filter((team, pickIndex) => team && pickIndex !== index));
+  return teams.filter((team) => team === current || !selectedByOtherSlots.has(team));
+}
+
+function koshienPickCountLabel(picks) {
+  const pickedTeams = [...new Set(picks.filter(Boolean))];
+  const firstRoundCount = pickedTeams.filter((team) => koshienStartRound(team) !== 2).length;
+  const secondRoundCount = pickedTeams.filter((team) => koshienStartRound(team) === 2).length;
+  return `${pickedTeams.length} / ${picks.length}（1回戦 ${firstRoundCount} / 2回戦 ${secondRoundCount}）`;
+}
+
+function koshienGroupedOptionList(teams, selected) {
+  const selectedValue = selected || "";
+  const option = (value, label = value) => `<option value="${escapeAttr(value)}" ${String(value) === String(selectedValue) ? "selected" : ""}>${escapeHtml(label || "未選択")}</option>`;
+  const group = (label, values) => values.length
+    ? `<optgroup label="${escapeAttr(label)}">${values.map((team) => option(team, koshienTeamOptionLabel(team))).join("")}</optgroup>`
+    : "";
+  const firstRoundTeams = teams.filter((team) => koshienStartRound(team) !== 2);
+  const secondRoundTeams = teams.filter((team) => koshienStartRound(team) === 2);
+  return [
+    option("", "未選択"),
+    group("1回戦スタート校", firstRoundTeams),
+    group("2回戦スタート校", secondRoundTeams),
+  ].join("");
+}
+
+function koshienTeamOptionLabel(team) {
+  if (!team) return "";
+  return `${team}（${koshienStartRound(team)}回戦スタート）`;
+}
+
+function updateKoshienPhase1Controls(name) {
+  ensurePrediction(name);
+  const teams = getTeams();
+  const prediction = state.event.predictions[name];
+  const picks = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8);
+  prediction.teams = picks;
+  const pickedTeams = [...new Set(picks.filter(Boolean))];
+  if (prediction.captain && !pickedTeams.includes(prediction.captain)) prediction.captain = "";
+
+  els.eventForm.querySelectorAll("[data-koshien-pick]").forEach((select) => {
+    const [selectName, index] = select.dataset.koshienPick.split(":");
+    if (selectName !== name) return;
+    const pickIndex = Number(index);
+    select.innerHTML = koshienGroupedOptionList(koshienPickOptionsForSlot(teams, picks, pickIndex), picks[pickIndex]);
+  });
+
+  els.eventForm.querySelectorAll("[data-koshien-captain]").forEach((select) => {
+    if (select.dataset.koshienCaptain !== name) return;
+    select.innerHTML = koshienGroupedOptionList(pickedTeams, prediction.captain);
+  });
+
+  const counter = [...els.eventForm.querySelectorAll("[data-koshien-pick-count]")]
+    .find((item) => item.dataset.koshienPickCount === name);
+  if (counter) counter.textContent = koshienPickCountLabel(picks);
+  setKoshienPhase1Message(name, "");
+}
+
+function setKoshienPhase1Message(name, message) {
+  const target = [...els.eventForm.querySelectorAll("[data-koshien-phase1-message]")]
+    .find((item) => item.dataset.koshienPhase1Message === name);
+  if (target) target.textContent = message;
 }
 
 function participantKoshienDraftBlock(name, teams) {
@@ -2986,7 +3083,7 @@ function koshienPredictionSummary(name) {
   ensurePrediction(name);
   const prediction = state.event.predictions[name];
   const picked = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean);
-  return `指名 ${picked.length}/${state.event.config.pickCount || 8}、キャプテン ${prediction.captain || "未選択"}、決勝合計 ${prediction.finalTotalScore || "未入力"}`;
+  return `指名 ${picked.length}/${state.event.config.pickCount || 8}、キャプテン ${prediction.captain || "未選択"}`;
 }
 
 function koshienPredictionDetails(name) {
@@ -3752,44 +3849,43 @@ function bindGenericInputs() {
       renderScoresOnly();
     });
   });
-  els.eventForm.querySelectorAll("[data-koshien-final-total-result]").forEach((input) => {
-    input.addEventListener("input", () => {
-      state.event.results.finalTotalScore = input.value;
-      renderScoresOnly();
-    });
-  });
   els.eventForm.querySelectorAll("[data-koshien-pick]").forEach((input) => {
     input.addEventListener("change", () => {
       const [name, index] = input.dataset.koshienPick.split(":");
+      const pickIndex = Number(index);
+      const scrollTop = window.scrollY;
       ensurePrediction(name);
-      const previous = state.event.predictions[name].teams[Number(index)] || "";
-      state.event.predictions[name].teams[Number(index)] = input.value;
+      state.event.predictions[name].teams = normalizeFixedArray(
+        state.event.predictions[name].teams,
+        state.event.config.pickCount || 8,
+      );
+      const previous = state.event.predictions[name].teams[pickIndex] || "";
+      state.event.predictions[name].teams[pickIndex] = input.value;
       const picks = state.event.predictions[name].teams.filter(Boolean);
       const duplicate = input.value && picks.filter((team) => team === input.value).length > 1;
       const round2Count = picks.filter((team) => koshienStartRound(team) === 2).length;
       if (duplicate || round2Count > 3) {
-        state.event.predictions[name].teams[Number(index)] = previous;
-        render();
+        state.event.predictions[name].teams[pickIndex] = previous;
+        input.value = previous;
+        updateKoshienPhase1Controls(name);
+        setKoshienPhase1Message(name, duplicate
+          ? "同じ高校は同じ人の8校内で重複選択できません。"
+          : "2回戦スタート校は最大3校までです。");
+        requestAnimationFrame(() => window.scrollTo({ top: scrollTop, left: 0, behavior: "auto" }));
         return;
       }
       if (state.event.predictions[name].captain && !state.event.predictions[name].teams.includes(state.event.predictions[name].captain)) {
         state.event.predictions[name].captain = "";
       }
-      render();
+      updateKoshienPhase1Controls(name);
+      requestAnimationFrame(() => window.scrollTo({ top: scrollTop, left: 0, behavior: "auto" }));
     });
   });
   els.eventForm.querySelectorAll("[data-koshien-captain]").forEach((input) => {
     input.addEventListener("change", () => {
       ensurePrediction(input.dataset.koshienCaptain);
       state.event.predictions[input.dataset.koshienCaptain].captain = input.value;
-      renderScoresOnly();
-    });
-  });
-  els.eventForm.querySelectorAll("[data-koshien-final-total]").forEach((input) => {
-    input.addEventListener("input", () => {
-      ensurePrediction(input.dataset.koshienFinalTotal);
-      state.event.predictions[input.dataset.koshienFinalTotal].finalTotalScore = input.value;
-      renderScoresOnly();
+      setKoshienPhase1Message(input.dataset.koshienCaptain, "");
     });
   });
   els.eventForm.querySelectorAll("[data-koshien-draft-pick]").forEach((input) => {
@@ -3834,6 +3930,39 @@ function bindGenericInputs() {
     };
     input.addEventListener("input", updateFinalScorePrediction);
     input.addEventListener("change", updateFinalScorePrediction);
+  });
+  els.eventForm.querySelectorAll("[data-koshien-phase1-save]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const name = button.dataset.koshienPhase1Save;
+      ensurePrediction(name);
+      const validation = koshienPhase1Validation(state.event.predictions[name]);
+      if (!validation.ok) {
+        setKoshienPhase1Message(name, validation.message);
+        return;
+      }
+      const shouldSaveOnline = name === currentParticipantName() && window.YosoDataService?.shouldAutoSaveKoshien?.();
+      if (shouldSaveOnline && !currentAuthUser()) {
+        setKoshienPhase1Message(name, "オンライン保存にはログインが必要です。ログインまたは新規登録してください。");
+        return;
+      }
+      persist();
+      renderScores();
+      if (shouldSaveOnline) {
+        renderDashboard();
+        setKoshienPhase1Message(name, "Supabaseへ保存しています...");
+        try {
+          const result = await saveKoshienOnlineNow({ participantName: name });
+          setKoshienPhase1Message(name, result?.skipped ? koshienSaveSkipMessage(result.reason) : "フェーズ1予想を保存しました。");
+        } catch (error) {
+          setKoshienPhase1Message(name, `Supabaseに接続できません。通信環境またはログイン状態を確認してください。${error?.message ? ` (${error.message})` : ""}`);
+        }
+        return;
+      }
+      renderDashboard();
+      setKoshienPhase1Message(name, state.connection?.mode === "supabase"
+        ? "オンライン保存にはログインが必要です。ログインまたは新規登録してください。"
+        : "フェーズ1予想を保存しました。");
+    });
   });
   els.eventForm.querySelectorAll("[data-market-result]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -3967,7 +4096,6 @@ function applyResultInputPermissions() {
     "[data-result-key]",
     "[data-finish]",
     "[data-koshien-finish]",
-    "[data-koshien-final-total-result]",
     "[data-koshien-final-score-result]",
     "[data-market-result]",
     "[data-wc-top-result]",
@@ -3988,7 +4116,7 @@ function applyResultInputPermissions() {
 function applyKoshienPermissions() {
   if (baseTemplateId(state.event.templateId) !== "koshien") return;
   const canPredict = (state.event.status || "open") === "open";
-  els.eventForm.querySelectorAll(".koshien-participant input, .koshien-participant select").forEach((input) => {
+  els.eventForm.querySelectorAll(".koshien-participant input, .koshien-participant select, .koshien-participant button").forEach((input) => {
     input.disabled = !canPredict;
   });
 }
@@ -4516,7 +4644,7 @@ function calculateScores() {
       normalizeKoshienPrediction(state.event, name);
       const row = koshienRows.find((item) => item.name === name);
       score = row?.score || 0;
-      detail = row?.detail || "8校ピック + キャプテン2倍";
+      detail = row?.detail || "8校ピック + キャプテン1.2倍";
       return { name, score, detail, tiebreakDelta: row?.tiebreakDelta, breakdown: row?.breakdown };
     }
     if (templateId === "fightCard") {
@@ -4561,8 +4689,6 @@ function calculateScores() {
 }
 
 function koshienScoreRows() {
-  const actualFinalTotal = Number(state.event.results.finalTotalScore);
-  const hasFinalTotal = state.event.results.finalTotalScore !== "" && Number.isFinite(actualFinalTotal);
   return state.participants.map((name) => {
     ensurePrediction(name);
     const prediction = state.event.predictions[name];
@@ -4571,17 +4697,12 @@ function koshienScoreRows() {
     const phase2 = koshienPhase2Score(name, prediction);
     const phase3 = koshienPhase3Score(name, prediction);
     const score = phase1 + revenge + phase2 + phase3;
-    const predictedFinalTotal = Number(prediction.finalTotalScore);
-    const tiebreakDelta = hasFinalTotal && Number.isFinite(predictedFinalTotal)
-      ? Math.abs(actualFinalTotal - predictedFinalTotal)
-      : Infinity;
-    const tiebreakText = hasFinalTotal && Number.isFinite(predictedFinalTotal) ? ` / final total diff ${tiebreakDelta}` : "";
     return {
       name,
       score,
-      tiebreakDelta,
+      tiebreakDelta: Infinity,
       breakdown: { phase1, revenge, phase2, phase3 },
-      detail: `P1 ${formatScore(phase1)} / Revenge ${formatScore(revenge)} / P2 ${formatScore(phase2)} / P3 ${formatScore(phase3)}${tiebreakText}`,
+      detail: `P1 ${formatScore(phase1)} / Revenge ${formatScore(revenge)} / P2 ${formatScore(phase2)} / P3 ${formatScore(phase3)}`,
     };
   });
 }
@@ -4666,13 +4787,16 @@ function koshienStartRound(team) {
 }
 
 function koshienPhase1Validation(prediction) {
-  const picks = normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean);
+  const pickCount = state.event.config.pickCount || 8;
+  const allPicks = normalizeFixedArray(prediction.teams, pickCount);
+  const picks = allPicks.filter(Boolean);
+  if (picks.length !== pickCount) return { ok: false, message: "8校すべて選択してください。" };
   const uniqueCount = new Set(picks).size;
-  if (picks.length !== uniqueCount) return { ok: false, message: "同じ高校は1人の8校指名内で重複できません。" };
+  if (picks.length !== uniqueCount) return { ok: false, message: "同じ高校を複数回選ぶことはできません。" };
   const round2Count = picks.filter((team) => koshienStartRound(team) === 2).length;
   if (round2Count > 3) return { ok: false, message: "2回戦スタート校は最大3校までです。" };
-  if (picks.length === (state.event.config.pickCount || 8) && !prediction.captain) return { ok: false, message: "キャプテン校を1校選んでください。" };
-  if (prediction.captain && !picks.includes(prediction.captain)) return { ok: false, message: "キャプテン校は指名済み8校から選んでください。" };
+  if (!prediction.captain) return { ok: false, message: "キャプテンを1校選んでください。" };
+  if (!picks.includes(prediction.captain)) return { ok: false, message: "キャプテンは選択済み8校の中から選んでください。" };
   return { ok: true, message: "" };
 }
 
@@ -5031,8 +5155,22 @@ els.confirmSaveButton?.addEventListener("click", () => {
   confirmSave();
 });
 
-function confirmSave() {
+async function confirmSave() {
   persist();
+  if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
+    els.saveButton.textContent = "SYNCING";
+    try {
+      const result = await saveKoshienOnlineNow();
+      els.saveButton.textContent = result?.skipped ? "LOCAL" : "SAVED";
+    } catch (error) {
+      console.warn("Koshien Supabase save failed", error);
+      els.saveButton.textContent = "LOCAL";
+    }
+    setTimeout(() => {
+      els.saveButton.textContent = "LOCK IN";
+    }, 900);
+    return;
+  }
   els.saveButton.textContent = "LOCKED";
   setTimeout(() => {
     els.saveButton.textContent = "LOCK IN";
