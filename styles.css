@@ -968,6 +968,77 @@ input[type="number"],
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.rule-guide-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.rule-guide-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.rule-guide-panel summary span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.rule-guide-panel.is-compact {
+  margin-top: 10px;
+}
+
+.rule-guide-grid {
+  display: grid;
+  width: min(720px, 100%);
+  margin: 0 auto;
+  gap: 14px;
+}
+
+.rule-guide-sheet {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(238, 232, 224, 0.06), transparent 42%),
+    rgba(10, 9, 8, 0.54);
+  box-shadow: 0 18px 45px rgba(10, 10, 14, 0.32);
+}
+
+.rule-guide-sheet a {
+  display: block;
+  color: inherit;
+}
+
+.rule-guide-sheet img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  background: #07172a;
+}
+
+.rule-guide-sheet figcaption {
+  padding: 10px 12px 12px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .wc-seed-preview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

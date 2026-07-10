@@ -244,6 +244,7 @@ const els = {
   presetDescription: document.querySelector("#presetDescription"),
   eventTitle: document.querySelector("#eventTitle"),
   eventSubtitle: document.querySelector("#eventSubtitle"),
+  eventRuleGuide: document.querySelector("#eventRuleGuide"),
   eventForm: document.querySelector("#eventForm"),
   newEventButton: document.querySelector("#newEventButton"),
   settingsNewEventButton: document.querySelector("#settingsNewEventButton"),
@@ -1958,6 +1959,7 @@ function render() {
   updatePresetSummary();
   renderTournamentCreateOptions();
   renderEvent();
+  renderEventRuleGuide();
   renderScores();
   renderDashboard();
   renderActiveTournaments();
@@ -2036,6 +2038,42 @@ function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount
         <small>確定済みフェーズを反映</small>
       </article>
     </div>
+    ${koshienRuleGuideMarkup({ event: activeEvent, compact: true })}
+  `;
+}
+
+function renderEventRuleGuide() {
+  if (!els.eventRuleGuide) return;
+  els.eventRuleGuide.innerHTML = koshienRuleGuideMarkup({ event: state.event });
+}
+
+const koshienRuleGuideSheets = [
+  { id: "phase1", label: "フェーズ1", src: "./assets/koshien-rule-guides/phase1.jpg", alt: "フェーズ1ルールガイド" },
+  { id: "phase2", label: "フェーズ2", src: "./assets/koshien-rule-guides/phase2.jpg", alt: "フェーズ2ルールガイド" },
+  { id: "phase3", label: "フェーズ3", src: "./assets/koshien-rule-guides/phase3.jpg", alt: "フェーズ3ルールガイド" },
+  { id: "special", label: "特別ルール", src: "./assets/koshien-rule-guides/special.jpg", alt: "特別ルールガイド" },
+  { id: "summary", label: "サマリー", src: "./assets/koshien-rule-guides/summary.jpg", alt: "ルールシミュレーション結果サマリー" },
+];
+
+function koshienRuleGuideMarkup({ event = state.event, compact = false } = {}) {
+  if (baseTemplateId(event?.templateId) !== "koshien") return "";
+  return `
+    <details class="rule-guide-panel ${compact ? "is-compact" : ""}">
+      <summary>
+        <span>ルールガイド</span>
+        <strong>${escapeHtml(event?.name || "YOSO 夏の甲子園2026")}</strong>
+      </summary>
+      <div class="rule-guide-grid">
+        ${koshienRuleGuideSheets.map((sheet) => `
+          <figure class="rule-guide-sheet">
+            <a href="${escapeAttr(sheet.src)}" target="_blank" rel="noopener">
+              <img src="${escapeAttr(sheet.src)}" width="960" height="1280" loading="lazy" alt="${escapeAttr(sheet.alt)}" />
+            </a>
+            <figcaption>${escapeHtml(sheet.label)}</figcaption>
+          </figure>
+        `).join("")}
+      </div>
+    </details>
   `;
 }
 
