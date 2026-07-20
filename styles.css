@@ -710,6 +710,94 @@ input[type="number"],
   padding-top: 16px;
 }
 
+.koshien-phase2-board {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(240, 168, 190, 0.2);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.koshien-phase2-meta,
+.koshien-phase2-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.koshien-phase2-meta span {
+  padding: 6px 9px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.koshien-phase2-team-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.koshien-phase2-slot {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 11px;
+  background: rgba(10, 9, 8, 0.3);
+}
+
+.koshien-phase2-slot span,
+.koshien-phase2-slot small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.koshien-phase2-slot strong,
+.koshien-phase2-slot small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koshien-phase2-slot.is-current {
+  border-color: var(--soap-pink);
+  box-shadow: 0 0 0 2px rgba(240, 168, 190, 0.1);
+}
+
+.koshien-phase2-slot.is-picked {
+  background: rgba(30, 58, 52, 0.34);
+}
+
+.koshien-phase2-pick-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.koshien-phase2-message {
+  min-height: 20px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.koshien-phase2-message.is-error {
+  color: #ffb1b1;
+}
+
+.koshien-phase2-message.is-success {
+  color: #a9e7c7;
+}
+
+.koshien-phase2-message.is-pending {
+  color: var(--soap-pink);
+}
+
 .worldcup-phase-panel {
   border: 1px solid rgba(255, 170, 210, 0.18);
   border-radius: 18px;
@@ -1612,6 +1700,8 @@ dialog::backdrop {
 
   .prediction-grid,
   .form-grid,
+  .koshien-phase2-team-grid,
+  .koshien-phase2-pick-form,
   .account-settings-grid,
   .account-password-grid,
   .connection-settings-grid,
