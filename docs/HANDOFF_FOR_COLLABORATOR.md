@@ -3,12 +3,12 @@
 YOSOアプリの共同開発に参加するときは、まず以下を読んでください。
 
 1. `README.md`
-2. `CLAUDE.md`
-3. `docs/WORKFLOW.md`
-4. `docs/GOOGLE_SHEETS_SYNC_PLAN.md`
-5. `docs/KOSHIEN_2026_DELIVERY_PLAN.md`
-6. `docs/SUPABASE_SETUP.md`
-7. `docs/SUPABASE_MIGRATION_PLAN.md`
+2. `AGENTS.md`（AIエージェントを使う場合）
+3. `CONTEXT.md`
+4. `docs/KOSHIEN_2026_RULES.md`（甲子園2026に関係する場合）
+5. `docs/WORKFLOW.md`
+6. `docs/KOSHIEN_2026_DELIVERY_PLAN.md`
+7. `docs/SUPABASE_SETUP.md`
 
 ## 作業ブランチ
 
@@ -38,7 +38,7 @@ https://stsofbbl.github.io/pickcircle-sports-prediction-league/
 - リアルマネー、決済、送金、ブックメーカー連携は入れない。
 - W杯2026は専用プリセットとして扱う。
 - 直近はW杯UIの完成より、Supabase移行と夏の甲子園リリースを優先する。
-- 夏の甲子園は8校ピック、キャプテン2倍、進出ポイント累積方式を採用する。
+- 夏の甲子園2026のルールは `docs/KOSHIEN_2026_RULES.md` を唯一の正本とし、ここへ得点表を複製しない。
 
 ## 最低限の確認
 
