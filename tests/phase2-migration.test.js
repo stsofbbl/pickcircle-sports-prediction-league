@@ -100,7 +100,8 @@ test("ready state freezes the draw snapshot and only allows forward transitions"
   assert.match(sql, /jsonb_typeof\(p_snapshot -> 'tie_draws'\) is distinct from 'array'/i);
   assert.match(sql, /v_players_valid is not true/i);
   assert.match(sql, /is not true then[\s\S]*ranking_snapshot must contain/i);
-  assert.match(sql, /v_has_ties[\s\S]*jsonb_array_length\(p_snapshot -> 'tie_draws'\) = 0/i);
+  assert.match(sql, /v_has_ties[\s\S]*coalesce\(jsonb_array_length\(p_snapshot -> 'tie_draws'\), 0\) = 0/i);
+  assert.match(sql, /group by \(item ->> 'phase1_score'\)::numeric/i);
   assert.match(sql, /old\.status <> 'not_ready'[\s\S]*ranking_snapshot is distinct from new\.ranking_snapshot/i);
   assert.match(sql, /old\.status = 'not_ready' and new\.status = 'ready'/i);
   assert.match(sql, /old\.status = 'ready' and new\.status = 'drafting'/i);

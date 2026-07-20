@@ -18,7 +18,7 @@ test("phase 2 domain module loads before the data service and app", () => {
 });
 
 test("phase 2 UI uses the dedicated DB load and atomic save boundaries", () => {
-  assert.match(app, /loadPhase2DraftState\(state\.event\.id\)/);
+  assert.match(app, /loadPhase2DraftState\(requestedEventId\)/);
   assert.match(app, /savePhase2DraftPick\(\{/);
   assert.match(app, /YosoKoshienPhase2Draft\.buildDraftViewState/);
   assert.doesNotMatch(app, /data-koshien-draft-pick/);
@@ -51,6 +51,8 @@ test("formal DB draft never scores stale display-name keyed local picks", () => 
   assert.match(app, /function koshienFormalPhase2ScoringPending/);
   assert.match(app, /if \(koshienFormalPhase2ScoringPending\(\)\) return 0/);
   assert.match(app, /koshienPhase2DraftView\.formalDraftExists === true/);
+  assert.match(app, /koshienPhase2DraftView\.eventId !== currentEventId/);
+  assert.match(app, /if \(!isSupabaseAuthEnabled\(\)\) return false/);
   assert.match(app, /旧ローカル指名は正式得点に加算しません/);
 });
 

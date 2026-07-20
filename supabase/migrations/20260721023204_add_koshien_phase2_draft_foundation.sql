@@ -64,11 +64,11 @@ begin
   select exists (
     select 1
     from jsonb_array_elements(p_snapshot -> 'players') as item
-    group by item ->> 'phase1_score'
+    group by (item ->> 'phase1_score')::numeric
     having count(*) > 1
   ) into v_has_ties;
 
-  if v_has_ties and jsonb_array_length(p_snapshot -> 'tie_draws') = 0 then
+  if v_has_ties and coalesce(jsonb_array_length(p_snapshot -> 'tie_draws'), 0) = 0 then
     return false;
   end if;
 
