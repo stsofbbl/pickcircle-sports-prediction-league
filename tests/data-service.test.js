@@ -1,0 +1,263 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const vm = require("node:vm");
+
+const DATA_SERVICE_PATH = path.join(__dirname, "..", "js", "data-service.js");
+
+function createSupabaseMock({ rpcError = null, teamError = null, playersError = null } = {}) {
+  const calls = [];
+  const teamRows = [
+    { id: "team-a-id", name: "Team A", odds: 4, sqrt_odds: 2 },
+    { id: "team-b-id", name: "Team B", odds: 9, sqrt_odds: 3 },
+  ];
+
+  class Query {
+    constructor(table) {
+      this.table = table;
+      this.operation = "select";
+      this.payload = null;
+      this.options = null;
+    }
+
+    select() {
+      return this;
+    }
+
+    eq() {
+      return this;
+    }
+
+    order() {
+      return this;
+    }
+
+    limit() {
+      return this.resolve();
+    }
+
+    upsert(payload, options) {
+      this.operation = "upsert";
+      this.payload = payload;
+      this.options = options;
+      calls.push({ table: this.table, operation: this.operation, payload, options });
+      return this;
+    }
+
+    insert(payload) {
+      this.operation = "insert";
+      this.payload = payload;
+      calls.push({ table: this.table, operation: this.operation, payload });
+      return this;
+    }
+
+    delete() {
+      this.operation = "delete";
+      calls.push({ table: this.table, operation: this.operation });
+      return this;
+    }
+
+    single() {
+      return this.resolve();
+    }
+
+    maybeSingle() {
+      return this.resolve();
+    }
+
+    then(resolve, reject) {
+      return Promise.resolve(this.resolve()).then(resolve, reject);
+    }
+
+    resolve() {
+      if (this.table === "leagues") return { data: [{ id: "league-id", invite_code: "league-code" }], error: null };
+      if (this.table === "league_members") return { data: { league_id: "league-id", role: "admin" }, error: null };
+      if (this.table === "profiles") return { data: { display_name: "Admin" }, error: null };
+      if (this.table === "events" && this.operation === "select") return { data: { id: "event-id" }, error: null };
+      if (this.table === "players" && this.operation === "upsert") return { data: { id: "player-id" }, error: null };
+      if (this.table === "players") return { data: [{ id: "player-id", display_name: "Admin" }], error: playersError };
+      if (this.table === "teams") return { data: teamRows, error: teamError };
+      return { data: null, error: null };
+    }
+  }
+
+  return {
+    calls,
+    client: {
+      from(table) {
+        return new Query(table);
+      },
+      rpc(name, args) {
+        calls.push({ operation: "rpc", name, args });
+        return Promise.resolve({ data: null, error: name === "save_koshien_result_snapshot" ? rpcError : null });
+      },
+    },
+  };
+}
+
+function loadDataService(supabase) {
+  const window = {
+    location: { href: "https://example.test/" },
+    YosoSupabase: {
+      config: () => ({ inviteCode: "league-code", sync: { autoSaveKoshien: true } }),
+      hasConfig: () => true,
+      client: () => supabase,
+      sessionUser: async () => ({ id: "user-id", email: "admin@example.test", user_metadata: { display_name: "Admin" } }),
+    },
+  };
+  window.YosoKoshienResults = require("../js/koshien-results.js");
+  vm.runInNewContext(fs.readFileSync(DATA_SERVICE_PATH, "utf8"), { console: { ...console, warn() {} }, window });
+  return window.YosoDataService;
+}
+
+function completedEvent() {
+  return {
+    id: "event-id",
+    name: "YOSO 夏の甲子園2026",
+    templateId: "koshien",
+    status: "resultWait",
+    config: {
+      teams: ["Team A", "Team B"],
+      teamMeta: {
+        "Team A": { startRound: 1, odds: 4 },
+        "Team B": { startRound: 1, odds: 9 },
+      },
+    },
+    predictions: {},
+    results: {
+      matches: [{
+        match_id: "R1-1",
+        round: "R1",
+        match_no: 1,
+        team_a_id: "Team A",
+        team_b_id: "Team B",
+        score_a: 3,
+        score_b: 1,
+        winner_id: "Team A",
+        loser_id: "Team B",
+        status: "completed",
+      }],
+      finishes: { "Team B": "initial_loss" },
+    },
+  };
+}
+
+test("transactional result failure rejects without falling back to separate table writes", async () => {
+  const missingColumn = {
+    code: "42703",
+    message: "Could not find the 'loser_team_id' column of 'matches' in the schema cache",
+  };
+  const supabase = createSupabaseMock({ rpcError: missingColumn });
+  const service = loadDataService(supabase.client);
+
+  await assert.rejects(
+    service.koshien.saveSnapshot({
+      state: { approvalPolicy: "half" },
+      event: completedEvent(),
+      participantName: "Admin",
+      scoreRows: [{ name: "Admin", score: 6, breakdown: { phase1: 6 } }],
+    }),
+    (error) => error?.stage === "result_transaction" && /loser_team_id/.test(error.message),
+  );
+
+  assert.equal(supabase.calls.some((call) => ["matches", "scores", "results"].includes(call.table)), false);
+});
+
+test("score payload preparation failure stops before the result transaction", async () => {
+  const supabase = createSupabaseMock({ playersError: { code: "42501", message: "players RLS denied" } });
+  const service = loadDataService(supabase.client);
+
+  await assert.rejects(
+    service.koshien.saveSnapshot({
+      state: { approvalPolicy: "half" },
+      event: completedEvent(),
+      participantName: "Admin",
+      scoreRows: [{ name: "Admin", score: 6, breakdown: { phase1: 6 } }],
+    }),
+    (error) => error?.stage === "scores" && /RLS denied/.test(error.message),
+  );
+
+  assert.equal(supabase.calls.some((call) => call.name === "save_koshien_result_snapshot"), false);
+});
+
+test("completed results reject when scoreRows is empty", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+
+  await assert.rejects(
+    service.koshien.saveSnapshot({
+      state: { approvalPolicy: "half" },
+      event: completedEvent(),
+      participantName: "Admin",
+      scoreRows: [],
+    }),
+    (error) => error?.stage === "scores" && /空/.test(error.message),
+  );
+  assert.equal(supabase.calls.some((call) => call.name === "save_koshien_result_snapshot"), false);
+});
+
+test("saveSnapshot returns ok only after matches, scores, and raw results succeed", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+
+  const result = await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event: completedEvent(),
+    participantName: "Admin",
+    scoreRows: [{ name: "Admin", score: 6, breakdown: { phase1: 6 } }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    ok: true,
+    stages: { structured: true, scores: true, results: true },
+  });
+  const transaction = supabase.calls.find((call) => call.name === "save_koshien_result_snapshot");
+  assert.ok(transaction);
+  assert.equal(transaction.args.p_match_rows[0].loser_team_id, "team-b-id");
+  assert.equal(transaction.args.p_match_rows[0].status, "completed");
+  assert.equal(transaction.args.p_score_rows[0].player_id, "player-id");
+  assert.deepEqual(JSON.parse(JSON.stringify(transaction.args.p_results_payload)), completedEvent().results);
+  assert.equal(supabase.calls.some((call) => ["matches", "scores", "results"].includes(call.table)), false);
+});
+
+test("resultWait result save does not rewrite prediction tables after the deadline", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.predictions.Admin = { teams: ["Team A"], captain: "Team A" };
+
+  const result = await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [{ name: "Admin", score: 2.4, breakdown: { phase1: 2.4 } }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(supabase.calls.some((call) => call.table === "predictions"), false);
+  assert.equal(supabase.calls.some((call) => call.table === "phase1_picks"), false);
+});
+
+test("prediction-only fallback reports partial when structured tables are missing", async () => {
+  const supabase = createSupabaseMock({
+    teamError: { code: "PGRST205", message: "Could not find the table 'teams' in the schema cache" },
+  });
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.status = "open";
+  event.results = { matches: [], finishes: {} };
+  event.predictions.Admin = { teams: ["Team A"], captain: "Team A" };
+
+  const result = await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.partial, true);
+  assert.deepEqual(Array.from(result.warnings), ["structured_tables_missing"]);
+  assert.equal(result.stages.structured, false);
+});
