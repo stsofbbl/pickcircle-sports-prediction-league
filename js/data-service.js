@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  const phase2DraftInFlight = new Map();
+
   function config() {
     return window.YosoSupabase?.config?.() || {};
   }
@@ -35,6 +37,80 @@
     wrapped.stage = stage;
     wrapped.code = error?.code || "";
     return wrapped;
+  }
+
+  async function phase2DraftContext() {
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user) throw new Error("フェーズ2ドラフトにはオンラインログインが必要です。");
+    return { supabase, user };
+  }
+
+  async function loadPhase2DraftState(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("フェーズ2ドラフトのevent_idが必要です。");
+    const { supabase } = await phase2DraftContext();
+    const { data, error } = await supabase.rpc("get_koshien_phase2_draft_state", {
+      p_event_id: normalizedEventId,
+    });
+    if (error) throw koshienSaveError("phase2_load", error, "フェーズ2ドラフト状態を取得できませんでした。");
+    return data;
+  }
+
+  function phase2ConflictError(error) {
+    return ["23505", "40001", "55000"].includes(error?.code)
+      || /already|conflict|deadline|turn changed|not active/i.test(error?.message || "");
+  }
+
+  function savePhase2DraftPick({ eventId, draftId, teamId, pickNo, requestId } = {}) {
+    const payload = {
+      eventId: String(eventId || "").trim(),
+      draftId: String(draftId || "").trim(),
+      teamId: String(teamId || "").trim(),
+      pickNo: Number(pickNo),
+      requestId: String(requestId || "").trim(),
+    };
+    if (!payload.eventId || !payload.draftId || !payload.teamId || !payload.requestId
+      || !Number.isInteger(payload.pickNo) || payload.pickNo < 1 || payload.pickNo > 16) {
+      return Promise.reject(new Error("フェーズ2指名payloadを確認してください。"));
+    }
+
+    const inFlightKey = `${payload.draftId}:${payload.pickNo}`;
+    const signature = `${payload.teamId}:${payload.requestId}`;
+    const existing = phase2DraftInFlight.get(inFlightKey);
+    if (existing) {
+      if (existing.signature === signature) return existing.promise;
+      const error = new Error("同じ手番の指名を保存中です。");
+      error.code = "phase2_save_in_progress";
+      return Promise.reject(error);
+    }
+
+    const promise = (async () => {
+      const { supabase } = await phase2DraftContext();
+      const { data, error } = await supabase.rpc("save_koshien_phase2_draft_pick", {
+        p_draft_id: payload.draftId,
+        p_team_id: payload.teamId,
+        p_expected_pick_no: payload.pickNo,
+        p_request_id: payload.requestId,
+      });
+      if (!error) return data;
+
+      const wrapped = koshienSaveError("phase2_pick", error, "フェーズ2指名を保存できませんでした。");
+      if (phase2ConflictError(error)) {
+        wrapped.retryable = true;
+        try {
+          wrapped.latestState = await loadPhase2DraftState(payload.eventId);
+        } catch (reloadError) {
+          wrapped.reloadError = reloadError;
+        }
+      }
+      throw wrapped;
+    })();
+    phase2DraftInFlight.set(inFlightKey, { signature, promise });
+    promise.finally(() => {
+      if (phase2DraftInFlight.get(inFlightKey)?.promise === promise) phase2DraftInFlight.delete(inFlightKey);
+    }).catch(() => {});
+    return promise;
   }
 
   function koshienTeamMeta(event, name, index) {
@@ -362,31 +438,6 @@
       if (error) throw error;
     }
 
-    const phase2Picks = fixedArray(prediction.phase2DraftPicks, Number(event.config?.phase2DraftCount) || 4)
-      .map((name, index) => ({ name, index }))
-      .filter((pick) => pick.name && teamByName.has(pick.name));
-    const { error: phase2DeleteError } = await supabase
-      .from("phase2_draft_picks")
-      .delete()
-      .eq("event_id", eventId)
-      .eq("player_id", player.id);
-    if (phase2DeleteError) throw phase2DeleteError;
-    if (phase2Picks.length) {
-      const rows = phase2Picks.map((pick) => {
-        const team = teamByName.get(pick.name);
-        return {
-          event_id: eventId,
-          player_id: player.id,
-          team_id: team.id,
-          draft_round: pick.index + 1,
-          odds_snapshot: Number(team.odds) || null,
-          sqrt_odds_snapshot: Number(team.sqrt_odds) || null,
-        };
-      });
-      const { error } = await supabase.from("phase2_draft_picks").insert(rows);
-      if (error) throw error;
-    }
-
     const { error: revengeDeleteError } = await supabase
       .from("revenge_picks")
       .delete()
@@ -673,6 +724,8 @@
     koshien: {
       saveSnapshot: saveKoshienSnapshot,
       loadSnapshot: loadKoshienSnapshot,
+      loadPhase2DraftState,
+      savePhase2DraftPick,
     },
     local: {
       loadState: loadLocalState,

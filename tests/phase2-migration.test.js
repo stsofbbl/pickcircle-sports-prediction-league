@@ -1,0 +1,88 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+
+const MIGRATION_PATH = path.join(
+  __dirname,
+  "..",
+  "supabase",
+  "migrations",
+  "20260721023204_add_koshien_phase2_draft_foundation.sql",
+);
+
+test("phase 2 migration is additive, guarded, and explicitly exposed only to authenticated users", () => {
+  const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
+  assert.match(sql, /^begin;/i);
+  assert.match(sql, /commit;\s*$/i);
+  assert.match(sql, /create table if not exists public\.phase2_drafts/i);
+  assert.match(sql, /alter table public\.phase2_drafts enable row level security/i);
+  assert.match(sql, /alter table public\.phase2_draft_picks add column if not exists draft_id uuid/i);
+  assert.match(sql, /alter table public\.phase2_draft_picks add column if not exists pick_no integer/i);
+  assert.match(sql, /alter table public\.phase2_draft_picks add column if not exists request_id uuid/i);
+  assert.match(sql, /phase2_draft_picks contains existing rows that require a reviewed conversion migration/i);
+  assert.match(sql, /alter column draft_id set not null/i);
+  assert.match(sql, /alter column pick_no set not null/i);
+  assert.match(sql, /alter column request_id set not null/i);
+  assert.match(sql, /grant select, update on public\.phase2_drafts to authenticated/i);
+  assert.match(sql, /grant select, insert on public\.phase2_draft_picks to authenticated/i);
+  assert.doesNotMatch(sql, /grant[^;]+to anon/i);
+  assert.doesNotMatch(sql, /drop\s+table|truncate|delete\s+from/i);
+});
+
+test("phase 2 schema enforces 4 players, 16 teams, pick uniqueness, and ID references", () => {
+  const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
+  assert.match(sql, /cardinality\(ordered_player_ids\) = 4/i);
+  assert.match(sql, /cardinality\(eligible_team_ids\) = 16/i);
+  assert.match(sql, /public\.uuid_array_is_unique\(ordered_player_ids\)/i);
+  assert.match(sql, /public\.uuid_array_is_unique\(eligible_team_ids\)/i);
+  assert.match(sql, /unique \(event_id\)/i);
+  assert.match(sql, /unique \(draft_id, pick_no\)/i);
+  assert.match(sql, /unique \(draft_id, team_id\)/i);
+  assert.match(sql, /unique \(draft_id, player_id, draft_round\)/i);
+  assert.match(sql, /unique \(draft_id, player_id, request_id\)/i);
+  assert.match(sql, /pick_no between 1 and 16/i);
+  assert.match(sql, /draft_round between 1 and 4/i);
+  assert.match(sql, /foreign key \(draft_id\)[\s\S]*references public\.phase2_drafts\(id\)/i);
+  assert.match(sql, /foreign key \(event_id\)[\s\S]*references public\.events\(id\)/i);
+  assert.match(sql, /foreign key \(player_id\)[\s\S]*references public\.players\(id\)/i);
+  assert.match(sql, /foreign key \(team_id\)[\s\S]*references public\.teams\(id\)/i);
+  assert.match(sql, /create or replace function public\.validate_koshien_phase2_draft_setup/i);
+  assert.match(sql, /p\.league_id = v_league_id[\s\S]*p\.id = any \(new\.ordered_player_ids\)/i);
+  assert.match(sql, /t\.event_id = new\.event_id[\s\S]*t\.id = any \(new\.eligible_team_ids\)/i);
+  assert.match(sql, /cannot change fixed draft players or teams after picks exist/i);
+  assert.match(sql, /create trigger phase2_drafts_validate_setup/i);
+});
+
+test("atomic pick RPC locks, resolves auth player, validates turn, and advances only in one transaction", () => {
+  const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
+  assert.match(sql, /create or replace function public\.save_koshien_phase2_draft_pick\(\s*p_draft_id uuid,\s*p_team_id uuid,\s*p_expected_pick_no integer,\s*p_request_id uuid/i);
+  assert.doesNotMatch(sql, /save_koshien_phase2_draft_pick\([^)]*p_player_id/i);
+  assert.match(sql, /security invoker/i);
+  assert.match(sql, /set search_path = ''/i);
+  assert.match(sql, /if auth\.uid\(\) is null/i);
+  assert.match(sql, /from public\.phase2_drafts d[\s\S]*for update/i);
+  assert.match(sql, /p\.profile_id = auth\.uid\(\)/i);
+  assert.match(sql, /v_draft\.status <> 'drafting'/i);
+  assert.match(sql, /clock_timestamp\(\) >= v_draft\.deadline_at/i);
+  assert.match(sql, /p_expected_pick_no <> v_draft\.current_pick_no/i);
+  assert.match(sql, /p_team_id = any \(v_draft\.eligible_team_ids\)/i);
+  assert.match(sql, /insert into public\.phase2_draft_picks/i);
+  assert.match(sql, /set current_pick_no = case/i);
+  assert.match(sql, /status = case[\s\S]*then 'completed'/i);
+  assert.match(sql, /set_config\('yoso\.phase2_rpc', 'save_pick', true\)/i);
+  assert.doesNotMatch(sql, /public\.predictions|results\.payload/i);
+});
+
+test("RLS and function privileges exclude anon and direct phase 2 writes", () => {
+  const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
+  assert.match(sql, /drop policy if exists phase2_draft_picks_self_before_deadline/i);
+  assert.match(sql, /create policy phase2_drafts_select_members[\s\S]*to authenticated/i);
+  assert.match(sql, /create policy phase2_draft_picks_select_members[\s\S]*to authenticated/i);
+  assert.match(sql, /create policy phase2_draft_picks_rpc_insert[\s\S]*current_setting\('yoso\.phase2_rpc', true\) = 'save_pick'/i);
+  assert.match(sql, /create policy phase2_drafts_rpc_update[\s\S]*current_setting\('yoso\.phase2_rpc', true\) = 'save_pick'/i);
+  assert.match(sql, /revoke execute on function public\.save_koshien_phase2_draft_pick[\s\S]*from anon, public/i);
+  assert.match(sql, /grant execute on function public\.save_koshien_phase2_draft_pick[\s\S]*to authenticated/i);
+  assert.match(sql, /revoke execute on function public\.get_koshien_phase2_draft_state[\s\S]*from anon, public/i);
+  assert.match(sql, /grant execute on function public\.get_koshien_phase2_draft_state[\s\S]*to authenticated/i);
+});
