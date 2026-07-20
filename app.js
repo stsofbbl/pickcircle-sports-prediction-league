@@ -57,7 +57,7 @@ const templates = {
       "佐賀代表", "長崎代表", "熊本代表", "大分代表", "宮崎代表", "鹿児島代表", "沖縄代表",
     ],
     pickCount: 8,
-    stagePoints: { initial_loss: 0, first_win_then_loss: 1, best16: 1.5, best8: 2, best4: 2.5, runner_up: 3.5, champion: 5 },
+    stagePoints: { ...window.YosoKoshienResults.OFFICIAL_PHASE1_POINTS },
     phase2Points: { best16: 0, best8: 20, best4: 40, runner_up: 60, champion: 100 },
     captainMultiplier: 1.2,
     sqrtOddsCap: 50,
@@ -706,7 +706,7 @@ async function syncKoshienToSupabaseNow() {
     state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
     if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
     renderConnectionSettings();
-    setConnectionMessage(`Supabaseへ保存しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`);
+    setConnectionMessage(koshienSaveOutcomeMessage(result, `Supabaseへ保存しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`));
   } catch (error) {
     setConnectionMessage(`Supabaseへの保存に失敗しました。${error?.message ? ` (${error.message})` : ""}`);
   }
@@ -719,6 +719,12 @@ function koshienSaveSkipMessage(reason) {
   if (reason === "league is not ready") return "参加リーグを確認できませんでした。League IDを確認してください。";
   if (reason === "admin must create the Koshien event before members can save predictions") return "まだ管理者が甲子園大会をオンライン作成していません。先に管理者で保存してください。";
   return "Supabaseへ保存できませんでした。設定とログイン状態を確認してください。";
+}
+
+function koshienSaveOutcomeMessage(result, successMessage) {
+  if (result?.skipped) return koshienSaveSkipMessage(result.reason);
+  if (result?.partial) return "raw snapshotは保存しましたが、structured tablesは未保存です。schema/migration適用後に再保存してください。";
+  return successMessage;
 }
 
 async function syncStateToSheets() {
@@ -1793,7 +1799,7 @@ function normalizeKoshienEvent(event) {
   event.config.phase2DraftCount = Number(event.config.phase2DraftCount) || template.phase2DraftCount || 4;
   event.config.activePhase = ["phase1", "phase2", "phase3"].includes(event.config.activePhase) ? event.config.activePhase : "phase1";
   event.config.teamMeta = normalizeKoshienTeamMeta(event.config.teams, event.config.teamMeta);
-  event.config.stagePoints = { ...templates.koshien.stagePoints, ...(event.config.stagePoints || {}) };
+  event.config.stagePoints = { ...templates.koshien.stagePoints };
   event.config.phase2Points = { ...templates.koshien.phase2Points, ...(event.config.phase2Points || {}) };
   event.config.captainMultiplier = Number(event.config.captainMultiplier) || templates.koshien.captainMultiplier;
   event.config.sqrtOddsCap = Number(event.config.sqrtOddsCap) || templates.koshien.sqrtOddsCap;
@@ -3094,13 +3100,7 @@ function koshienStageLabel(finish) {
 }
 
 function koshienLoserFinishForRound(round, team) {
-  if (round === "R1") return "initial_loss";
-  if (round === "R2") return koshienStartRound(team) === 2 ? "initial_loss" : "first_win_then_loss";
-  if (round === "R3") return "best16";
-  if (round === "QF") return "best8";
-  if (round === "SF") return "best4";
-  if (round === "F") return "runner_up";
-  return "";
+  return window.YosoKoshienResults.loserFinishForRound(round, koshienStartRound(team));
 }
 
 function applyKoshienMatchFinishes() {
@@ -3125,20 +3125,7 @@ function applyKoshienMatchFinishes() {
 }
 
 function validateKoshienMatchResult(match) {
-  if (!match.team_a_id || !match.team_b_id) return { ok: false, message: "team_a / team_b が未確定の試合は保存できません。" };
-  if (match.team_a_id === match.team_b_id) return { ok: false, message: "同じ高校同士のカードは保存できません。" };
-  const scoreA = Number(match.score_a);
-  const scoreB = Number(match.score_b);
-  if (!Number.isInteger(scoreA) || scoreA < 0 || !Number.isInteger(scoreB) || scoreB < 0) {
-    return { ok: false, message: "スコアは両校とも0以上の整数で入力してください。" };
-  }
-  if (scoreA === scoreB) return { ok: false, message: "同点は保存できません。勝敗が決まったスコアを入力してください。" };
-  if (![match.team_a_id, match.team_b_id].includes(match.winner_id)) {
-    return { ok: false, message: "勝者をteam_aまたはteam_bから選んでください。" };
-  }
-  const scoreWinner = scoreA > scoreB ? match.team_a_id : match.team_b_id;
-  if (match.winner_id !== scoreWinner) return { ok: false, message: "勝者とスコアの整合性を確認してください。" };
-  return { ok: true };
+  return window.YosoKoshienResults.validateMatchResult(match);
 }
 
 async function saveKoshienMatchResult(matchId) {
@@ -3150,19 +3137,25 @@ async function saveKoshienMatchResult(matchId) {
     renderActiveEventManager();
     return;
   }
-  match.loser_id = match.winner_id === match.team_a_id ? match.team_b_id : match.team_a_id;
-  match.status = "completed";
+  const completed = window.YosoKoshienResults.completeMatch(match);
+  Object.assign(match, completed.match);
   applyKoshienMatchFinishes();
+  saveLocalStateOnly();
   setKoshienMatchMessage(`${koshienRoundLabel(match.round)} ${match.match_no} を保存しました。ランキングを再計算しました。`, "success");
   renderScoresOnly();
-  if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !currentAuthUser()) return;
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
+  if (!currentAuthUser()) {
+    setKoshienMatchMessage("端末内には保存しましたが、Supabaseには未保存です。オンラインログイン後に再保存してください。", "error");
+    renderScoresOnly();
+    return;
+  }
   setKoshienMatchMessage("Supabaseへ保存しています...", "success");
   renderActiveEventManager();
   try {
     const result = await saveKoshienOnlineNow({ participantName: currentParticipantName(), updateConnection: false });
-    setKoshienMatchMessage(result?.skipped ? koshienSaveSkipMessage(result.reason) : "Supabaseへ結果を保存しました。", result?.skipped ? "error" : "success");
+    setKoshienMatchMessage(koshienSaveOutcomeMessage(result, "Supabaseへ結果を保存しました。"), result?.skipped || result?.partial ? "error" : "success");
   } catch (error) {
-    setKoshienMatchMessage(`Supabase保存に失敗しました。${error?.message ? ` (${error.message})` : ""}`, "error");
+    setKoshienMatchMessage(koshienStructuredSaveErrorMessage(error), "error");
   }
   renderScoresOnly();
 }
@@ -3170,6 +3163,12 @@ async function saveKoshienMatchResult(matchId) {
 function setKoshienMatchMessage(text, type = "success") {
   state.event.results ||= createResults("koshien");
   state.event.results.matchMessage = text ? { text, type } : null;
+}
+
+function koshienStructuredSaveErrorMessage(error) {
+  const stageLabels = { matches: "matches", scores: "scores", results: "raw results", result_transaction: "matches・scores・raw results", structured: "structured tables", teams: "teams", players: "players" };
+  const stage = stageLabels[error?.stage] || "Supabase";
+  return `${stage}保存に失敗しました。再保存しても重複しないため、設定・migration・player対応を確認して再試行してください。${error?.message ? ` (${error.message})` : ""}`;
 }
 
 function koshienResultBlock(teams) {
@@ -4233,7 +4232,7 @@ function bindGenericInputs() {
         setKoshienPhase1Message(name, "Supabaseへ保存しています...");
         try {
           const result = await saveKoshienOnlineNow({ participantName: name });
-          setKoshienPhase1Message(name, result?.skipped ? koshienSaveSkipMessage(result.reason) : "フェーズ1予想を保存しました。");
+          setKoshienPhase1Message(name, koshienSaveOutcomeMessage(result, "フェーズ1予想を保存しました。"));
         } catch (error) {
           setKoshienPhase1Message(name, `Supabaseに接続できません。通信環境またはログイン状態を確認してください。${error?.message ? ` (${error.message})` : ""}`);
         }
@@ -5033,17 +5032,19 @@ function koshienPhase1Score(prediction) {
 function koshienPhase1Breakdown(prediction) {
   const uniquePicks = [...new Set(normalizeFixedArray(prediction.teams, state.event.config.pickCount || 8).filter(Boolean))];
   const captainMultiplier = Number(state.event.config.captainMultiplier) || templates.koshien.captainMultiplier || 1.2;
-  const lines = [];
-  const total = uniquePicks.reduce((sum, team) => {
-    const finish = state.event.results.finishes[team] || "";
-    const stagePoint = finish ? koshienTeamScore(finish) : 0;
-    const sqrtOdds = koshienSqrtOdds(team);
-    const multiplier = prediction.captain === team ? captainMultiplier : 1;
-    const score = stagePoint * sqrtOdds * multiplier;
-    lines.push(`${team}: ${koshienStageLabel(finish)} ${formatScore(stagePoint)} x sqrt_odds ${formatScore(sqrtOdds)} x captain ${formatScore(multiplier)} = ${formatScore(score)}pt`);
-    return sum + score;
-  }, 0);
-  return { total, lines };
+  const breakdown = window.YosoKoshienResults.calculatePhase1Breakdown({
+    picks: uniquePicks,
+    captain: prediction.captain,
+    finishes: state.event.results.finishes,
+    teamMeta: state.event.config.teamMeta,
+    stagePoints: state.event.config.stagePoints || templates.koshien.stagePoints,
+    captainMultiplier,
+    sqrtOddsCap: Number(state.event.config.sqrtOddsCap) || templates.koshien.sqrtOddsCap || 50,
+  });
+  return {
+    total: breakdown.total,
+    lines: breakdown.rows.map((row) => `${row.team}: ${koshienStageLabel(row.finish)} ${formatScore(row.stagePoint)} x sqrt_odds ${formatScore(row.sqrtOdds)} x captain ${formatScore(row.multiplier)} = ${formatScore(row.score)}pt`),
+  };
 }
 
 function koshienRevengeScore(prediction) {
@@ -5106,13 +5107,7 @@ function koshienPhase2TeamScore(ownerName, team) {
 }
 
 function koshienNormalizeFinish(finish) {
-  const aliases = {
-    best32: "first_win_then_loss",
-    semifinal: "best4",
-    runnerUp: "runner_up",
-    quarterfinal: "best8",
-  };
-  return aliases[finish] || finish || "initial_loss";
+  return window.YosoKoshienResults.normalizeFinish(finish) || "initial_loss";
 }
 
 function koshienFinishRank(finish) {
@@ -5502,7 +5497,7 @@ async function confirmSave() {
     els.saveButton.textContent = "SYNCING";
     try {
       const result = await saveKoshienOnlineNow();
-      els.saveButton.textContent = result?.skipped ? "LOCAL" : "SAVED";
+      els.saveButton.textContent = result?.skipped ? "LOCAL" : result?.partial ? "PARTIAL" : "SAVED";
     } catch (error) {
       console.warn("Koshien Supabase save failed", error);
       els.saveButton.textContent = "LOCAL";
