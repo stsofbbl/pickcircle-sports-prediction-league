@@ -17,26 +17,64 @@ create or replace function public.koshien_phase2_ranking_snapshot_is_valid(
   p_ordered_player_ids uuid[]
 )
 returns boolean
-language sql
+language plpgsql
 immutable
 strict
 parallel safe
 set search_path = ''
 as $$
-  select jsonb_typeof(p_snapshot) = 'object'
-    and jsonb_typeof(p_snapshot -> 'players') = 'array'
-    and jsonb_array_length(p_snapshot -> 'players') = 4
-    and jsonb_typeof(p_snapshot -> 'tie_draws') = 'array'
-    and p_snapshot -> 'resolved_order_player_ids' = to_jsonb(p_ordered_player_ids)
-    and (
-      select count(*) = 4
-        and count(distinct item ->> 'player_id') = 4
-        and bool_and((item ->> 'player_id') = any (p_ordered_player_ids::text[]))
-        and bool_and(jsonb_typeof(item -> 'phase1_score') = 'number')
-        and array_agg(distinct item ->> 'resolved_rank' order by item ->> 'resolved_rank')
-          = array['1', '2', '3', '4']::text[]
-      from jsonb_array_elements(p_snapshot -> 'players') as item
-    );
+declare
+  v_players_valid boolean;
+  v_has_ties boolean;
+  v_rank_mismatch boolean;
+begin
+  if jsonb_typeof(p_snapshot) <> 'object'
+    or jsonb_typeof(p_snapshot -> 'players') <> 'array'
+    or jsonb_array_length(p_snapshot -> 'players') <> 4
+    or jsonb_typeof(p_snapshot -> 'tie_draws') <> 'array'
+    or p_snapshot -> 'resolved_order_player_ids' is distinct from to_jsonb(p_ordered_player_ids)
+  then
+    return false;
+  end if;
+
+  select count(*) = 4
+      and count(distinct item ->> 'player_id') = 4
+      and bool_and(coalesce((item ->> 'player_id') = any (p_ordered_player_ids::text[]), false))
+      and bool_and(case
+        when jsonb_typeof(item -> 'phase1_score') = 'number'
+          then (item ->> 'phase1_score')::numeric >= 0
+        else false
+      end)
+      and array_agg(distinct item ->> 'resolved_rank' order by item ->> 'resolved_rank')
+        = array['1', '2', '3', '4']::text[]
+  into v_players_valid
+  from jsonb_array_elements(p_snapshot -> 'players') as item;
+
+  if v_players_valid is not true then
+    return false;
+  end if;
+
+  select exists (
+    select 1
+    from jsonb_array_elements(p_snapshot -> 'players') as item
+    group by item ->> 'phase1_score'
+    having count(*) > 1
+  ) into v_has_ties;
+
+  if v_has_ties and jsonb_array_length(p_snapshot -> 'tie_draws') = 0 then
+    return false;
+  end if;
+
+  select exists (
+    select 1
+    from unnest(p_ordered_player_ids) with ordinality as ordered(player_id, ordinality)
+    left join jsonb_array_elements(p_snapshot -> 'players') as item
+      on item ->> 'player_id' = ordered.player_id::text
+    where item ->> 'resolved_rank' <> (5 - ordered.ordinality)::text
+  ) into v_rank_mismatch;
+
+  return coalesce(not v_rank_mismatch, false);
+end;
 $$;
 
 create table if not exists public.phase2_drafts (
@@ -117,12 +155,14 @@ begin
     if v_team_count <> 16 then
       raise exception 'eligible_team_ids must reference sixteen teams in the draft event';
     end if;
-    if not public.koshien_phase2_ranking_snapshot_is_valid(new.ranking_snapshot, new.ordered_player_ids) then
+    if public.koshien_phase2_ranking_snapshot_is_valid(new.ranking_snapshot, new.ordered_player_ids) is not true then
       raise exception 'ranking_snapshot must contain four scored players, resolved ranks, tie draws, and the fixed order';
     end if;
   end if;
 
   if tg_op = 'UPDATE' then
+    new.version := old.version + 1;
+
     if old.status is distinct from new.status and not (
       (old.status = 'not_ready' and new.status = 'ready')
       or (old.status = 'ready' and new.status = 'drafting')

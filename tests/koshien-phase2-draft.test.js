@@ -240,6 +240,7 @@ test("DB response rejects picks outside the fixed draft and event", () => {
 test("missing draft response maps to not_ready without trusting local state", () => {
   assert.deepEqual(draft.buildDraftViewState(null), {
     available: false,
+    formalDraftExists: false,
     status: "not_ready",
     message: "phase 2 draft is not ready",
   });
@@ -260,6 +261,7 @@ test("persisted not_ready row with empty setup stays a normal unavailable state"
     picks: [],
   }), {
     available: false,
+    formalDraftExists: true,
     status: "not_ready",
     message: "phase 2 draft setup is not complete",
   });

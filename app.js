@@ -292,7 +292,7 @@ let onlineAuthUser = null;
 let pendingKoshienSyncTimer = null;
 let pendingKoshienLoadPromise = null;
 let lastKoshienOnlineLoadUserId = "";
-let koshienPhase2DraftView = { available: false, status: "not_ready" };
+let koshienPhase2DraftView = { available: false, formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
 let koshienPhase2DraftLoading = false;
 let koshienPhase2DraftSaving = false;
 let koshienPhase2DraftMessage = "";
@@ -431,7 +431,7 @@ async function handleSupabaseAuthEvent(event) {
   if (event === "SIGNED_OUT") {
     applyOnlineAuthUser(null);
     lastKoshienOnlineLoadUserId = "";
-    koshienPhase2DraftView = { available: false, status: "not_ready" };
+    koshienPhase2DraftView = { available: false, formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
     koshienPhase2DraftMessage = "";
     renderAuthState();
     render();
@@ -1569,19 +1569,22 @@ function applyKoshienPhase2DraftResponse(response) {
   if (!window.YosoKoshienPhase2Draft?.buildDraftViewState) {
     throw new Error("フェーズ2ドラフトのドメインモジュールを読み込めませんでした。");
   }
-  koshienPhase2DraftView = window.YosoKoshienPhase2Draft.buildDraftViewState(response);
+  koshienPhase2DraftView = {
+    ...window.YosoKoshienPhase2Draft.buildDraftViewState(response),
+    loadedFromDb: true,
+  };
   return koshienPhase2DraftView;
 }
 
 async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
   const service = window.YosoDataService?.koshien;
   if (baseTemplateId(state.event?.templateId) !== "koshien" || !state.event?.id || !service?.loadPhase2DraftState) {
-    koshienPhase2DraftView = { available: false, status: "not_ready" };
+    koshienPhase2DraftView = { available: false, formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
     if (renderAfter) render();
     return koshienPhase2DraftView;
   }
   if (!currentAuthUser()) {
-    koshienPhase2DraftView = { available: false, status: "not_ready" };
+    koshienPhase2DraftView = { available: false, formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
     koshienPhase2DraftMessage = "フェーズ2ドラフトの確認にはオンラインログインが必要です。";
     koshienPhase2DraftMessageKind = "error";
     if (renderAfter) render();
@@ -1598,7 +1601,12 @@ async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
     return koshienPhase2DraftView;
   } catch (error) {
     console.warn("Koshien phase 2 draft load failed", error);
-    koshienPhase2DraftView = { available: false, status: "error" };
+    koshienPhase2DraftView = {
+      available: false,
+      formalDraftExists: Boolean(koshienPhase2DraftView.formalDraftExists),
+      loadedFromDb: false,
+      status: "error",
+    };
     koshienPhase2DraftMessage = `フェーズ2ドラフトを読み込めませんでした。${error?.message ? ` (${error.message})` : ""}`;
     koshienPhase2DraftMessageKind = "error";
     return koshienPhase2DraftView;
@@ -1654,11 +1662,11 @@ async function confirmKoshienPhase2DraftPick() {
       } catch (stateError) {
         console.warn("Koshien phase 2 conflict state was invalid", stateError);
         const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
-        appliedLatest = refreshed.status !== "error";
+        appliedLatest = refreshed.loadedFromDb === true;
       }
     } else {
       const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
-      appliedLatest = refreshed.status !== "error";
+      appliedLatest = refreshed.loadedFromDb === true;
     }
     const restored = koshienPhase2DraftView.status !== "error" && appliedLatest;
     koshienPhase2DraftMessage = restored
@@ -5244,7 +5252,7 @@ function koshienPhase2BaseScore(prediction) {
 }
 
 function koshienFormalPhase2ScoringPending() {
-  return Boolean(window.YosoKoshienPhase2Draft);
+  return koshienPhase2DraftView.formalDraftExists === true;
 }
 
 function koshienPhase3Score(name, prediction) {

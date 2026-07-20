@@ -233,11 +233,11 @@
 
   function buildDraftViewState(response) {
     if (!response?.draft) {
-      return { available: false, status: "not_ready", message: "phase 2 draft is not ready" };
+      return { available: false, formalDraftExists: false, status: "not_ready", message: "phase 2 draft is not ready" };
     }
     const draft = response.draft;
     if (draft.status === "not_ready") {
-      return { available: false, status: "not_ready", message: "phase 2 draft setup is not complete" };
+      return { available: false, formalDraftExists: true, status: "not_ready", message: "phase 2 draft setup is not complete" };
     }
     const playerRows = Array.isArray(response.players) ? response.players : [];
     const teamRows = Array.isArray(response.teams) ? response.teams : [];
@@ -286,6 +286,7 @@
     const rankedPlayers = [...orderedPlayerIds].reverse();
     return {
       available: true,
+      formalDraftExists: true,
       draftId: normalizedId(draft.id),
       eventId: normalizedId(draft.event_id),
       status: draft.status,

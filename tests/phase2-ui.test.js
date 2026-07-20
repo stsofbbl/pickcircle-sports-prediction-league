@@ -50,12 +50,14 @@ test("phase 2 controls expose pending, ownership, refresh and accessible status"
 test("formal DB draft never scores stale display-name keyed local picks", () => {
   assert.match(app, /function koshienFormalPhase2ScoringPending/);
   assert.match(app, /if \(koshienFormalPhase2ScoringPending\(\)\) return 0/);
+  assert.match(app, /koshienPhase2DraftView\.formalDraftExists === true/);
   assert.match(app, /旧ローカル指名は正式得点に加算しません/);
 });
 
 test("failed conflict reload does not claim that formal state was restored", () => {
   assert.match(app, /最新状態を取得できず、手番は未確認です/);
   assert.match(app, /const restored = koshienPhase2DraftView\.status !== "error"/);
+  assert.match(app, /refreshed\.loadedFromDb === true/);
 });
 
 test("phase 2 layout has a mobile single-column fallback", () => {
