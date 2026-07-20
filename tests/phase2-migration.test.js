@@ -97,6 +97,7 @@ test("ready state freezes the draw snapshot and only allows forward transitions"
   assert.match(sql, /create or replace function public\.koshien_phase2_ranking_snapshot_is_valid/i);
   assert.match(sql, /resolved_order_player_ids/i);
   assert.match(sql, /phase1_score/i);
+  assert.match(sql, /jsonb_typeof\(p_snapshot -> 'tie_draws'\) is distinct from 'array'/i);
   assert.match(sql, /v_players_valid is not true/i);
   assert.match(sql, /is not true then[\s\S]*ranking_snapshot must contain/i);
   assert.match(sql, /v_has_ties[\s\S]*jsonb_array_length\(p_snapshot -> 'tie_draws'\) = 0/i);

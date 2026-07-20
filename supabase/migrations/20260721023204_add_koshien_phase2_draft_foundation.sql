@@ -28,10 +28,17 @@ declare
   v_has_ties boolean;
   v_rank_mismatch boolean;
 begin
-  if jsonb_typeof(p_snapshot) <> 'object'
-    or jsonb_typeof(p_snapshot -> 'players') <> 'array'
-    or jsonb_array_length(p_snapshot -> 'players') <> 4
-    or jsonb_typeof(p_snapshot -> 'tie_draws') <> 'array'
+  if jsonb_typeof(p_snapshot) is distinct from 'object' then
+    return false;
+  end if;
+
+  if jsonb_typeof(p_snapshot -> 'players') is distinct from 'array'
+    or jsonb_typeof(p_snapshot -> 'tie_draws') is distinct from 'array'
+  then
+    return false;
+  end if;
+
+  if jsonb_array_length(p_snapshot -> 'players') <> 4
     or p_snapshot -> 'resolved_order_player_ids' is distinct from to_jsonb(p_ordered_player_ids)
   then
     return false;
