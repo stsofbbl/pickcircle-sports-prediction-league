@@ -3291,26 +3291,109 @@ function setKoshienPhase1Message(name, message) {
   if (target) target.textContent = message;
 }
 
+// --- Koshien Phase2 Draft Logic ---
+function getKoshienDraftState() {
+  const participants = Object.keys(state.event.predictions || {}).sort((a, b) => {
+    const scoreA = koshienPhase1Score(state.event.predictions[a]);
+    const scoreB = koshienPhase1Score(state.event.predictions[b]);
+    if (scoreA !== scoreB) return scoreA - scoreB;
+    return a.localeCompare(b);
+  });
+  
+  const draftCount = state.event.config.phase2DraftCount || 4;
+  const draftOrder = [];
+  for (let i = 0; i < draftCount; i++) {
+    draftOrder.push(...(i % 2 === 0 ? participants : [...participants].reverse()));
+  }
+  
+  let totalPicks = 0;
+  const pickedTeams = new Set();
+  const playerPickCounts = {};
+  participants.forEach(p => playerPickCounts[p] = 0);
+  
+  participants.forEach(p => {
+    const picks = state.event.predictions[p].phase2DraftPicks || [];
+    picks.forEach(team => {
+      if (team) {
+        totalPicks++;
+        pickedTeams.add(team);
+        playerPickCounts[p]++;
+      }
+    });
+  });
+
+  const isComplete = totalPicks >= draftOrder.length;
+  const currentTurnPlayer = isComplete ? null : draftOrder[totalPicks];
+  const currentTurnRound = currentTurnPlayer ? playerPickCounts[currentTurnPlayer] : -1;
+
+  return { draftOrder, totalPicks, pickedTeams, isComplete, currentTurnPlayer, currentTurnRound };
+}
+
+function koshienDraftOptionList(options, selected, pickedTeams, myPicks) {
+  const normalized = options[0] === "" ? options : ["", ...options];
+  return normalized.map((option) => {
+    if (option === "") return `<option value="" ${!selected ? "selected" : ""}>未選択</option>`;
+    const isDisabled = pickedTeams.has(option) && !myPicks.includes(option);
+    return `<option value="${escapeAttr(option)}" ${String(option) === String(selected) ? "selected" : ""} ${isDisabled ? "disabled" : ""}>${escapeHtml(option)}${isDisabled ? " (指名済)" : ""}</option>`;
+  }).join("");
+}
+
 function participantKoshienDraftBlock(name, teams) {
   ensurePrediction(name);
   const prediction = state.event.predictions[name];
   const picks = normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4);
   const pickedTeams = [...new Set(picks.filter(Boolean))];
   const revengeOptions = koshienRevengeOptions(prediction, teams);
+  const draftState = getKoshienDraftState();
+  const isMyTurn = draftState.currentTurnPlayer === name;
+  const activeSlotIndex = draftState.currentTurnRound;
+  
+  let turnMessage = "";
+  if (draftState.isComplete) {
+    turnMessage = `<div class="active-manager-note">ドラフトは完了しました。</div>`;
+  } else if (isMyTurn) {
+    turnMessage = `<div class="active-manager-note" style="border-color: var(--soap-pink); background: rgba(245, 154, 194, 0.15);"><strong style="color: var(--soap-pink);">あなたの番です！（全体第${draftState.totalPicks + 1}指名）</strong></div>`;
+  } else {
+    turnMessage = `<div class="active-manager-note is-disabled">現在は <strong>${escapeHtml(draftState.currentTurnPlayer)}</strong> の指名待ちです。（全体第${draftState.totalPicks + 1}指名）</div>`;
+  }
+
   return `
-    <div class="entry-block koshien-participant">
+    <div class="entry-block koshien-participant ${isMyTurn ? 'is-active-turn' : ''}">
       <div class="wc-participant-head">
         <h3>${escapeHtml(name)} のYOSO</h3>
         <span>${pickedTeams.length} / ${picks.length}</span>
       </div>
-      <p class="wc-phase-intro">フェーズ2はドラフト指名です。クラブ内の重複不可制御はSupabaseの phase2_draft_picks で拡張できる構造にします。</p>
-      <div class="prediction-grid koshien-pick-grid">
-        ${picks.map((pick, index) => `
-          <label class="field">
-            <span>ドラフト${index + 1}巡目</span>
-            <select data-koshien-draft-pick="${escapeAttr(name)}:${index}">${optionList(teams, pick)}</select>
-          </label>
-        `).join("")}
+      <p class="wc-phase-intro">フェーズ2はドラフト指名です。フェーズ1暫定順位の下位からスネーク順で1チームずつ指名します。</p>
+      ${turnMessage}
+      <div class="prediction-grid koshien-pick-grid" style="margin-top: 12px;">
+        ${picks.map((pick, index) => {
+          const isCurrentSlot = isMyTurn && index === activeSlotIndex;
+          if (pick) {
+            return `
+            <label class="field">
+              <span>ドラフト${index + 1}巡目</span>
+              <div style="padding: 10px; border: 1px solid var(--app-line); border-radius: 12px; background: rgba(255,255,255,0.05); color: var(--app-text);">${escapeHtml(pick)}</div>
+            </label>
+            `;
+          } else if (isCurrentSlot) {
+            return `
+            <label class="field">
+              <span style="color: var(--soap-pink);">ドラフト${index + 1}巡目（あなたの指名）</span>
+              <div style="display: flex; gap: 8px;">
+                <select id="koshien-draft-select-${index}" style="flex: 1;">${koshienDraftOptionList(teams, "", draftState.pickedTeams, picks)}</select>
+                <button type="button" class="primary-button" data-koshien-draft-confirm="${escapeAttr(name)}:${index}" style="padding: 0 16px; border-radius: 12px; font-weight: bold; white-space: nowrap;">確定</button>
+              </div>
+            </label>
+            `;
+          } else {
+            return `
+            <label class="field">
+              <span>ドラフト${index + 1}巡目</span>
+              <div style="padding: 10px; border: 1px dashed var(--app-line); border-radius: 12px; background: rgba(0,0,0,0.2); color: var(--app-muted);">未指名</div>
+            </label>
+            `;
+          }
+        }).join("")}
       </div>
       <div class="form-grid">
         <label class="field"><span>リベンジカード</span><select data-koshien-revenge-pick="${escapeAttr(name)}">${optionList(revengeOptions, prediction.revengePick)}</select></label>
@@ -4169,22 +4252,19 @@ function bindGenericInputs() {
       setKoshienPhase1Message(input.dataset.koshienCaptain, "");
     });
   });
-  els.eventForm.querySelectorAll("[data-koshien-draft-pick]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const [name, index] = input.dataset.koshienDraftPick.split(":");
+  els.eventForm.querySelectorAll("[data-koshien-draft-confirm]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const [name, index] = btn.dataset.koshienDraftConfirm.split(":");
+      const select = document.getElementById(`koshien-draft-select-${index}`);
+      if (!select || !select.value) return;
       ensurePrediction(name);
       state.event.predictions[name].phase2DraftPicks = normalizeFixedArray(
         state.event.predictions[name].phase2DraftPicks,
         state.event.config.phase2DraftCount || 4,
       );
-      const previous = state.event.predictions[name].phase2DraftPicks[Number(index)] || "";
-      state.event.predictions[name].phase2DraftPicks[Number(index)] = input.value;
-      if (input.value && koshienPhase2TakenByOther(input.value, name)) {
-        state.event.predictions[name].phase2DraftPicks[Number(index)] = previous;
-        render();
-        return;
-      }
-      renderScoresOnly();
+      state.event.predictions[name].phase2DraftPicks[Number(index)] = select.value;
+      saveState(); // 指名確定時にSupabaseへ同期
+      render();
     });
   });
   els.eventForm.querySelectorAll("[data-koshien-revenge-pick]").forEach((input) => {
