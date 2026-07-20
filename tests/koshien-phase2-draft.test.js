@@ -68,8 +68,11 @@ test("pick number derives player ID and draft round from fixed ranking", () => {
 test("phase 1 standings validate IDs and numeric scores, not display names", () => {
   const standings = ranked.map((playerId, index) => ({ player_id: playerId, score: 40 - index, display_name: "Same name" }));
   assert.deepEqual(draft.validatePhase1Standings(standings), { ok: true, errors: [] });
+  assert.equal(draft.validatePhase1Standings(standings.map((row) => ({ ...row, score: 0 }))).ok, true);
   assert.equal(draft.validatePhase1Standings([...standings.slice(0, 3), { ...standings[3], player_id: "player-1" }]).ok, false);
   assert.equal(draft.validatePhase1Standings([...standings.slice(0, 3), { ...standings[3], score: "not-a-number" }]).ok, false);
+  assert.equal(draft.validatePhase1Standings([...standings.slice(0, 3), { ...standings[3], score: "" }]).ok, false);
+  assert.equal(draft.validatePhase1Standings([...standings.slice(0, 3), { ...standings[3], score: null }]).ok, false);
   assert.equal(draft.validatePhase1Standings(standings.slice(0, 3)).ok, false);
 });
 
@@ -220,10 +223,44 @@ test("DB response tolerates duplicate display names but rejects duplicate IDs an
   assert.throws(() => draft.buildDraftViewState(dbState({ picks: sparse })), /persisted draft state/i);
 });
 
+test("DB response rejects picks outside the fixed draft and event", () => {
+  const wrongTeam = completedPicks(2);
+  wrongTeam[1] = { ...wrongTeam[1], team_id: "team-outside-best16" };
+  assert.throws(() => draft.buildDraftViewState(dbState({ picks: wrongTeam })), /eligible team/i);
+
+  const wrongDraft = completedPicks(2);
+  wrongDraft[1] = { ...wrongDraft[1], draft_id: "draft-2" };
+  assert.throws(() => draft.buildDraftViewState(dbState({ picks: wrongDraft })), /draft ID/i);
+
+  const wrongEvent = completedPicks(2);
+  wrongEvent[1] = { ...wrongEvent[1], event_id: "event-2" };
+  assert.throws(() => draft.buildDraftViewState(dbState({ picks: wrongEvent })), /event ID/i);
+});
+
 test("missing draft response maps to not_ready without trusting local state", () => {
   assert.deepEqual(draft.buildDraftViewState(null), {
     available: false,
     status: "not_ready",
     message: "phase 2 draft is not ready",
+  });
+});
+
+test("persisted not_ready row with empty setup stays a normal unavailable state", () => {
+  assert.deepEqual(draft.buildDraftViewState({
+    draft: activeDraft({
+      status: "not_ready",
+      ordered_player_ids: [],
+      eligible_team_ids: [],
+      starts_at: null,
+      deadline_at: null,
+    }),
+    viewer_player_id: null,
+    players: [],
+    teams: [],
+    picks: [],
+  }), {
+    available: false,
+    status: "not_ready",
+    message: "phase 2 draft setup is not complete",
   });
 });

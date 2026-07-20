@@ -50,7 +50,7 @@ test("phase 2 schema enforces 4 players, 16 teams, pick uniqueness, and ID refer
   assert.match(sql, /create or replace function public\.validate_koshien_phase2_draft_setup/i);
   assert.match(sql, /p\.league_id = v_league_id[\s\S]*p\.id = any \(new\.ordered_player_ids\)/i);
   assert.match(sql, /t\.event_id = new\.event_id[\s\S]*t\.id = any \(new\.eligible_team_ids\)/i);
-  assert.match(sql, /cannot change fixed draft players or teams after picks exist/i);
+  assert.match(sql, /cannot change fixed phase 2 draft setup after ready/i);
   assert.match(sql, /create trigger phase2_drafts_validate_setup/i);
 });
 
@@ -71,6 +71,10 @@ test("atomic pick RPC locks, resolves auth player, validates turn, and advances 
   assert.match(sql, /set current_pick_no = case/i);
   assert.match(sql, /status = case[\s\S]*then 'completed'/i);
   assert.match(sql, /set_config\('yoso\.phase2_rpc', 'save_pick', true\)/i);
+  assert.ok(
+    sql.indexOf("set_config('yoso.phase2_rpc', 'save_pick', true)") < sql.indexOf("for update;"),
+    "RPC RLS context must be set before SELECT FOR UPDATE",
+  );
   assert.doesNotMatch(sql, /public\.predictions|results\.payload/i);
 });
 
@@ -85,4 +89,18 @@ test("RLS and function privileges exclude anon and direct phase 2 writes", () =>
   assert.match(sql, /grant execute on function public\.save_koshien_phase2_draft_pick[\s\S]*to authenticated/i);
   assert.match(sql, /revoke execute on function public\.get_koshien_phase2_draft_state[\s\S]*from anon, public/i);
   assert.match(sql, /grant execute on function public\.get_koshien_phase2_draft_state[\s\S]*to authenticated/i);
+  assert.match(sql, /grant execute on function public\.is_league_member\(uuid\) to authenticated/i);
+});
+
+test("ready state freezes the draw snapshot and only allows forward transitions", () => {
+  const sql = fs.readFileSync(MIGRATION_PATH, "utf8");
+  assert.match(sql, /create or replace function public\.koshien_phase2_ranking_snapshot_is_valid/i);
+  assert.match(sql, /resolved_order_player_ids/i);
+  assert.match(sql, /phase1_score/i);
+  assert.match(sql, /old\.status <> 'not_ready'[\s\S]*ranking_snapshot is distinct from new\.ranking_snapshot/i);
+  assert.match(sql, /old\.status = 'not_ready' and new\.status = 'ready'/i);
+  assert.match(sql, /old\.status = 'ready' and new\.status = 'drafting'/i);
+  assert.match(sql, /old\.status = 'drafting' and new\.status = 'completed'/i);
+  assert.match(sql, /old\.status = 'completed' and new\.status = 'locked'/i);
+  assert.match(sql, /completed phase 2 draft requires exactly sixteen picks/i);
 });

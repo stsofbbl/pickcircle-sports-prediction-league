@@ -1646,17 +1646,24 @@ async function confirmKoshienPhase2DraftPick() {
     koshienPhase2DraftMessageKind = "success";
   } catch (error) {
     console.warn("Koshien phase 2 draft pick failed", error);
+    let appliedLatest = false;
     if (error?.latestState) {
       try {
         applyKoshienPhase2DraftResponse(error.latestState);
+        appliedLatest = true;
       } catch (stateError) {
         console.warn("Koshien phase 2 conflict state was invalid", stateError);
-        await refreshKoshienPhase2DraftState({ renderAfter: false });
+        const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
+        appliedLatest = refreshed.status !== "error";
       }
     } else {
-      await refreshKoshienPhase2DraftState({ renderAfter: false });
+      const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
+      appliedLatest = refreshed.status !== "error";
     }
-    koshienPhase2DraftMessage = `指名を確定できませんでした。最新状態へ戻しました。${error?.message ? ` (${error.message})` : ""}`;
+    const restored = koshienPhase2DraftView.status !== "error" && appliedLatest;
+    koshienPhase2DraftMessage = restored
+      ? `指名を確定できませんでした。最新状態へ戻しました。${error?.message ? ` (${error.message})` : ""}`
+      : `指名を確定できませんでした。最新状態を取得できず、手番は未確認です。再読込してください。${error?.message ? ` (${error.message})` : ""}`;
     koshienPhase2DraftMessageKind = "error";
   } finally {
     koshienPhase2DraftSaving = false;
@@ -3436,8 +3443,9 @@ function participantKoshienDraftBlock() {
   const teamsById = new Map(view.eligibleTeams.map((team) => [team.teamId, team.name]));
   const picksByNo = new Map(view.picks.map((pick) => [pick.pickNo, pick]));
   const pickedSet = new Set(view.pickedTeamIds);
+  const startsBefore = view.startsAt && Date.now() < Date.parse(view.startsAt);
   const deadlinePassed = view.deadlineAt && Date.now() >= Date.parse(view.deadlineAt);
-  const canSubmit = view.canViewerPick && !deadlinePassed && !koshienPhase2DraftSaving;
+  const canSubmit = view.canViewerPick && !startsBefore && !deadlinePassed && !koshienPhase2DraftSaving;
   const currentText = view.completed
     ? "すべての指名が完了しました。"
     : `${view.currentTurn.pickNo}番目・${view.currentTurn.draftRound}巡目：${view.currentTurn.displayName}`;
@@ -3484,7 +3492,9 @@ function participantKoshienDraftBlock() {
           <button class="ghost-button" type="button" data-koshien-phase2-refresh ${koshienPhase2DraftSaving || koshienPhase2DraftLoading ? "disabled" : ""}>最新状態を取得</button>
         </div>
       </div>
+      <p class="helper-text">正式なフェーズ2得点のplayer ID投影は未実装です。旧ローカル指名は正式得点に加算しません。</p>
       ${!view.canViewerPick && !view.completed ? `<p class="helper-text">現在のplayer本人だけが操作できます。他の手番は閲覧のみです。</p>` : ""}
+      ${startsBefore && !view.completed ? `<p class="helper-text">開始時刻前のため指名できません。</p>` : ""}
       ${deadlinePassed && !view.completed ? `<p class="helper-text">締切を過ぎているため指名できません。</p>` : ""}
       <p class="koshien-phase2-message${messageClass}" role="status" aria-live="polite">${escapeHtml(koshienPhase2DraftMessage)}</p>
     </div>
@@ -5219,16 +5229,22 @@ function koshienRevengeScore(prediction) {
 }
 
 function koshienPhase2Score(name, prediction) {
+  if (koshienFormalPhase2ScoringPending()) return 0;
   const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
   return uniquePicks.reduce((total, team) => total + koshienPhase2TeamScore(name, team), 0);
 }
 
 function koshienPhase2BaseScore(prediction) {
+  if (koshienFormalPhase2ScoringPending()) return 0;
   const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
   return uniquePicks.reduce((total, team) => {
     const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
     return total + Number(state.event.config.phase2Points?.[finish] ?? templates.koshien.phase2Points?.[finish] ?? 0);
   }, 0);
+}
+
+function koshienFormalPhase2ScoringPending() {
+  return Boolean(window.YosoKoshienPhase2Draft);
 }
 
 function koshienPhase3Score(name, prediction) {

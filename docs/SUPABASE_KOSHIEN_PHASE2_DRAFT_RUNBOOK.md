@@ -28,6 +28,12 @@ supabase/migrations/20260721023204_add_koshien_phase2_draft_foundation.sql
 select count(*) as existing_phase2_pick_count
 from public.phase2_draft_picks;
 
+select has_function_privilege(
+  'authenticated',
+  'public.is_league_member(uuid)',
+  'execute'
+) as authenticated_can_check_membership;
+
 select e.id as event_id, e.league_id, e.name, e.preset_type, e.status
 from public.events e
 where e.preset_type = 'koshien'
@@ -54,6 +60,7 @@ order by m.match_no;
 期待値:
 
 - `existing_phase2_pick_count = 0`
+- `authenticated_can_check_membership` の現在値を記録する。このmigration適用後は `true` であること
 - 対象eventが1件に決まる
 - 対象playerが4件で、`profile_id` が全件非NULL・重複なし
 - R2の完了済み勝者が重複なしで16校
@@ -69,6 +76,7 @@ order by m.match_no;
 - 旧フェーズ2直接書込policyを削除し、RPC経由のinsert/updateだけを許可している
 - 2つのRPCが `SECURITY INVOKER` かつ `search_path = ''` である
 - `PUBLIC` と `anon` のEXECUTEがrevokeされ、`authenticated` だけにgrantされている
+- RLSが使用する `is_league_member(uuid)` は `anon` / `PUBLIC` からrevokeし、`authenticated` にだけEXECUTEを明示grantしている
 - publicテーブルのData API権限が明示grantされている
 - auth、storage、Vault、service roleへ変更がない
 
@@ -121,7 +129,8 @@ join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
   and p.proname in (
     'get_koshien_phase2_draft_state',
-    'save_koshien_phase2_draft_pick'
+    'save_koshien_phase2_draft_pick',
+    'is_league_member'
   )
 order by p.proname;
 ```
@@ -147,6 +156,22 @@ draft作成・開始UIの権限は未確定のため、今回のmigrationは準�
 - `deadline_at`
 - 初期 `current_pick_no = 1`
 - 開始時 `status = drafting`
+
+draft行は必ず `not_ready` で作成する。4人・16校・監査snapshot・時刻を保存した同じレビュー済み運用で `ready` へ進め、`starts_at` 到達後にだけ `drafting` へ進める。`not_ready` から `drafting` へ直接移行しない。
+
+`ranking_snapshot` は最低限、次の形で固定する。
+
+```json
+{
+  "players": [
+    { "player_id": "PLAYER_UUID", "phase1_score": 0, "resolved_rank": 1 }
+  ],
+  "tie_draws": [],
+  "resolved_order_player_ids": ["P4_UUID", "P3_UUID", "P2_UUID", "P1_UUID"]
+}
+```
+
+実データでは `players` を4件、`resolved_rank` を1〜4で重複なしにし、`resolved_order_player_ids` を4位→1位の4件にする。同点があれば `tie_draws` に固定抽選結果を残す。
 
 表示名や高校名からID配列を自動生成しない。`ordered_player_ids` と `eligible_team_ids` は、保存前後に同じ順序・同じ件数でread backする。
 

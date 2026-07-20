@@ -12,6 +12,33 @@ as $$
   from unnest(p_values) as value;
 $$;
 
+create or replace function public.koshien_phase2_ranking_snapshot_is_valid(
+  p_snapshot jsonb,
+  p_ordered_player_ids uuid[]
+)
+returns boolean
+language sql
+immutable
+strict
+parallel safe
+set search_path = ''
+as $$
+  select jsonb_typeof(p_snapshot) = 'object'
+    and jsonb_typeof(p_snapshot -> 'players') = 'array'
+    and jsonb_array_length(p_snapshot -> 'players') = 4
+    and jsonb_typeof(p_snapshot -> 'tie_draws') = 'array'
+    and p_snapshot -> 'resolved_order_player_ids' = to_jsonb(p_ordered_player_ids)
+    and (
+      select count(*) = 4
+        and count(distinct item ->> 'player_id') = 4
+        and bool_and((item ->> 'player_id') = any (p_ordered_player_ids::text[]))
+        and bool_and(jsonb_typeof(item -> 'phase1_score') = 'number')
+        and array_agg(distinct item ->> 'resolved_rank' order by item ->> 'resolved_rank')
+          = array['1', '2', '3', '4']::text[]
+      from jsonb_array_elements(p_snapshot -> 'players') as item
+    );
+$$;
+
 create table if not exists public.phase2_drafts (
   id uuid primary key default gen_random_uuid(),
   event_id text not null references public.events(id) on delete cascade,
@@ -54,7 +81,16 @@ declare
   v_league_id uuid;
   v_player_count integer;
   v_team_count integer;
+  v_pick_count integer;
 begin
+  if tg_op = 'INSERT' and new.status <> 'not_ready' then
+    raise exception 'phase 2 draft must be inserted as not_ready';
+  end if;
+
+  select count(*) into v_pick_count
+  from public.phase2_draft_picks dp
+  where dp.draft_id = new.id;
+
   if new.status <> 'not_ready' then
     select e.league_id into v_league_id
     from public.events e
@@ -81,26 +117,48 @@ begin
     if v_team_count <> 16 then
       raise exception 'eligible_team_ids must reference sixteen teams in the draft event';
     end if;
-    if jsonb_typeof(new.ranking_snapshot) <> 'object' then
-      raise exception 'ranking_snapshot must be a JSON object';
+    if not public.koshien_phase2_ranking_snapshot_is_valid(new.ranking_snapshot, new.ordered_player_ids) then
+      raise exception 'ranking_snapshot must contain four scored players, resolved ranks, tie draws, and the fixed order';
     end if;
   end if;
 
   if tg_op = 'UPDATE' then
-    if old.status = 'locked' and new.status <> 'locked' then
-      raise exception 'locked phase 2 draft cannot transition';
-    end if;
-    if old.status = 'completed' and new.status not in ('completed', 'locked') then
-      raise exception 'completed phase 2 draft can only remain completed or become locked';
-    end if;
-    if (
-      old.ordered_player_ids is distinct from new.ordered_player_ids
-      or old.eligible_team_ids is distinct from new.eligible_team_ids
-    ) and exists (
-      select 1 from public.phase2_draft_picks dp where dp.draft_id = old.id
+    if old.status is distinct from new.status and not (
+      (old.status = 'not_ready' and new.status = 'ready')
+      or (old.status = 'ready' and new.status = 'drafting')
+      or (old.status = 'drafting' and new.status = 'completed')
+      or (old.status = 'completed' and new.status = 'locked')
     ) then
-      raise exception 'cannot change fixed draft players or teams after picks exist';
+      raise exception 'invalid phase 2 draft status transition from % to %', old.status, new.status;
     end if;
+
+    if old.status = 'ready' and new.status = 'drafting' and clock_timestamp() < new.starts_at then
+      raise exception 'phase 2 draft cannot start before starts_at';
+    end if;
+
+    if old.status <> 'not_ready' and (
+      old.event_id is distinct from new.event_id
+      or old.ordered_player_ids is distinct from new.ordered_player_ids
+      or old.ranking_snapshot is distinct from new.ranking_snapshot
+      or old.eligible_team_ids is distinct from new.eligible_team_ids
+      or old.starts_at is distinct from new.starts_at
+      or old.deadline_at is distinct from new.deadline_at
+    ) then
+      raise exception 'cannot change fixed phase 2 draft setup after ready';
+    end if;
+  end if;
+
+  if new.status in ('not_ready', 'ready') and (v_pick_count <> 0 or new.current_pick_no <> 1) then
+    raise exception 'not_ready or ready phase 2 draft cannot contain picks';
+  end if;
+  if new.status = 'drafting' and (
+    v_pick_count not between 0 and 15
+    or new.current_pick_no <> v_pick_count + 1
+  ) then
+    raise exception 'drafting phase 2 draft current_pick_no must follow persisted picks';
+  end if;
+  if new.status in ('completed', 'locked') and (v_pick_count <> 16 or new.current_pick_no <> 16) then
+    raise exception 'completed phase 2 draft requires exactly sixteen picks';
   end if;
 
   return new;
@@ -357,6 +415,8 @@ begin
     raise exception 'request_id is required';
   end if;
 
+  perform set_config('yoso.phase2_rpc', 'save_pick', true);
+
   select d.* into v_draft
   from public.phase2_drafts d
   where d.id = p_draft_id
@@ -446,8 +506,6 @@ begin
     raise exception 'player already owns four teams' using errcode = '23505';
   end if;
 
-  perform set_config('yoso.phase2_rpc', 'save_pick', true);
-
   insert into public.phase2_draft_picks (
     draft_id, event_id, player_id, team_id, pick_no, draft_round, request_id
   ) values (
@@ -474,8 +532,12 @@ grant select, insert on public.phase2_draft_picks to authenticated;
 
 revoke execute on function public.uuid_array_is_unique(uuid[]) from anon, public;
 grant execute on function public.uuid_array_is_unique(uuid[]) to authenticated;
+revoke execute on function public.koshien_phase2_ranking_snapshot_is_valid(jsonb, uuid[]) from anon, public;
+grant execute on function public.koshien_phase2_ranking_snapshot_is_valid(jsonb, uuid[]) to authenticated;
 revoke execute on function public.validate_koshien_phase2_draft_setup() from anon, public;
 grant execute on function public.validate_koshien_phase2_draft_setup() to authenticated;
+revoke execute on function public.is_league_member(uuid) from anon, public;
+grant execute on function public.is_league_member(uuid) to authenticated;
 revoke execute on function public.get_koshien_phase2_draft_state(text) from anon, public;
 grant execute on function public.get_koshien_phase2_draft_state(text) to authenticated;
 revoke execute on function public.save_koshien_phase2_draft_pick(uuid, uuid, integer, uuid) from anon, public;

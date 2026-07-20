@@ -74,10 +74,10 @@
 - `status text not null`
 - `ordered_player_ids uuid[] not null`。4位から1位の順、重複なし、要素数4
 - `eligible_team_ids uuid[] not null`。ベスト16の固定スナップショット、重複なし、要素数16
-- `ranking_snapshot jsonb not null`。player ID、暫定得点、同点抽選の確定結果を監査できる情報
+- `ranking_snapshot jsonb not null`。`players` 4件（`player_id`, `phase1_score`, `resolved_rank`）、`tie_draws` 配列、`resolved_order_player_ids` を持つ監査情報。resolved orderは `ordered_player_ids` と一致させる
 - `current_pick_no integer not null`。1から16。完了時も16を保持する
-- `starts_at timestamptz not null`
-- `deadline_at timestamptz not null`
+- `starts_at timestamptz`。`not_ready` だけNULL可。それ以外は必須
+- `deadline_at timestamptz`。`not_ready` だけNULL可。それ以外は必須
 - `version bigint not null`。状態更新ごとに増加
 - `created_at`, `updated_at`
 
@@ -163,6 +163,7 @@ RLSはリーグ参加者の読取、本人性、RPC経由の書込境界を担�
 - 失敗時はターンを進めず、エラーを表示し、最新DB状態を再取得して再試行可能にする
 - 不正・疎・重複したDBレスポンスは画面状態として受理せず、明示的エラーにする
 - スマートフォンで候補選択、確定、現在手番、指名履歴を確認できる最小レイアウトにする
+- 既存の表示名キー `prediction.phase2DraftPicks` は正式DB指名へ投影しない。player ID・team ID基準の得点投影が完成するまで、旧ローカル値を正式フェーズ2得点へ加算しない
 
 見た目の最終調整と実機UI完成判定は本仕様の完了条件に含めない。
 
@@ -198,5 +199,6 @@ RLSはリーグ参加者の読取、本人性、RPC経由の書込境界を担�
 - 4人以外、4巡以外への一般化
 - 既存 `phase2_draft_picks` 本番行が存在する場合の変換規則
 - 同点抽選のUI、監査表示、乱数生成方式
+- 正式DB指名をplayer ID・team IDのまま結果・総合得点へ投影する読取境界
 
 これらが決まるまで、今回のUIは既に準備・開始されたdraftを読み、本人の現在ターンで1校を確定する機能だけを持つ。

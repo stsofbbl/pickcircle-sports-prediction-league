@@ -29,7 +29,11 @@
     const playerIds = standings.map((row) => normalizedId(row?.player_id));
     if (playerIds.some((playerId) => !playerId)) errors.push("missing_player_id");
     if (!unique(playerIds)) errors.push("duplicate_player_id");
-    if (standings.some((row) => !Number.isFinite(Number(row?.score)))) errors.push("invalid_score");
+    if (standings.some((row) => {
+      const score = row?.score;
+      return score === null || score === undefined || (typeof score === "string" && !score.trim())
+        || !Number.isFinite(Number(score));
+    })) errors.push("invalid_score");
     return { ok: errors.length === 0, errors };
   }
 
@@ -232,6 +236,9 @@
       return { available: false, status: "not_ready", message: "phase 2 draft is not ready" };
     }
     const draft = response.draft;
+    if (draft.status === "not_ready") {
+      return { available: false, status: "not_ready", message: "phase 2 draft setup is not complete" };
+    }
     const playerRows = Array.isArray(response.players) ? response.players : [];
     const teamRows = Array.isArray(response.teams) ? response.teams : [];
     const picks = Array.isArray(response.picks) ? [...response.picks].sort((left, right) => Number(left.pick_no) - Number(right.pick_no)) : [];
@@ -251,6 +258,17 @@
     if (eligibleTeamIds.some((teamId) => !teamsById.has(teamId))) {
       throw new Error("DB response is missing eligible teams");
     }
+    picks.forEach((pick) => {
+      if (normalizedId(pick.draft_id) !== normalizedId(draft.id)) {
+        throw new Error("invalid persisted draft state: pick draft ID does not match");
+      }
+      if (normalizedId(pick.event_id) !== normalizedId(draft.event_id)) {
+        throw new Error("invalid persisted draft state: pick event ID does not match");
+      }
+      if (!eligibleTeamIds.includes(normalizedId(pick.team_id))) {
+        throw new Error("invalid persisted draft state: pick is not an eligible team");
+      }
+    });
     const current = deriveCurrentTurn({ draft, picks });
     if (!current.ok) throw new Error(`invalid persisted draft state: ${current.errors.join(", ")}`);
     const playersById = new Map(playerRows.map((player) => [normalizedId(player.player_id), player]));
