@@ -292,6 +292,11 @@ let onlineAuthUser = null;
 let pendingKoshienSyncTimer = null;
 let pendingKoshienLoadPromise = null;
 let lastKoshienOnlineLoadUserId = "";
+let koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
+let koshienPhase2DraftLoading = false;
+let koshienPhase2DraftSaving = false;
+let koshienPhase2DraftMessage = "";
+let koshienPhase2DraftMessageKind = "";
 
 function loadAuthUsers() {
   try {
@@ -426,6 +431,8 @@ async function handleSupabaseAuthEvent(event) {
   if (event === "SIGNED_OUT") {
     applyOnlineAuthUser(null);
     lastKoshienOnlineLoadUserId = "";
+    koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
+    koshienPhase2DraftMessage = "";
     renderAuthState();
     render();
     return;
@@ -1540,6 +1547,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
       if (snapshot?.ok) {
         applyKoshienOnlineSnapshot(snapshot);
         lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
+        await refreshKoshienPhase2DraftState({ renderAfter: false });
         render();
         setConnectionMessage(`Supabaseから甲子園データを読み込みました。${snapshot.predictionsPublic ? "締切後のため他メンバーの予想も取得しています。" : "締切前のため自分の予想だけ取得しています。"}`);
       } else if (snapshot?.skipped) {
@@ -1555,6 +1563,126 @@ async function loadKoshienOnlineState({ force = false } = {}) {
     }
   })();
   return pendingKoshienLoadPromise;
+}
+
+function applyKoshienPhase2DraftResponse(response, eventId = state.event?.id) {
+  if (!window.YosoKoshienPhase2Draft?.buildDraftViewState) {
+    throw new Error("フェーズ2ドラフトのドメインモジュールを読み込めませんでした。");
+  }
+  koshienPhase2DraftView = {
+    ...window.YosoKoshienPhase2Draft.buildDraftViewState(response),
+    eventId: String(eventId || ""),
+    loadedFromDb: true,
+  };
+  return koshienPhase2DraftView;
+}
+
+async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
+  const service = window.YosoDataService?.koshien;
+  const requestedEventId = String(state.event?.id || "");
+  if (baseTemplateId(state.event?.templateId) !== "koshien" || !state.event?.id || !service?.loadPhase2DraftState) {
+    koshienPhase2DraftView = { available: false, eventId: requestedEventId, formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
+    if (renderAfter) render();
+    return koshienPhase2DraftView;
+  }
+  if (!currentAuthUser()) {
+    koshienPhase2DraftView = { available: false, eventId: requestedEventId, formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
+    koshienPhase2DraftMessage = "フェーズ2ドラフトの確認にはオンラインログインが必要です。";
+    koshienPhase2DraftMessageKind = "error";
+    if (renderAfter) render();
+    return koshienPhase2DraftView;
+  }
+
+  koshienPhase2DraftLoading = true;
+  if (renderAfter) render();
+  try {
+    const response = await service.loadPhase2DraftState(requestedEventId);
+    if (String(state.event?.id || "") !== requestedEventId) return koshienPhase2DraftView;
+    applyKoshienPhase2DraftResponse(response, requestedEventId);
+    koshienPhase2DraftMessage = "";
+    koshienPhase2DraftMessageKind = "";
+    return koshienPhase2DraftView;
+  } catch (error) {
+    console.warn("Koshien phase 2 draft load failed", error);
+    koshienPhase2DraftView = {
+      available: false,
+      eventId: requestedEventId,
+      formalDraftExists: Boolean(koshienPhase2DraftView.formalDraftExists),
+      loadedFromDb: false,
+      status: "error",
+    };
+    koshienPhase2DraftMessage = `フェーズ2ドラフトを読み込めませんでした。${error?.message ? ` (${error.message})` : ""}`;
+    koshienPhase2DraftMessageKind = "error";
+    return koshienPhase2DraftView;
+  } finally {
+    koshienPhase2DraftLoading = false;
+    if (renderAfter) render();
+  }
+}
+
+function createKoshienPhase2RequestId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
+async function confirmKoshienPhase2DraftPick() {
+  if (koshienPhase2DraftSaving || !koshienPhase2DraftView?.canViewerPick) return;
+  const select = els.eventForm.querySelector("[data-koshien-phase2-team]");
+  const teamId = select?.value || "";
+  if (!teamId) {
+    koshienPhase2DraftMessage = "指名する高校を選択してください。";
+    koshienPhase2DraftMessageKind = "error";
+    render();
+    return;
+  }
+
+  koshienPhase2DraftSaving = true;
+  const requestEventId = String(state.event.id);
+  koshienPhase2DraftMessage = "指名を保存しています…";
+  koshienPhase2DraftMessageKind = "pending";
+  render();
+  try {
+    const response = await window.YosoDataService.koshien.savePhase2DraftPick({
+      eventId: requestEventId,
+      draftId: koshienPhase2DraftView.draftId,
+      teamId,
+      pickNo: koshienPhase2DraftView.currentTurn.pickNo,
+      requestId: createKoshienPhase2RequestId(),
+    });
+    if (String(state.event?.id || "") === requestEventId) applyKoshienPhase2DraftResponse(response, requestEventId);
+    koshienPhase2DraftMessage = "指名を確定しました。";
+    koshienPhase2DraftMessageKind = "success";
+  } catch (error) {
+    console.warn("Koshien phase 2 draft pick failed", error);
+    let appliedLatest = false;
+    if (error?.latestState) {
+      try {
+        if (String(state.event?.id || "") !== requestEventId) throw new Error("active event changed");
+        applyKoshienPhase2DraftResponse(error.latestState, requestEventId);
+        appliedLatest = true;
+      } catch (stateError) {
+        console.warn("Koshien phase 2 conflict state was invalid", stateError);
+        const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
+        appliedLatest = refreshed.loadedFromDb === true;
+      }
+    } else {
+      const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
+      appliedLatest = refreshed.loadedFromDb === true;
+    }
+    const restored = koshienPhase2DraftView.status !== "error" && appliedLatest;
+    koshienPhase2DraftMessage = restored
+      ? `指名を確定できませんでした。最新状態へ戻しました。${error?.message ? ` (${error.message})` : ""}`
+      : `指名を確定できませんでした。最新状態を取得できず、手番は未確認です。再読込してください。${error?.message ? ` (${error.message})` : ""}`;
+    koshienPhase2DraftMessageKind = "error";
+  } finally {
+    koshienPhase2DraftSaving = false;
+    render();
+  }
 }
 
 function koshienLoadSkipMessage(reason) {
@@ -3290,30 +3418,101 @@ function setKoshienPhase1Message(name, message) {
   if (target) target.textContent = message;
 }
 
-function participantKoshienDraftBlock(name, teams) {
-  ensurePrediction(name);
-  const prediction = state.event.predictions[name];
-  const picks = normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4);
-  const pickedTeams = [...new Set(picks.filter(Boolean))];
-  const revengeOptions = koshienRevengeOptions(prediction, teams);
+function participantKoshienDraftBlock() {
+  const view = !koshienPhase2DraftView.eventId || koshienPhase2DraftView.eventId === String(state.event?.id || "")
+    ? koshienPhase2DraftView
+    : { available: false, status: "not_ready" };
+  const statusLabels = {
+    not_ready: "準備前",
+    ready: "開始待ち",
+    drafting: "ドラフト中",
+    completed: "全16指名完了",
+    locked: "ロック済み",
+    error: "読込エラー",
+  };
+  const messageClass = koshienPhase2DraftMessageKind ? ` is-${koshienPhase2DraftMessageKind}` : "";
+  if (koshienPhase2DraftLoading && !view.available) {
+    return `
+      <div class="entry-block koshien-phase2-draft koshien-phase2-board">
+        <div class="wc-participant-head"><h3>フェーズ2・ベスト16ドラフト</h3><span>読込中</span></div>
+        <p class="koshien-phase2-message is-pending" role="status" aria-live="polite">DBの正式状態を読み込んでいます…</p>
+      </div>
+    `;
+  }
+  if (!view.available) {
+    return `
+      <div class="entry-block koshien-phase2-draft koshien-phase2-board">
+        <div class="wc-participant-head">
+          <h3>フェーズ2・ベスト16ドラフト</h3>
+          <span>${escapeHtml(statusLabels[view.status] || statusLabels.not_ready)}</span>
+        </div>
+        <p class="wc-phase-intro">正式なドラフトがDBで準備されると、固定済みの順序と16校をここに表示します。</p>
+        <div class="koshien-phase2-actions">
+          <button class="ghost-button" type="button" data-koshien-phase2-refresh ${koshienPhase2DraftLoading ? "disabled" : ""}>最新状態を取得</button>
+        </div>
+        <p class="koshien-phase2-message${messageClass}" role="status" aria-live="polite">${escapeHtml(koshienPhase2DraftMessage)}</p>
+      </div>
+    `;
+  }
+
+  const playersById = new Map(view.players.map((player) => [player.playerId, player.displayName]));
+  const teamsById = new Map(view.eligibleTeams.map((team) => [team.teamId, team.name]));
+  const picksByNo = new Map(view.picks.map((pick) => [pick.pickNo, pick]));
+  const pickedSet = new Set(view.pickedTeamIds);
+  const startsBefore = view.startsAt && Date.now() < Date.parse(view.startsAt);
+  const deadlinePassed = view.deadlineAt && Date.now() >= Date.parse(view.deadlineAt);
+  const canSubmit = view.canViewerPick && !startsBefore && !deadlinePassed && !koshienPhase2DraftSaving;
+  const currentText = view.completed
+    ? "すべての指名が完了しました。"
+    : `${view.currentTurn.pickNo}番目・${view.currentTurn.draftRound}巡目：${view.currentTurn.displayName}`;
+  const teamOptions = view.eligibleTeams.map((team) => {
+    const owner = view.ownerByTeamId[team.teamId];
+    const suffix = owner ? ` — 指名済み: ${owner.displayName}` : "";
+    return `<option value="${escapeAttr(team.teamId)}" ${pickedSet.has(team.teamId) ? "disabled" : ""}>${escapeHtml(team.name + suffix)}</option>`;
+  }).join("");
   return `
-    <div class="entry-block koshien-participant">
+    <div class="entry-block koshien-phase2-draft koshien-phase2-board">
       <div class="wc-participant-head">
-        <h3>${escapeHtml(name)} のYOSO</h3>
-        <span>${pickedTeams.length} / ${picks.length}</span>
+        <h3>フェーズ2・ベスト16ドラフト</h3>
+        <span>${escapeHtml(statusLabels[view.status] || view.status)} / ${view.picks.length} of 16</span>
       </div>
-      <p class="wc-phase-intro">フェーズ2はドラフト指名です。クラブ内の重複不可制御はSupabaseの phase2_draft_picks で拡張できる構造にします。</p>
-      <div class="prediction-grid koshien-pick-grid">
-        ${picks.map((pick, index) => `
-          <label class="field">
-            <span>ドラフト${index + 1}巡目</span>
-            <select data-koshien-draft-pick="${escapeAttr(name)}:${index}">${optionList(teams, pick)}</select>
-          </label>
-        `).join("")}
+      <p class="wc-phase-intro">${escapeHtml(currentText)} 指名の確定と復元はDBの正式状態を使用します。</p>
+      <div class="koshien-phase2-meta">
+        <span>開始 ${escapeHtml(formatDateTime(view.startsAt) || "未設定")}</span>
+        <span>締切 ${escapeHtml(formatDateTime(view.deadlineAt) || "未設定")}</span>
+        <span>version ${view.version}</span>
       </div>
-      <div class="form-grid">
-        <label class="field"><span>リベンジカード</span><select data-koshien-revenge-pick="${escapeAttr(name)}">${optionList(revengeOptions, prediction.revengePick)}</select></label>
+      <div class="koshien-phase2-team-grid" aria-label="ドラフト指名順">
+        ${view.snakeOrder.map((playerId, index) => {
+          const pickNo = index + 1;
+          const pick = picksByNo.get(pickNo);
+          return `
+            <div class="koshien-phase2-slot ${pick ? "is-picked" : view.currentTurn?.pickNo === pickNo ? "is-current" : ""}">
+              <span>${pickNo} / ${Math.floor(index / 4) + 1}巡目</span>
+              <strong>${escapeHtml(playersById.get(playerId) || "参加者")}</strong>
+              <small>${escapeHtml(pick ? teamsById.get(pick.teamId) || "高校" : view.currentTurn?.pickNo === pickNo ? "現在の手番" : "未指名")}</small>
+            </div>
+          `;
+        }).join("")}
       </div>
+      <div class="koshien-phase2-pick-form">
+        <label class="field">
+          <span>指名校（ベスト16）</span>
+          <select data-koshien-phase2-team ${canSubmit ? "" : "disabled"}>
+            <option value="">高校を選択</option>
+            ${teamOptions}
+          </select>
+        </label>
+        <div class="koshien-phase2-actions">
+          <button class="primary-button" type="button" data-koshien-phase2-confirm ${canSubmit ? "" : "disabled"}>${koshienPhase2DraftSaving ? "保存中…" : "この高校を指名する"}</button>
+          <button class="ghost-button" type="button" data-koshien-phase2-refresh ${koshienPhase2DraftSaving || koshienPhase2DraftLoading ? "disabled" : ""}>最新状態を取得</button>
+        </div>
+      </div>
+      <p class="helper-text">正式なフェーズ2得点のplayer ID投影は未実装です。旧ローカル指名は正式得点に加算しません。</p>
+      ${!view.canViewerPick && !view.completed ? `<p class="helper-text">現在のplayer本人だけが操作できます。他の手番は閲覧のみです。</p>` : ""}
+      ${startsBefore && !view.completed ? `<p class="helper-text">開始時刻前のため指名できません。</p>` : ""}
+      ${deadlinePassed && !view.completed ? `<p class="helper-text">締切を過ぎているため指名できません。</p>` : ""}
+      <p class="koshien-phase2-message${messageClass}" role="status" aria-live="polite">${escapeHtml(koshienPhase2DraftMessage)}</p>
     </div>
   `;
 }
@@ -3891,9 +4090,10 @@ function worldCupPredictionDetails(name, phase, groups) {
 
 function bindGenericInputs() {
   els.eventForm.querySelectorAll("[data-koshien-phase]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       state.event.config.activePhase = button.dataset.koshienPhase;
       render();
+      if (button.dataset.koshienPhase === "phase2") await refreshKoshienPhase2DraftState();
     });
   });
   els.eventForm.querySelectorAll("[data-wc-phase]").forEach((button) => {
@@ -4168,23 +4368,11 @@ function bindGenericInputs() {
       setKoshienPhase1Message(input.dataset.koshienCaptain, "");
     });
   });
-  els.eventForm.querySelectorAll("[data-koshien-draft-pick]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const [name, index] = input.dataset.koshienDraftPick.split(":");
-      ensurePrediction(name);
-      state.event.predictions[name].phase2DraftPicks = normalizeFixedArray(
-        state.event.predictions[name].phase2DraftPicks,
-        state.event.config.phase2DraftCount || 4,
-      );
-      const previous = state.event.predictions[name].phase2DraftPicks[Number(index)] || "";
-      state.event.predictions[name].phase2DraftPicks[Number(index)] = input.value;
-      if (input.value && koshienPhase2TakenByOther(input.value, name)) {
-        state.event.predictions[name].phase2DraftPicks[Number(index)] = previous;
-        render();
-        return;
-      }
-      renderScoresOnly();
-    });
+  els.eventForm.querySelectorAll("[data-koshien-phase2-confirm]").forEach((button) => {
+    button.addEventListener("click", confirmKoshienPhase2DraftPick);
+  });
+  els.eventForm.querySelectorAll("[data-koshien-phase2-refresh]").forEach((button) => {
+    button.addEventListener("click", () => refreshKoshienPhase2DraftState());
   });
   els.eventForm.querySelectorAll("[data-koshien-revenge-pick]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -5057,16 +5245,25 @@ function koshienRevengeScore(prediction) {
 }
 
 function koshienPhase2Score(name, prediction) {
+  if (koshienFormalPhase2ScoringPending()) return 0;
   const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
   return uniquePicks.reduce((total, team) => total + koshienPhase2TeamScore(name, team), 0);
 }
 
 function koshienPhase2BaseScore(prediction) {
+  if (koshienFormalPhase2ScoringPending()) return 0;
   const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
   return uniquePicks.reduce((total, team) => {
     const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
     return total + Number(state.event.config.phase2Points?.[finish] ?? templates.koshien.phase2Points?.[finish] ?? 0);
   }, 0);
+}
+
+function koshienFormalPhase2ScoringPending() {
+  if (!isSupabaseAuthEnabled()) return false;
+  const currentEventId = String(state.event?.id || "");
+  if (!koshienPhase2DraftView.loadedFromDb || koshienPhase2DraftView.eventId !== currentEventId) return true;
+  return koshienPhase2DraftView.formalDraftExists === true;
 }
 
 function koshienPhase3Score(name, prediction) {
