@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "rewrites": [
+    {
+      "source": "/supabase-config.js",
+      "destination": "/js/supabase-config-placeholder.js"
+    }
+  ]
+}

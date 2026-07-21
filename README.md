@@ -39,6 +39,7 @@ python -m http.server 4173
 | [docs/SUPABASE_MIGRATION_PLAN.md](docs/SUPABASE_MIGRATION_PLAN.md) | Supabase移行方針 |
 | [docs/SUPABASE_KOSHIEN_MATCH_RESULTS_RUNBOOK.md](docs/SUPABASE_KOSHIEN_MATCH_RESULTS_RUNBOOK.md) | 甲子園試合結果保存migrationの本番確認手順 |
 | [docs/SUPABASE_KOSHIEN_PHASE2_DRAFT_RUNBOOK.md](docs/SUPABASE_KOSHIEN_PHASE2_DRAFT_RUNBOOK.md) | フェーズ2ドラフトmigrationと競合確認の運用草案 |
+| [docs/VERCEL_DEPLOYMENT.md](docs/VERCEL_DEPLOYMENT.md) | Vercelプレビューの静的サイト設定と本番前確認 |
 
 `CLAUDE.md` と `docs/ANTIGRAVITY_KOSHIEN_2026_CONTEXT.md` は互換用の参照案内です。エージェント規則や甲子園ルールの正本として扱いません。
 
