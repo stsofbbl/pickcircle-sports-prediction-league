@@ -49,11 +49,7 @@ python yoso-koshien-sim\run.py --iterations 100000 --strategy-sets mixed --reven
 python yoso-koshien-sim\run.py --iterations 100000 --strategy-sets mixed --revenge-mode full --phase1-point-mode current
 ```
 
-PythonがPATHにない場合は、Codex同梱Pythonを使います。
-
-```powershell
-& 'C:\Users\stsof\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe' yoso-koshien-sim\run.py --iterations 2000
-```
+PythonがPATHにない場合は、利用環境のPython実行ファイルをフルパスで指定してください。
 
 高速確認:
 
