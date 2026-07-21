@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "skills": {
+    "code-review": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/code-review/SKILL.md"
+    },
+    "diagnosing-bugs": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md"
+    },
+    "domain-modeling": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/domain-modeling/SKILL.md"
+    },
+    "grill-with-docs": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/grill-with-docs/SKILL.md"
+    },
+    "grilling": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grilling/SKILL.md"
+    },
+    "implement": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/implement/SKILL.md"
+    },
+    "setup-matt-pocock-skills": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/setup-matt-pocock-skills/SKILL.md"
+    },
+    "tdd": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/tdd/SKILL.md"
+    },
+    "to-spec": {
+      "source": "https://github.com/mattpocock/skills.git",
+      "sourceUrl": "https://github.com/mattpocock/skills.git",
+      "ref": "66898f60e8c744e269f8ce06c2b2b99ce7660d5f",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/to-spec/SKILL.md"
+    }
+  }
+}
