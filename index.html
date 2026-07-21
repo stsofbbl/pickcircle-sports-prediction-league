@@ -22,7 +22,7 @@
       <div class="auth-card">
         <img class="auth-logo" src="./assets/yoso-header-logo.png" alt="YOSO" />
         <div class="auth-copy">
-          <span class="match-kicker">YOSO ACCOUNT</span>
+          <span class="match-kicker">YOSOアカウント</span>
           <h1>ログイン</h1>
           <p>この端末のYOSOメンバーとして入ります。</p>
         </div>
@@ -81,7 +81,7 @@
           <span class="brand-wordmark" aria-hidden="true">YOSO</span>
         </a>
         <div class="account-chip" id="accountChip" hidden>
-          <span id="accountName">Guest</span>
+          <span id="accountName">ゲスト</span>
           <button class="ghost-button small-button" id="logoutButton" type="button">ログアウト</button>
         </div>
       </header>
@@ -94,12 +94,12 @@
                 <h2>ホーム</h2>
                 <p id="homeClubLine">参加中のクラブと受付中の大会を確認します。</p>
               </div>
-              <span class="status-pill">DASHBOARD</span>
+              <span class="status-pill">ダッシュボード</span>
             </div>
 
             <div class="home-summary">
               <div class="home-person">
-                <span>PLAYER</span>
+                <span>参加者</span>
                 <strong id="homeParticipantName">あなた</strong>
               </div>
               <div class="summary-metrics">
@@ -132,7 +132,7 @@
               <div>
                 <h2>大会編集</h2>
               </div>
-              <span class="status-pill">TOURNAMENTS</span>
+              <span class="status-pill">大会</span>
             </div>
             <div class="tournament-list" id="activeTournamentCards"></div>
           </section>
@@ -221,17 +221,17 @@
                 <h2>アーカイブ</h2>
                 <p>確定した結果と保存中のイベント状態を確認します。</p>
               </div>
-              <span class="status-pill">ARCHIVE</span>
+              <span class="status-pill">アーカイブ</span>
             </div>
             <div class="result-board">
               <div class="result-card">
-                <span>Current table</span>
+                <span>現在の順位</span>
                 <strong id="resultEventName">未設定</strong>
                 <small>確定結果の入力状況に応じてランキングが動きます。</small>
               </div>
               <div class="result-card result-card-accent">
-                <span>House note</span>
-                <strong>POINT ONLY</strong>
+                <span>リーグ方針</span>
+                <strong>ポイント制のみ</strong>
                 <small>決済、送金、リアルマネーを扱う機能はありません。</small>
               </div>
             </div>
@@ -244,7 +244,7 @@
                 <h2>履歴</h2>
                 <p>ローカル保存中のイベント状態を確認できます。</p>
               </div>
-              <span class="status-pill">History</span>
+              <span class="status-pill">履歴</span>
             </div>
             <div class="history-list">
               <div class="history-row">
@@ -268,7 +268,7 @@
                 <h2>ランキング</h2>
                 <p>期間を切り替えてポイントを確認します。</p>
               </div>
-              <button id="saveButton" class="primary-button">LOCK IN</button>
+              <button id="saveButton" class="primary-button">確定</button>
             </div>
 
             <div class="ranking-tabs" id="rankingTabs" aria-label="ランキング期間">
@@ -409,7 +409,7 @@
                       <span id="dataConnectionStatus">この端末に保存中</span>
                       <strong id="dataConnectionSummary">Google Sheets同期は準備中です</strong>
                     </div>
-                    <span class="status-label pending" id="dataConnectionBadge">LOCAL</span>
+                    <span class="status-label pending" id="dataConnectionBadge">ローカル保存</span>
                   </article>
                 </div>
                 <div class="connection-settings-grid">
@@ -422,15 +422,15 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span id="dataConnectionScriptUrlLabel">Apps Script URL</span>
+                    <span id="dataConnectionScriptUrlLabel">Apps ScriptのURL</span>
                     <input id="dataConnectionScriptUrl" type="url" placeholder="https://script.google.com/..." />
                   </label>
                   <label class="field">
-                    <span id="dataConnectionSpreadsheetIdLabel">Spreadsheet ID</span>
+                    <span id="dataConnectionSpreadsheetIdLabel">スプレッドシートID</span>
                     <input id="dataConnectionSpreadsheetId" type="text" placeholder="スプレッドシートID" />
                   </label>
                   <label class="field">
-                    <span>League ID</span>
+                    <span>リーグID</span>
                     <input id="dataConnectionLeagueId" type="text" placeholder="例: g-unit-koshien-2026" />
                   </label>
                   <label class="field">
@@ -438,12 +438,12 @@
                     <input id="dataConnectionLastSync" type="text" disabled />
                   </label>
                 </div>
-                <p class="field-note" id="dataConnectionNote">Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。</p>
+                <p class="field-note" id="dataConnectionNote">Google Apps ScriptをWebアプリとして公開し、そのURLとスプレッドシートIDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。</p>
                 <div class="account-action-row">
                   <button class="primary-button" id="dataConnectionSaveButton" type="button">接続設定を保存</button>
                   <button class="ghost-button" id="dataConnectionTestButton" type="button">接続テスト</button>
-                  <button class="ghost-button" id="dataConnectionSyncToButton" type="button">Sheetsへ保存</button>
-                  <button class="ghost-button" id="dataConnectionSyncFromButton" type="button">Sheetsから読込</button>
+                  <button class="ghost-button" id="dataConnectionSyncToButton" type="button">Google Sheetsへ保存</button>
+                  <button class="ghost-button" id="dataConnectionSyncFromButton" type="button">Google Sheetsから読込</button>
                   <button class="ghost-button" id="dataConnectionCopyStateButton" type="button">現在のデータをコピー</button>
                 </div>
                 <p class="auth-message" id="dataConnectionMessage" role="status"></p>
@@ -516,12 +516,12 @@
 
     <dialog id="confirmDialog" class="confirm-dialog">
       <form method="dialog">
-        <p class="eyebrow">Final call</p>
+        <p class="eyebrow">最終確認</p>
         <h2>このYOSOを確定しますか？</h2>
         <p>一度確定すると変更できません。内容を確認してから進めてください。</p>
         <div class="dialog-actions">
           <button class="ghost-button" value="cancel">戻る</button>
-          <button class="primary-button" id="confirmSaveButton" value="confirm">CONFIRM</button>
+          <button class="primary-button" id="confirmSaveButton" value="confirm">確定する</button>
         </div>
       </form>
     </dialog>

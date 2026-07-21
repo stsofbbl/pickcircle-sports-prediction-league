@@ -10,6 +10,24 @@ const PUBLIC_CONFIG = window.YOSO_PUBLIC_CONFIG || {};
 const DEFAULT_SAVE_MODE = PUBLIC_CONFIG.DEFAULT_SAVE_MODE || "supabase";
 const DEFAULT_LEAGUE_ID = PUBLIC_CONFIG.DEFAULT_LEAGUE_ID || "g-unit-koshien-2026";
 
+const UI_TEXT = Object.freeze({
+  connection: Object.freeze({
+    onlineReady: "オンライン接続可能",
+    error: "接続エラー",
+    syncReady: "同期準備完了",
+    setup: "設定が必要",
+    local: "ローカル保存",
+  }),
+  save: Object.freeze({
+    syncing: "保存中…",
+    local: "ローカル保存",
+    partial: "一部保存",
+    saved: "保存済み",
+    confirm: "確定",
+    confirmed: "確定済み",
+  }),
+});
+
 const templates = {
   rankingOdds: {
     id: "rankingOdds",
@@ -387,7 +405,7 @@ function renderAuthState() {
   document.body.classList.toggle("auth-locked", !user);
   if (els.authScreen) els.authScreen.hidden = Boolean(user);
   if (els.accountChip) els.accountChip.hidden = !user;
-  if (els.accountName) els.accountName.textContent = user ? `${user.displayName}${user.role === "admin" ? " / Admin" : ""}` : "";
+  if (els.accountName) els.accountName.textContent = user ? `${user.displayName}${user.role === "admin" ? " / 管理者" : ""}` : "";
   if (!user) {
     if (!authRecoveryMode && !isSupabaseAuthEnabled()) setAuthMode(loadAuthUsers().length ? "login" : "register");
     return;
@@ -495,7 +513,7 @@ function renderAuthFormMode() {
 function renderAccountSettings(user = currentAuthUser()) {
   if (!user) return;
   if (els.accountUsername) els.accountUsername.value = user.username || "";
-  if (els.accountRole) els.accountRole.value = user.role === "admin" ? "Admin" : "member";
+  if (els.accountRole) els.accountRole.value = user.role === "admin" ? "管理者" : "メンバー";
   if (els.accountDisplayNameInput) els.accountDisplayNameInput.value = user.displayName || "";
   if (els.accountEmailInput) els.accountEmailInput.value = user.email || "";
   if (els.accountIdleTimeout) els.accountIdleTimeout.value = String(user.idleTimeoutMinutes ?? AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES);
@@ -510,8 +528,8 @@ function renderConnectionSettings() {
   const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
   const isSupabaseReady = connection.mode === "supabase" && window.YosoSupabase?.hasConfig?.();
   if (els.dataConnectionMode) els.dataConnectionMode.value = connection.mode;
-  if (els.dataConnectionScriptUrlLabel) els.dataConnectionScriptUrlLabel.textContent = connection.mode === "supabase" ? "Supabase Project URL" : "Apps Script URL";
-  if (els.dataConnectionSpreadsheetIdLabel) els.dataConnectionSpreadsheetIdLabel.textContent = connection.mode === "supabase" ? "anon public key" : "Spreadsheet ID";
+  if (els.dataConnectionScriptUrlLabel) els.dataConnectionScriptUrlLabel.textContent = connection.mode === "supabase" ? "SupabaseプロジェクトのURL" : "Apps ScriptのURL";
+  if (els.dataConnectionSpreadsheetIdLabel) els.dataConnectionSpreadsheetIdLabel.textContent = connection.mode === "supabase" ? "匿名公開キー" : "スプレッドシートID";
   [els.dataConnectionMode, els.dataConnectionScriptUrl, els.dataConnectionSpreadsheetId, els.dataConnectionLeagueId].forEach((input) => {
     const field = input?.closest?.(".field");
     if (field) field.hidden = !isDeveloperMode;
@@ -525,7 +543,7 @@ function renderConnectionSettings() {
   }
   if (els.dataConnectionSpreadsheetId) {
     els.dataConnectionSpreadsheetId.value = connection.mode === "supabase" ? connection.supabaseAnonKey : connection.spreadsheetId;
-    els.dataConnectionSpreadsheetId.placeholder = connection.mode === "supabase" ? "Supabase anon public key" : "スプレッドシートID";
+    els.dataConnectionSpreadsheetId.placeholder = connection.mode === "supabase" ? "Supabaseの匿名公開キー" : "スプレッドシートID";
   }
   if (els.dataConnectionLeagueId) els.dataConnectionLeagueId.value = connection.leagueId;
   if (els.dataConnectionLastSync) els.dataConnectionLastSync.value = connection.lastSyncAt ? formatDateTime(connection.lastSyncAt) : "未同期";
@@ -534,32 +552,40 @@ function renderConnectionSettings() {
   }
   if (els.dataConnectionSummary) {
     els.dataConnectionSummary.textContent = isSupabaseReady
-      ? `League ID: ${connection.leagueId || "未設定"} / URLを開いてログインすればオンライン保存できます。`
+      ? `リーグID: ${connection.leagueId || "未設定"} / URLを開いてログインすればオンライン保存できます。`
       : connection.mode === "supabase"
         ? "Supabaseに接続できません。通信環境またはログイン状態を確認してください。"
         : isSheetsReady
-      ? `League ID: ${connection.leagueId || "未設定"} / Sheetsへ保存・読込できます。`
+      ? `リーグID: ${connection.leagueId || "未設定"} / Google Sheetsへ保存・読込できます。`
       : connection.mode === "sheets"
-        ? "Apps Script URL、Spreadsheet ID、League IDを入れると同期できます。"
-        : "友達と共有する前に、次のステップでSheets同期を追加します。";
+        ? "Apps ScriptのURL、スプレッドシートID、リーグIDを入れると同期できます。"
+        : "友達と共有する前に、次のステップでGoogle Sheets同期を追加します。";
   }
   if (els.dataConnectionBadge) {
     const ready = isSupabaseReady || isSheetsReady;
-    els.dataConnectionBadge.textContent = isSupabaseReady ? "ONLINE READY" : connection.mode === "supabase" ? "ERROR" : isSheetsReady ? "SYNC READY" : connection.mode === "sheets" ? "SETUP" : "LOCAL";
+    els.dataConnectionBadge.textContent = isSupabaseReady
+      ? UI_TEXT.connection.onlineReady
+      : connection.mode === "supabase"
+        ? UI_TEXT.connection.error
+        : isSheetsReady
+          ? UI_TEXT.connection.syncReady
+          : connection.mode === "sheets"
+            ? UI_TEXT.connection.setup
+            : UI_TEXT.connection.local;
     els.dataConnectionBadge.className = `status-label ${ready ? "open" : "pending"}`;
   }
   if (els.dataConnectionNote) {
     els.dataConnectionNote.hidden = !isDeveloperMode;
     els.dataConnectionNote.textContent = connection.mode === "supabase"
-      ? "通常はSupabase URLやanon public keyの入力は不要です。接続できない場合は通信環境またはログイン状態を確認してください。"
-      : "Google Apps ScriptをWebアプリとして公開し、そのURLとSpreadsheet IDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。";
+      ? "通常はSupabaseのURLや匿名公開キーの入力は不要です。接続できない場合は通信環境またはログイン状態を確認してください。"
+      : "Google Apps ScriptをWebアプリとして公開し、そのURLとスプレッドシートIDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。";
   }
   if (els.dataConnectionTestButton) els.dataConnectionTestButton.textContent = connection.mode === "supabase" ? "Supabase接続テスト" : "接続テスト";
   if (els.dataConnectionSyncToButton) {
-    els.dataConnectionSyncToButton.textContent = connection.mode === "supabase" ? "Supabaseへ保存" : "Sheetsへ保存";
+    els.dataConnectionSyncToButton.textContent = connection.mode === "supabase" ? "Supabaseへ保存" : "Google Sheetsへ保存";
   }
   if (els.dataConnectionSyncFromButton) {
-    els.dataConnectionSyncFromButton.textContent = connection.mode === "supabase" ? "Supabaseから読込" : "Sheetsから読込";
+    els.dataConnectionSyncFromButton.textContent = connection.mode === "supabase" ? "Supabaseから読込" : "Google Sheetsから読込";
   }
   if (els.dataConnectionCopyStateButton) {
     els.dataConnectionCopyStateButton.textContent = connection.mode === "supabase" ? "設定URLをコピー" : "現在のデータをコピー";
@@ -637,14 +663,14 @@ async function handleConnectionTest() {
 
 async function testSupabaseConnection() {
   if (!window.YosoSupabase?.hasConfig?.()) {
-    setConnectionMessage("Supabase接続設定が未保存です。Project URLとanon public keyを入力して保存してください。");
+    setConnectionMessage("Supabase接続設定が未保存です。プロジェクトURLと匿名公開キーを入力して保存してください。");
     return;
   }
   setConnectionMessage("Supabase接続を確認しています...");
   try {
     const client = await window.YosoSupabase.client();
     if (!client) {
-      setConnectionMessage("Supabaseクライアントを作成できませんでした。Project URLとanon public keyを確認してください。");
+      setConnectionMessage("Supabaseクライアントを作成できませんでした。プロジェクトURLと匿名公開キーを確認してください。");
       return;
     }
     const user = await window.YosoDataService?.auth?.currentUser?.();
@@ -652,7 +678,7 @@ async function testSupabaseConnection() {
       ? `Supabase接続OKです。ログイン中: ${user.displayName || user.email || "ユーザー"}`
       : "Supabase接続OKです。オンライン同期にはメールアドレスでログインしてください。");
   } catch (error) {
-    setConnectionMessage(`Supabase接続に失敗しました。Project URLとanon public keyを確認してください。${error?.message ? ` (${error.message})` : ""}`);
+    setConnectionMessage("Supabase接続に失敗しました。プロジェクトURLと匿名公開キーを確認してください。");
   }
 }
 
@@ -672,11 +698,11 @@ async function testSheetsConnection() {
         setConnectionMessage("Apps Scriptには届いていますが、デプロイ中のコードが古いです。最新版を貼り直し、「デプロイを管理」から新しいバージョンで再デプロイしてください。");
         return;
       }
-      setConnectionMessage(response?.error || "Apps Scriptには届きましたが、Spreadsheetを開けませんでした。");
+      setConnectionMessage(response?.error || "Apps Scriptには届きましたが、スプレッドシートを開けませんでした。");
       return;
     }
     const savedState = response.hasState ? "保存済みデータあり" : "保存済みデータなし";
-    setConnectionMessage(`接続OKです。${response.spreadsheetName || "Spreadsheet"} / ${savedState}`);
+    setConnectionMessage(`接続OKです。${response.spreadsheetName || "スプレッドシート"} / ${savedState}`);
   } catch (error) {
     setConnectionMessage(formatSheetsRequestError(error, "接続テスト"));
   }
@@ -715,7 +741,7 @@ async function syncKoshienToSupabaseNow() {
     renderConnectionSettings();
     setConnectionMessage(koshienSaveOutcomeMessage(result, `Supabaseへ保存しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`));
   } catch (error) {
-    setConnectionMessage(`Supabaseへの保存に失敗しました。${error?.message ? ` (${error.message})` : ""}`);
+    setConnectionMessage("Supabaseへの保存に失敗しました。通信環境とログイン状態を確認してください。");
   }
 }
 
@@ -723,14 +749,14 @@ function koshienSaveSkipMessage(reason) {
   if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期が無効です。接続設定を保存してください。";
   if (reason === "event is not koshien") return "甲子園大会を選択してから保存してください。";
   if (reason === "Supabase session is not ready") return "Supabaseログインが確認できません。メールアドレスでログインしてください。";
-  if (reason === "league is not ready") return "参加リーグを確認できませんでした。League IDを確認してください。";
+  if (reason === "league is not ready") return "参加リーグを確認できませんでした。リーグIDを確認してください。";
   if (reason === "admin must create the Koshien event before members can save predictions") return "まだ管理者が甲子園大会をオンライン作成していません。先に管理者で保存してください。";
   return "Supabaseへ保存できませんでした。設定とログイン状態を確認してください。";
 }
 
 function koshienSaveOutcomeMessage(result, successMessage) {
   if (result?.skipped) return koshienSaveSkipMessage(result.reason);
-  if (result?.partial) return "raw snapshotは保存しましたが、structured tablesは未保存です。schema/migration適用後に再保存してください。";
+  if (result?.partial) return "元データは保存しましたが、構造化テーブルは未保存です。スキーマとマイグレーションの適用後に再保存してください。";
   return successMessage;
 }
 
@@ -742,7 +768,7 @@ async function syncStateToSheets() {
     setConnectionMessage(problem);
     return;
   }
-  setConnectionMessage("Sheetsへ保存しています...");
+  setConnectionMessage("Google Sheetsへ保存しています...");
   persist();
   const now = new Date().toISOString();
   const body = new URLSearchParams({
@@ -766,16 +792,16 @@ async function syncStateToSheets() {
     await delay(900);
     const verification = await requestSheetsJsonp(connection, "getState");
     if (!verification?.ok || !verification.state) {
-      setConnectionMessage(verification?.error || "保存リクエスト後にSheetsのデータを確認できませんでした。Apps Scriptの公開範囲を確認してください。");
+      setConnectionMessage(verification?.error || "保存リクエスト後にGoogle Sheetsのデータを確認できませんでした。Apps Scriptの公開範囲を確認してください。");
       return;
     }
     state.connection.lastSyncAt = verification.updatedAt || now;
     persist();
     renderConnectionSettings();
     renderDashboard();
-    setConnectionMessage(`Sheetsへ保存し、読み戻し確認まで完了しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`);
+    setConnectionMessage(`Google Sheetsへ保存し、読み戻し確認まで完了しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`);
   } catch (error) {
-    setConnectionMessage(formatSheetsRequestError(error, "Sheetsへ保存"));
+    setConnectionMessage(formatSheetsRequestError(error, "Google Sheetsへの保存"));
   }
 }
 
@@ -795,11 +821,11 @@ async function syncStateFromSheets() {
     setConnectionMessage(problem);
     return;
   }
-  setConnectionMessage("Sheetsから読み込んでいます...");
+  setConnectionMessage("Google Sheetsから読み込んでいます...");
   try {
     const response = await requestSheetsJsonp(connection, "getState");
     if (!response?.ok || !response.state) {
-      setConnectionMessage(response?.error || "Sheetsに保存済みデータが見つかりませんでした。");
+      setConnectionMessage(response?.error || "Google Sheetsに保存済みデータが見つかりませんでした。");
       return;
     }
     const localConnection = normalizeConnectionSettings(state.connection);
@@ -813,9 +839,9 @@ async function syncStateFromSheets() {
     });
     renderAuthState();
     render();
-    setConnectionMessage(`Sheetsから読み込みました。更新: ${formatDateTime(response.updatedAt || state.connection.lastSyncAt)}`);
+    setConnectionMessage(`Google Sheetsから読み込みました。更新: ${formatDateTime(response.updatedAt || state.connection.lastSyncAt)}`);
   } catch (error) {
-    setConnectionMessage(formatSheetsRequestError(error, "Sheetsから読込"));
+    setConnectionMessage(formatSheetsRequestError(error, "Google Sheetsからの読込"));
   }
 }
 
@@ -832,7 +858,7 @@ function ensureSheetsConnectionReady() {
     return null;
   }
   if (!state.connection.scriptUrl || !state.connection.spreadsheetId || !state.connection.leagueId) {
-    setConnectionMessage("Apps Script URL、Spreadsheet ID、League IDを入力してください。");
+    setConnectionMessage("Apps ScriptのURL、スプレッドシートID、リーグIDを入力してください。");
     return null;
   }
   persist();
@@ -859,21 +885,21 @@ function normalizeSheetsScriptUrl(value = "") {
 
 function getSheetsScriptUrlProblem(scriptUrl = "") {
   const raw = String(scriptUrl || "").trim();
-  if (!raw) return "Apps Script URLを入力してください。";
+  if (!raw) return "Apps ScriptのURLを入力してください。";
   let url;
   try {
     url = new URL(raw);
   } catch {
-    return "Apps Script URLは https://script.google.com/macros/s/.../exec の形式で入力してください。";
+    return "Apps ScriptのURLは https://script.google.com/macros/s/.../exec の形式で入力してください。";
   }
   if (url.hostname !== "script.google.com") {
-    return "Apps Script URLは script.google.com のWebアプリURLを入力してください。";
+    return "Apps ScriptのURLは script.google.com のWebアプリURLを入力してください。";
   }
   if (url.pathname.includes("/home/projects/") || url.pathname.endsWith("/edit")) {
     return "Apps Scriptの編集URLではなく、デプロイ後に表示されるWebアプリURL（/macros/s/.../exec）を貼ってください。";
   }
   if (!/\/macros\/s\/[^/]+\/exec$/.test(url.pathname)) {
-    return "Apps Script URLは /macros/s/.../exec で終わるWebアプリURLを貼ってください。";
+    return "Apps ScriptのURLは /macros/s/.../exec で終わるWebアプリURLを貼ってください。";
   }
   return "";
 }
@@ -881,28 +907,27 @@ function getSheetsScriptUrlProblem(scriptUrl = "") {
 function getSupabaseConfigProblem(projectUrl = "", anonKey = "") {
   const url = String(projectUrl || "").trim();
   const key = String(anonKey || "").trim();
-  if (!url) return "Supabase Project URLを入力してください。";
-  if (!key) return "Supabase anon public keyを入力してください。";
+  if (!url) return "SupabaseのプロジェクトURLを入力してください。";
+  if (!key) return "Supabaseの匿名公開キーを入力してください。";
   try {
     const parsed = new URL(url);
     if (!/\.supabase\.co$/i.test(parsed.hostname)) {
-      return "Supabase Project URLは https://xxxx.supabase.co の形式で入力してください。";
+      return "SupabaseのプロジェクトURLは https://xxxx.supabase.co の形式で入力してください。";
     }
   } catch {
-    return "Supabase Project URLは https://xxxx.supabase.co の形式で入力してください。";
+    return "SupabaseのプロジェクトURLは https://xxxx.supabase.co の形式で入力してください。";
   }
   if (/service_role|secret/i.test(key) || /^sb_secret_/i.test(key) || /^sbp_/i.test(key)) {
-    return "secret keyやservice_role keyは入れないでください。ブラウザにはanon public keyだけを使います。";
+    return "シークレットキーやservice_roleキーは入れないでください。ブラウザには匿名公開キーだけを使います。";
   }
   if (!/^eyJ/i.test(key)) {
-    return "anon public keyの形式を確認してください。SupabaseのProject Settings > APIにあるanon public keyを使います。";
+    return "匿名公開キーの形式を確認してください。Supabaseのプロジェクト設定 > APIにある匿名公開キーを使います。";
   }
   return "";
 }
 
 function formatSheetsRequestError(error, actionLabel) {
-  const detail = error?.message ? ` (${error.message})` : "";
-  return `${actionLabel}に失敗しました${detail}。Apps Scriptのデプロイで「実行ユーザー: 自分」「アクセスできるユーザー: 全員」になっているか確認してください。`;
+  return `${actionLabel}に失敗しました。Apps Scriptのデプロイで「実行ユーザー: 自分」「アクセスできるユーザー: 全員」になっているか確認してください。`;
 }
 
 function isSheetsUnknownAction(response) {
@@ -921,7 +946,7 @@ function requestSheetsJsonp(connection, action) {
     };
     timeout = setTimeout(() => {
       cleanup();
-      reject(new Error("Sheets request timed out"));
+      reject(new Error("Google Sheetsへのリクエストがタイムアウトしました"));
     }, SHEETS_SYNC_TIMEOUT_MS);
     window[callbackName] = (payload) => {
       cleanup();
@@ -975,7 +1000,7 @@ async function copySupabaseSetupUrl() {
   const url = current.url || state.connection?.supabaseUrl || "";
   const anonKey = current.anonKey || state.connection?.supabaseAnonKey || "";
   if (!url || !anonKey) {
-    setConnectionMessage("Supabase設定URLを作るには、Project URLとanon public keyを保存してください。");
+    setConnectionMessage("Supabase設定URLを作るには、プロジェクトURLと匿名公開キーを保存してください。");
     return;
   }
   const setupUrl = new URL(window.location.href.split("#")[0].split("?")[0]);
@@ -1556,7 +1581,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
       return snapshot;
     } catch (error) {
       console.warn("Koshien Supabase load failed", error);
-      setConnectionMessage(`Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。${error?.message ? ` (${error.message})` : ""}`);
+      setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。");
       return null;
     } finally {
       pendingKoshienLoadPromise = null;
@@ -1611,7 +1636,7 @@ async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
       loadedFromDb: false,
       status: "error",
     };
-    koshienPhase2DraftMessage = `フェーズ2ドラフトを読み込めませんでした。${error?.message ? ` (${error.message})` : ""}`;
+    koshienPhase2DraftMessage = "フェーズ2ドラフトを読み込めませんでした。時間をおいて再試行してください。";
     koshienPhase2DraftMessageKind = "error";
     return koshienPhase2DraftView;
   } finally {
@@ -1676,8 +1701,8 @@ async function confirmKoshienPhase2DraftPick() {
     }
     const restored = koshienPhase2DraftView.status !== "error" && appliedLatest;
     koshienPhase2DraftMessage = restored
-      ? `指名を確定できませんでした。最新状態へ戻しました。${error?.message ? ` (${error.message})` : ""}`
-      : `指名を確定できませんでした。最新状態を取得できず、手番は未確認です。再読込してください。${error?.message ? ` (${error.message})` : ""}`;
+      ? "指名を確定できませんでした。最新状態へ戻しました。"
+      : "指名を確定できませんでした。最新状態を取得できず、手番は未確認です。再読込してください。";
     koshienPhase2DraftMessageKind = "error";
   } finally {
     koshienPhase2DraftSaving = false;
@@ -2145,11 +2170,11 @@ function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount
   const connection = normalizeConnectionSettings(state.connection);
   const hasSheetsTarget = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
   const storageLabel = connection.mode === "sheets" ? "Google Sheets" : "この端末";
-  const syncLabel = hasSheetsTarget ? "接続情報保存済み" : connection.mode === "sheets" ? "接続情報待ち" : "Sheets準備中";
+  const syncLabel = hasSheetsTarget ? "接続情報保存済み" : connection.mode === "sheets" ? "接続情報待ち" : "Google Sheets準備中";
   els.homeReadinessPanel.innerHTML = `
     <article class="readiness-card primary-readiness">
       <div>
-        <span class="match-kicker">NEXT ACTION</span>
+        <span class="match-kicker">次の操作</span>
         <strong>${missingTournamentCount > 0 ? "未入力のYOSOがあります" : "入力はひとまず完了"}</strong>
         <small>${escapeHtml(participant)} / ${escapeHtml(activeEvent?.name || "大会未設定")}</small>
       </div>
@@ -2339,7 +2364,7 @@ function koshienMatchResultEditor(teams, disabledResults) {
       <div class="koshien-match-list">
         ${matchGroups.map((round) => `
           <details class="koshien-match-round" ${round.id === "R1" ? "open" : ""}>
-            <summary>${escapeHtml(round.label)} <span>${round.matches.filter((match) => match.status === "completed").length} / ${round.matches.length} completed</span></summary>
+            <summary>${escapeHtml(round.label)} <span>${round.matches.filter((match) => match.status === "completed").length} / ${round.matches.length} 試合完了</span></summary>
             <div class="koshien-match-grid">
               ${round.matches.map((match) => koshienMatchRow(match, teams, disabledResults)).join("")}
             </div>
@@ -2355,12 +2380,12 @@ function koshienMatchRow(match, teams, disabledResults) {
   return `
     <div class="draft-row koshien-match-row" data-koshien-match-row="${escapeAttr(match.match_id)}">
       <span class="pill">${escapeHtml(match.round)}-${escapeHtml(match.match_no)}</span>
-      <label class="field"><span>team_a</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:a" ${disabledResults}>${optionList(teams, match.team_a_id)}</select></label>
-      <label class="field"><span>team_b</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:b" ${disabledResults}>${optionList(teams, match.team_b_id)}</select></label>
-      <label class="field score-field"><span>score_a</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:a" type="number" min="0" step="1" value="${escapeAttr(match.score_a)}" ${disabledResults}></label>
-      <label class="field score-field"><span>score_b</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:b" type="number" min="0" step="1" value="${escapeAttr(match.score_b)}" ${disabledResults}></label>
+      <label class="field"><span>高校A</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:a" ${disabledResults}>${optionList(teams, match.team_a_id)}</select></label>
+      <label class="field"><span>高校B</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:b" ${disabledResults}>${optionList(teams, match.team_b_id)}</select></label>
+      <label class="field score-field"><span>高校Aの得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:a" type="number" min="0" step="1" value="${escapeAttr(match.score_a)}" ${disabledResults}></label>
+      <label class="field score-field"><span>高校Bの得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:b" type="number" min="0" step="1" value="${escapeAttr(match.score_b)}" ${disabledResults}></label>
       <label class="field"><span>勝者</span><select data-koshien-match-winner="${escapeAttr(match.match_id)}" ${disabledResults}>${optionList(winnerOptions, match.winner_id)}</select></label>
-      <span class="status-label ${match.status === "completed" ? "open" : "pending"}">${escapeHtml(match.status)}</span>
+      <span class="status-label ${match.status === "completed" ? "open" : "pending"}">${match.status === "completed" ? "完了" : "未実施"}</span>
       <button class="ghost-button" type="button" data-koshien-match-save="${escapeAttr(match.match_id)}" ${disabledResults}>結果保存</button>
     </div>
   `;
@@ -2373,7 +2398,7 @@ function koshienTeamMetaEditor(teams) {
       <div class="block-head">
         <div>
           <h3>開始ラウンド・倍率</h3>
-          <p class="helper-text">49校それぞれの開始ラウンド、オッズ、sqrt_oddsをSupabaseへ保存できる形で管理します。</p>
+          <p class="helper-text">49校それぞれの開始ラウンド、オッズ、平方根オッズをSupabaseへ保存できる形で管理します。</p>
         </div>
       </div>
       <div class="koshien-result-list">
@@ -2386,7 +2411,7 @@ function koshienTeamMetaEditor(teams) {
                 ${optionList(["1", "2"], String(meta.startRound || 1))}
               </select>
               <input data-koshien-team-odds="${escapeAttr(team)}" type="number" min="1" step="0.1" value="${escapeAttr(meta.odds)}">
-              <span class="sub-label">sqrt ${formatScore(meta.sqrtOdds || 1)}</span>
+              <span class="sub-label">平方根 ${formatScore(meta.sqrtOdds || 1)}</span>
             </div>
           `;
         }).join("")}
@@ -2593,7 +2618,7 @@ function statusPreviewCardMarkup(status, text, statusClass) {
       <div class="tournament-main">
         <span class="sport-icon" aria-hidden="true">${sport.icon}</span>
         <div>
-          <span class="match-kicker">Status sample</span>
+          <span class="match-kicker">状態見本</span>
           <strong>${escapeHtml(status)}</strong>
           <small>${escapeHtml(text)}</small>
         </div>
@@ -2982,7 +3007,7 @@ function resultFlowPanel() {
     <div class="entry-block result-flow-panel">
       <div class="result-flow-head">
         <div>
-          <span class="match-kicker">RESULT FLOW</span>
+          <span class="match-kicker">結果確定の進行</span>
           <h3>${escapeHtml(statusText)}</h3>
           <p class="helper-text">${escapeHtml(resultFlowMessage())}</p>
         </div>
@@ -3121,7 +3146,7 @@ function renderKoshienForm() {
   const showPublic = state.event.status !== "open" || isResultFinalized(state.event);
   els.eventForm.innerHTML = `
     <div class="worldcup-phase-panel koshien-preset-panel">
-      <span class="match-kicker">KOSHIEN 2026 / 8 TEAM PICK</span>
+      <span class="match-kicker">甲子園2026 / 8校指名</span>
       <h3>夏の甲子園 8校ピック</h3>
       <p>49代表から8校を選び、キャプテン校は1.2倍で加点します。準々決勝以降の再抽選に左右されない、甲子園向けのYOSOプリセットです。</p>
       <div class="koshien-score-strip">
@@ -3294,9 +3319,9 @@ function setKoshienMatchMessage(text, type = "success") {
 }
 
 function koshienStructuredSaveErrorMessage(error) {
-  const stageLabels = { matches: "matches", scores: "scores", results: "raw results", result_transaction: "matches・scores・raw results", structured: "structured tables", teams: "teams", players: "players" };
+  const stageLabels = { matches: "試合", scores: "得点", results: "結果データ", result_transaction: "試合・得点・結果データ", structured: "構造化テーブル", teams: "高校", players: "参加者" };
   const stage = stageLabels[error?.stage] || "Supabase";
-  return `${stage}保存に失敗しました。再保存しても重複しないため、設定・migration・player対応を確認して再試行してください。${error?.message ? ` (${error.message})` : ""}`;
+  return `${stage}保存に失敗しました。再保存しても重複しないため、設定・マイグレーション・参加者対応を確認して再試行してください。`;
 }
 
 function koshienResultBlock(teams) {
@@ -3435,7 +3460,7 @@ function participantKoshienDraftBlock() {
     return `
       <div class="entry-block koshien-phase2-draft koshien-phase2-board">
         <div class="wc-participant-head"><h3>フェーズ2・ベスト16ドラフト</h3><span>読込中</span></div>
-        <p class="koshien-phase2-message is-pending" role="status" aria-live="polite">DBの正式状態を読み込んでいます…</p>
+        <p class="koshien-phase2-message is-pending" role="status" aria-live="polite">正式データを読み込んでいます…</p>
       </div>
     `;
   }
@@ -3446,7 +3471,7 @@ function participantKoshienDraftBlock() {
           <h3>フェーズ2・ベスト16ドラフト</h3>
           <span>${escapeHtml(statusLabels[view.status] || statusLabels.not_ready)}</span>
         </div>
-        <p class="wc-phase-intro">正式なドラフトがDBで準備されると、固定済みの順序と16校をここに表示します。</p>
+        <p class="wc-phase-intro">正式なドラフトデータが準備されると、固定済みの順序と16校をここに表示します。</p>
         <div class="koshien-phase2-actions">
           <button class="ghost-button" type="button" data-koshien-phase2-refresh ${koshienPhase2DraftLoading ? "disabled" : ""}>最新状態を取得</button>
         </div>
@@ -3474,13 +3499,13 @@ function participantKoshienDraftBlock() {
     <div class="entry-block koshien-phase2-draft koshien-phase2-board">
       <div class="wc-participant-head">
         <h3>フェーズ2・ベスト16ドラフト</h3>
-        <span>${escapeHtml(statusLabels[view.status] || view.status)} / ${view.picks.length} of 16</span>
+        <span>${escapeHtml(statusLabels[view.status] || view.status)} / 16校中${view.picks.length}校を指名済み</span>
       </div>
-      <p class="wc-phase-intro">${escapeHtml(currentText)} 指名の確定と復元はDBの正式状態を使用します。</p>
+      <p class="wc-phase-intro">${escapeHtml(currentText)} 指名の確定と復元には正式データを使用します。</p>
       <div class="koshien-phase2-meta">
         <span>開始 ${escapeHtml(formatDateTime(view.startsAt) || "未設定")}</span>
         <span>締切 ${escapeHtml(formatDateTime(view.deadlineAt) || "未設定")}</span>
-        <span>version ${view.version}</span>
+        <span>更新番号 ${view.version}</span>
       </div>
       <div class="koshien-phase2-team-grid" aria-label="ドラフト指名順">
         ${view.snakeOrder.map((playerId, index) => {
@@ -3508,8 +3533,8 @@ function participantKoshienDraftBlock() {
           <button class="ghost-button" type="button" data-koshien-phase2-refresh ${koshienPhase2DraftSaving || koshienPhase2DraftLoading ? "disabled" : ""}>最新状態を取得</button>
         </div>
       </div>
-      <p class="helper-text">正式なフェーズ2得点のplayer ID投影は未実装です。旧ローカル指名は正式得点に加算しません。</p>
-      ${!view.canViewerPick && !view.completed ? `<p class="helper-text">現在のplayer本人だけが操作できます。他の手番は閲覧のみです。</p>` : ""}
+      <p class="helper-text">正式なフェーズ2得点の参加者IDへの反映は未実装です。旧ローカル指名は正式得点に加算しません。</p>
+      ${!view.canViewerPick && !view.completed ? `<p class="helper-text">現在の参加者本人だけが操作できます。他の手番は閲覧のみです。</p>` : ""}
       ${startsBefore && !view.completed ? `<p class="helper-text">開始時刻前のため指名できません。</p>` : ""}
       ${deadlinePassed && !view.completed ? `<p class="helper-text">締切を過ぎているため指名できません。</p>` : ""}
       <p class="koshien-phase2-message${messageClass}" role="status" aria-live="polite">${escapeHtml(koshienPhase2DraftMessage)}</p>
@@ -3634,8 +3659,8 @@ function worldCupPhaseOneResultBlock(groups, countries) {
         ${groups.map((group) => `
           <div class="wc-group-card">
             <div class="wc-group-head">
-              <strong>Group ${escapeHtml(group.id)}</strong>
-              <span>${group.teams.filter(Boolean).length || 4} teams</span>
+              <strong>グループ ${escapeHtml(group.id)}</strong>
+              <span>${group.teams.filter(Boolean).length || 4}か国</span>
             </div>
             ${worldCupTeamList(group)}
             <label class="field"><span>1位結果</span><select data-wc-gl-result="${escapeAttr(group.id)}:first">${optionList(countryOptionsForGroup(group, countries), state.event.results.gl[group.id]?.first)}</select></label>
@@ -3672,7 +3697,7 @@ function participantWorldCupPhaseOneBlock(name, groups, countries) {
           return `
             <div class="wc-group-card">
               <div class="wc-group-head">
-                <strong>Group ${escapeHtml(group.id)}</strong>
+                <strong>グループ ${escapeHtml(group.id)}</strong>
                 <span>上位2カ国</span>
               </div>
               ${worldCupTeamList(group)}
@@ -3727,7 +3752,7 @@ function renderWorldCupTournamentForm() {
   els.eventForm.innerHTML = `
     ${resultFlowPanel()}
     <div class="worldcup-phase-panel">
-      <span class="match-kicker">WORLD CUP 2026 / YOSO PRESET</span>
+      <span class="match-kicker">W杯2026 / YOSO専用ルール</span>
       <h3>W杯2026 予想王決定戦</h3>
       <p>この大会は通常の複合型ではなく、第1回・第2回・第3回が点数でつながるW杯専用プリセットです。入力は自分のYOSOだけ、締切後に全員分を公開します。</p>
       <div class="worldcup-rule-strip">
@@ -3828,7 +3853,7 @@ function worldCupCountrySeedBlock(countries, groups) {
         <div class="wc-seed-preview">
           ${groups.map((group) => `
             <div>
-              <strong>Group ${escapeHtml(group.id)}</strong>
+              <strong>グループ ${escapeHtml(group.id)}</strong>
               <span>${group.teams.filter(Boolean).map(escapeHtml).join(" / ") || "未設定"}</span>
             </div>
           `).join("")}
@@ -3840,7 +3865,7 @@ function worldCupCountrySeedBlock(countries, groups) {
 
 function worldCupSeedLabel(index) {
   const group = templates.worldCup.groups[Math.floor(index / 4)] || "-";
-  return `Group ${group} ${index % 4 + 1}枠`;
+  return `グループ ${group} ${index % 4 + 1}枠`;
 }
 
 function worldCupPhaseOneScreen(participant, groups, countries, showPublic) {
@@ -4422,7 +4447,7 @@ function bindGenericInputs() {
           const result = await saveKoshienOnlineNow({ participantName: name });
           setKoshienPhase1Message(name, koshienSaveOutcomeMessage(result, "フェーズ1予想を保存しました。"));
         } catch (error) {
-          setKoshienPhase1Message(name, `Supabaseに接続できません。通信環境またはログイン状態を確認してください。${error?.message ? ` (${error.message})` : ""}`);
+          setKoshienPhase1Message(name, "Supabaseに接続できません。通信環境またはログイン状態を確認してください。");
         }
         return;
       }
@@ -5208,7 +5233,7 @@ function koshienScoreRows() {
       score,
       tiebreakDelta: Infinity,
       breakdown: { phase1, revenge, phase2: phase2Base, zombie, phase3, schoolLines: phase1Breakdown.lines },
-      detail: `P1 ${formatScore(phase1)} / Revenge ${formatScore(revenge)} / P2 ${formatScore(phase2Base)} / Zombie ${formatScore(zombie)} / P3 ${formatScore(phase3)}`,
+      detail: `フェーズ1 ${formatScore(phase1)} / リベンジ ${formatScore(revenge)} / フェーズ2 ${formatScore(phase2Base)} / ゾンビ ${formatScore(zombie)} / フェーズ3 ${formatScore(phase3)}`,
     };
   });
 }
@@ -5691,22 +5716,22 @@ els.confirmSaveButton?.addEventListener("click", () => {
 async function confirmSave() {
   persist();
   if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
-    els.saveButton.textContent = "SYNCING";
+    els.saveButton.textContent = UI_TEXT.save.syncing;
     try {
       const result = await saveKoshienOnlineNow();
-      els.saveButton.textContent = result?.skipped ? "LOCAL" : result?.partial ? "PARTIAL" : "SAVED";
+      els.saveButton.textContent = result?.skipped ? UI_TEXT.save.local : result?.partial ? UI_TEXT.save.partial : UI_TEXT.save.saved;
     } catch (error) {
       console.warn("Koshien Supabase save failed", error);
-      els.saveButton.textContent = "LOCAL";
+      els.saveButton.textContent = UI_TEXT.save.local;
     }
     setTimeout(() => {
-      els.saveButton.textContent = "LOCK IN";
+      els.saveButton.textContent = UI_TEXT.save.confirm;
     }, 900);
     return;
   }
-  els.saveButton.textContent = "LOCKED";
+  els.saveButton.textContent = UI_TEXT.save.confirmed;
   setTimeout(() => {
-    els.saveButton.textContent = "LOCK IN";
+    els.saveButton.textContent = UI_TEXT.save.confirm;
   }, 900);
 }
 
