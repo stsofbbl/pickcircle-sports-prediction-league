@@ -3465,6 +3465,8 @@ function participantKoshienDraftBlock() {
   let currentTextHtml = "";
   if (view.completed) {
     currentTextHtml = `<div class="active-manager-note">ドラフトは完了しました。</div>`;
+  } else if (!view.currentTurn) {
+    currentTextHtml = `<div class="active-manager-note is-disabled">ドラフトは現在準備中またはアクセスできません。</div>`;
   } else if (view.canViewerPick) {
     currentTextHtml = `<div class="active-manager-note" style="border-color: var(--soap-pink); background: rgba(245, 154, 194, 0.15);"><strong style="color: var(--soap-pink);">あなたの番です！（全体第${view.currentTurn.pickNo}指名 / ${view.currentTurn.draftRound}巡目）</strong></div>`;
   } else {
