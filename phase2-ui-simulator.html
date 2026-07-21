@@ -532,5 +532,198 @@
     <script src="./js/koshien-phase2-draft.js"></script>
     <script src="./js/data-service.js"></script>
     <script src="./app.js"></script>
+    <script>
+      // ==========================================
+      // メルキオールの100回テスト・シミュレーター
+      // 本番DBを汚染しないよう、YosoDataServiceをモック化
+      // ==========================================
+      
+      // オンライン認証として動作させる
+      window.YOSO_PUBLIC_CONFIG = { DEFAULT_SAVE_MODE: "supabase" };
+      
+      const originalWarn = console.warn;
+      console.warn = function(...args) {
+        originalWarn.apply(console, args);
+        if (args[0] && args[0].includes("failed") && args[1]) {
+          document.body.innerHTML += `<div style="color:yellow; font-size:24px; padding:20px; z-index:9999; position:absolute; top:50px;">[DEBUG] ${args[1].message}</div>`;
+        }
+      };
+      
+      const mockPlayers = [
+        { player_id: "p1", display_name: "Wada" },
+        { player_id: "p2", display_name: "Sato" },
+        { player_id: "p3", display_name: "Suzuki" },
+        { player_id: "p4", display_name: "Tanaka" }
+      ];
+      
+      const mockTeams = Array.from({ length: 16 }, (_, i) => ({ team_id: `t${i+1}`, name: `高校${i+1}` }));
+      
+      let mockPicks = [];
+      let mockDraft = {
+        id: "d1", event_id: "koshien", status: "drafting",
+        ordered_player_ids: ["p1", "p2", "p3", "p4"],
+        eligible_team_ids: mockTeams.map(t => t.team_id),
+        current_pick_no: 1,
+        version: 1
+      };
+      
+      let testUser = "p1"; // 現在のログインユーザー
+      
+      // YosoDataService の上書き
+      window.YosoDataService = {
+        isAuthEnabled: () => true,
+        auth: {
+          signIn: async () => ({ data: { user: { id: testUser } }, error: null }),
+          session: async () => ({ data: { session: { user: { id: testUser } } }, error: null }),
+          signOut: async () => ({ error: null }),
+          currentUser: async () => ({ id: testUser }),
+          onAuthStateChange: () => {}
+        },
+        event: {
+          load: async () => ({ id: "koshien", templateId: "koshien", config: {}, predictions: {}, results: {} })
+        },
+        koshien: {
+          loadPhase2DraftState: async () => {
+            return {
+              draft: mockDraft,
+              players: mockPlayers,
+              teams: mockTeams,
+              picks: mockPicks,
+              viewer_player_id: testUser
+            };
+          },
+          savePhase2DraftPick: async ({ pickNo, teamId }) => {
+            // 現在のターンを計算
+            const res = window.YosoKoshienPhase2Draft.buildDraftViewState({
+              draft: mockDraft, players: mockPlayers, teams: mockTeams, picks: mockPicks, viewer_player_id: testUser
+            });
+            if (res.completed || !res.currentTurn || res.currentTurn.pickNo !== pickNo) {
+              throw new Error("Invalid turn");
+            }
+            mockPicks.push({
+              id: `pick_${pickNo}`,
+              draft_id: mockDraft.id,
+              event_id: mockDraft.event_id,
+              team_id: teamId,
+              player_id: res.currentTurn.playerId,
+              pick_no: pickNo,
+              draft_round: res.currentTurn.draftRound
+            });
+            mockDraft.current_pick_no = mockPicks.length >= 16 ? 16 : mockPicks.length + 1;
+            if (mockPicks.length >= 16) mockDraft.status = "completed";
+            mockDraft.version++;
+            return window.YosoDataService.koshien.loadPhase2DraftState();
+          }
+        }
+      };
+
+      // テストランナー
+      async function run100Tests() {
+        console.log("🚀 [メルキオール] 100回連続UIテストを開始します！");
+        
+        let successCount = 0;
+        let totalPicks = 0;
+        
+        // テスト環境の初期化（stateのリセット）
+        state.event = { id: "koshien", templateId: "koshien", config: { activePhase: "phase2" }, predictions: {}, results: { finishes: {} } };
+        state.participants = ["Wada", "Sato", "Suzuki", "Tanaka"];
+        
+        // ローカル認証状態を強制的にセットする
+        const dummyUser = { id: testUser, user_metadata: { name: "Test User" }, email: "test@example.com" };
+        localStorage.setItem("yoso-auth-users-v1", JSON.stringify([dummyUser]));
+        authSession = { userId: testUser, expiresAt: Date.now() + 1000000, activeAt: Date.now() };
+        applyOnlineAuthUser(dummyUser);
+        
+        // UIの初期化（YOSOイベント画面を表示）
+        window.location.hash = "prediction";
+        render(); // 全体再描画
+        renderPage(); // ページ切り替え
+        
+        // フェーズ2ドラフトのタブを選択
+        const phase2Tab = document.querySelector('button[data-koshien-phase="phase2"]');
+        if (phase2Tab) phase2Tab.click();
+        
+        // ドラフト画面が描画されるのを少し待つ
+        await new Promise(r => setTimeout(r, 100));
+        
+        // 100回ループ（1周16ピックのドラフトを6周強する）
+        const TOTAL_TESTS = 100;
+        
+        for (let i = 0; i < TOTAL_TESTS; i++) {
+          try {
+            // もしドラフトが完了していたら、状態をリセットして次の周へ
+            const completed = (mockPicks.length === 16);
+            if (completed) {
+              console.log(`🔄 ドラフト完了(${mockPicks.length}手)。盤面をリセットします。`);
+              mockPicks = [];
+              mockDraft.version++;
+              mockDraft.status = "drafting";
+              mockDraft.current_pick_no = 1;
+            }// 状態をリフレッシュ
+            await refreshKoshienPhase2DraftState();
+            render();
+            
+            // 誰の番か確認する
+            const view = koshienPhase2DraftView;
+            
+            // 内部で発生したエラーを探るため、koshienPhase2DraftMessage を一緒に表示
+            if (!view || !view.currentTurn) throw new Error("view.currentTurn が取得できません。\\nステータス: " + (view ? view.status : "undefined") + "\\nメッセージ: " + koshienPhase2DraftMessage);
+            
+            // その番の人にログインを切り替える（マルチプレイヤーのシミュレーション）
+            testUser = view.currentTurn.playerId;
+            const turnUser = { id: testUser, user_metadata: { name: "Test User" }, email: "test@example.com" };
+            localStorage.setItem("yoso-auth-users-v1", JSON.stringify([turnUser]));
+            authSession = { userId: testUser, expiresAt: Date.now() + 1000000, activeAt: Date.now() };
+            applyOnlineAuthUser(turnUser);
+            await refreshKoshienPhase2DraftState(); // 権限再取得
+            render();
+            
+            // UI上の要素から「自分の番」であることを確認（ピンク色の表示があるか）
+            const isPink = Array.from(document.querySelectorAll(".active-manager-note")).some(el => el.innerHTML.includes("あなたの番です！"));
+            if (!isPink) throw new Error("UIにピンク色の『あなたの番です！』が表示されていません。");
+            
+            // 未指名の高校を選ぶ
+            const selectEl = document.querySelector("select[data-koshien-phase2-team]");
+            if (!selectEl) throw new Error("高校を選択するプルダウンが存在しません。");
+            
+            const availableOptions = Array.from(selectEl.options).filter(opt => opt.value !== "" && !opt.disabled);
+            if (availableOptions.length === 0) throw new Error("選択可能な高校がありません。");
+            
+            // ランダムに高校を選ぶ
+            const chosenTeam = availableOptions[Math.floor(Math.random() * availableOptions.length)].value;
+            selectEl.value = chosenTeam;
+            
+            // 確定ボタンを押す
+            const confirmBtn = document.querySelector("button[data-koshien-phase2-confirm]");
+            if (confirmBtn.disabled) throw new Error("確定ボタンがロックされています。");
+            
+            // クリックイベントのディスパッチ
+            confirmBtn.click();
+            
+            // 保存中...を待機（非同期処理のため少し待つ）
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
+            successCount++;
+            totalPicks++;
+            
+            if (successCount % 10 === 0) {
+              console.log(`✅ ${successCount}/100 回目の指名完了 (Pick No: ${view.currentTurn.pickNo})`);
+            }
+          } catch (e) {
+            console.error(`❌ [エラー発生] テスト ${i+1}回目でクラッシュしました:`, e);
+            document.body.innerHTML += `<div style="color:red; font-size:24px; padding:20px; z-index:9999; position:absolute; top:0;">[TEST FAILED] ${e.message}</div>`;
+            return;
+          }
+        }
+        
+        console.log(`🎉 [成功] 100回の連続指名テストが全てエラーなく完走しました！！`);
+        document.body.innerHTML += `<div id="test-success" style="color:#00ff00; font-size:24px; padding:20px; background:#111; z-index:9999; position:absolute; top:0;">[TEST PASSED] 100/100 完了！UIは完璧です！</div>`;
+      }
+      
+      // アプリ起動後に自動実行
+      window.addEventListener("load", () => {
+        setTimeout(run100Tests, 1000);
+      });
+    </script>
   </body>
 </html>

@@ -32,11 +32,13 @@ python -m http.server 4173
 | [AGENTS.md](AGENTS.md) | リポジトリ全体のAIエージェント共通作業規則 |
 | [CONTEXT.md](CONTEXT.md) | YOSO全体の短い製品・ドメインコンテキスト |
 | [docs/KOSHIEN_2026_RULES.md](docs/KOSHIEN_2026_RULES.md) | 夏の甲子園2026正式ルールの唯一の正本 |
+| [docs/KOSHIEN_2026_PHASE2_DRAFT_SPEC.md](docs/KOSHIEN_2026_PHASE2_DRAFT_SPEC.md) | フェーズ2・ベスト16スネークドラフトの実装仕様 |
 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 人間向けの共同開発手順 |
 | [docs/KOSHIEN_2026_DELIVERY_PLAN.md](docs/KOSHIEN_2026_DELIVERY_PLAN.md) | 夏の甲子園2026のリリース計画 |
 | [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) | Supabase Auth/Postgresのセットアップ手順 |
 | [docs/SUPABASE_MIGRATION_PLAN.md](docs/SUPABASE_MIGRATION_PLAN.md) | Supabase移行方針 |
 | [docs/SUPABASE_KOSHIEN_MATCH_RESULTS_RUNBOOK.md](docs/SUPABASE_KOSHIEN_MATCH_RESULTS_RUNBOOK.md) | 甲子園試合結果保存migrationの本番確認手順 |
+| [docs/SUPABASE_KOSHIEN_PHASE2_DRAFT_RUNBOOK.md](docs/SUPABASE_KOSHIEN_PHASE2_DRAFT_RUNBOOK.md) | フェーズ2ドラフトmigrationと競合確認の運用草案 |
 
 `CLAUDE.md` と `docs/ANTIGRAVITY_KOSHIEN_2026_CONTEXT.md` は互換用の参照案内です。エージェント規則や甲子園ルールの正本として扱いません。
 
