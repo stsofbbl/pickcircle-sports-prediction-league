@@ -56,8 +56,7 @@ Google Sheets関連のコードとドキュメントは削除しません。現�
 ```json
 {
   "teams": ["校名1", "校名2"],
-  "captain": "校名1",
-  "finalTotalScore": "7"
+  "captain": "校名1"
 }
 ```
 
