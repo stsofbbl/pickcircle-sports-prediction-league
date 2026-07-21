@@ -122,7 +122,7 @@ RPC名は `save_koshien_phase2_draft_pick` とする。入力は `draft_id`, `te
 10. 16件目以外は `current_pick_no` と `version` を更新する。16件目は `completed` へ移行する
 11. 最新draft、順序、候補校、指名、所有者、viewer playerをJSONで返す
 
-関数は `SECURITY INVOKER`、固定 `search_path` とする。`PUBLIC` と `anon` のEXECUTEをrevokeし、`authenticated` だけへgrantする。クライアントから渡された表示名、player ID、巡目を信用しない。
+読取RPCは `SECURITY INVOKER` とする。保存RPCだけは、authenticatedへテーブルの直接INSERT/UPDATE権限を与えず原子的書込を実行するため、固定 `search_path` の `SECURITY DEFINER` を明示的な例外とする。保存RPCは `auth.uid()` から参加playerを解決し、手番・時刻・候補校・重複・状態遷移を再検証する。両RPCとも `PUBLIC` と `anon` のEXECUTEをrevokeし、`authenticated` だけへgrantする。クライアントから渡された表示名、player ID、巡目を信用しない。
 
 ## 8. 排他制御と冪等性
 
@@ -139,7 +139,7 @@ RPC名は `save_koshien_phase2_draft_pick` とする。入力は `draft_id`, `te
 - 同一 `request_id` で異なるpayloadは拒否する
 - insertとturn更新は一体で、raw predictionだけが残る部分保存を作らない
 
-RLSはリーグ参加者の読取、本人性、RPC経由の書込境界を担当する。RPCはロック、順序、時刻、候補校、重複、状態遷移、返却状態を担当する。一般のsnapshot保存や `predictions.payload` は正式ドラフトの書込経路にしない。
+RLSはリーグ参加者の読取境界を担当する。authenticatedのテーブル権限は一度すべてrevokeしてSELECTだけを再grantし、書込policyも持たせず、保存RPCだけを正式な書込境界とする。保存RPCは本人性、ロック、順序、時刻、候補校、重複、状態遷移、返却状態を担当する。クライアントが設定できるセッション値をRPC呼出の証明に使わない。一般のsnapshot保存や `predictions.payload` は正式ドラフトの書込経路にしない。
 
 ## 9. Data Service境界
 

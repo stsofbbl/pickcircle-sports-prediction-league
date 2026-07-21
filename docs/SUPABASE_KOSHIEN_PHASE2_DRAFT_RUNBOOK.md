@@ -6,6 +6,7 @@
 
 ```text
 supabase/migrations/20260721023204_add_koshien_phase2_draft_foundation.sql
+supabase/migrations/20260721104248_harden_koshien_phase2_rpc_permissions.sql
 ```
 
 ## 1. 適用前の停止条件
@@ -73,8 +74,10 @@ order by m.match_no;
 - `phase2_drafts` を追加し、既存 `phase2_draft_picks` を拡張している
 - 4人、16校、1〜16指名、1〜4巡、一意高校、一意手番、冪等キーの制約がある
 - `phase2_drafts` と `phase2_draft_picks` のRLSが有効である
-- 旧フェーズ2直接書込policyを削除し、RPC経由のinsert/updateだけを許可している
-- 2つのRPCが `SECURITY INVOKER` かつ `search_path = ''` である
+- 旧フェーズ2直接書込policyとセッション設定値に依存する書込policyを削除している
+- authenticatedのテーブル権限を一度すべてrevokeし、selectだけを再grantしている
+- 読取RPCは `SECURITY INVOKER`、保存RPCは直接DMLを閉じるための限定的な `SECURITY DEFINER` 例外で、両方とも `search_path = ''` である
+- 保存RPCが `auth.uid()` から本人を解決し、手番・時刻・候補校・重複・状態遷移をすべて再検証している
 - `PUBLIC` と `anon` のEXECUTEがrevokeされ、`authenticated` だけにgrantされている
 - RLSが使用する `is_league_member(uuid)` は `anon` / `PUBLIC` からrevokeし、`authenticated` にだけEXECUTEを明示grantしている
 - publicテーブルのData API権限が明示grantされている
@@ -138,11 +141,11 @@ order by p.proname;
 期待値:
 
 - 両テーブルでRLSが有効
-- 両RPCで `security_definer = false`
+- 読取RPCで `security_definer = false`、保存RPCで `security_definer = true`
 - `authenticated_can_execute = true`
 - `anon_can_execute = false`
-- `phase2_draft_picks` のinsertは専用RPCコンテキスト以外ではRLS拒否
-- update/deleteの直接権限なし
+- `phase2_drafts` と `phase2_draft_picks` はauthenticatedの全権限revoke後にselectだけが再grantされる
+- insert/update/deleteの直接権限と書込policyがなく、保存RPC以外の書込は拒否される
 
 ## 6. draft準備データの確認
 
