@@ -3462,9 +3462,15 @@ function participantKoshienDraftBlock() {
   const startsBefore = view.startsAt && Date.now() < Date.parse(view.startsAt);
   const deadlinePassed = view.deadlineAt && Date.now() >= Date.parse(view.deadlineAt);
   const canSubmit = view.canViewerPick && !startsBefore && !deadlinePassed && !koshienPhase2DraftSaving;
-  const currentText = view.completed
-    ? "すべての指名が完了しました。"
-    : `${view.currentTurn.pickNo}番目・${view.currentTurn.draftRound}巡目：${view.currentTurn.displayName}`;
+  let currentTextHtml = "";
+  if (view.completed) {
+    currentTextHtml = `<div class="active-manager-note">ドラフトは完了しました。</div>`;
+  } else if (view.canViewerPick) {
+    currentTextHtml = `<div class="active-manager-note" style="border-color: var(--soap-pink); background: rgba(245, 154, 194, 0.15);"><strong style="color: var(--soap-pink);">あなたの番です！（全体第${view.currentTurn.pickNo}指名 / ${view.currentTurn.draftRound}巡目）</strong></div>`;
+  } else {
+    currentTextHtml = `<div class="active-manager-note is-disabled">現在は <strong>${escapeHtml(view.currentTurn.displayName)}</strong> の指名待ちです。（全体第${view.currentTurn.pickNo}指名 / ${view.currentTurn.draftRound}巡目）</div>`;
+  }
+
   const teamOptions = view.eligibleTeams.map((team) => {
     const owner = view.ownerByTeamId[team.teamId];
     const suffix = owner ? ` — 指名済み: ${owner.displayName}` : "";
@@ -3476,7 +3482,8 @@ function participantKoshienDraftBlock() {
         <h3>フェーズ2・ベスト16ドラフト</h3>
         <span>${escapeHtml(statusLabels[view.status] || view.status)} / ${view.picks.length} of 16</span>
       </div>
-      <p class="wc-phase-intro">${escapeHtml(currentText)} 指名の確定と復元はDBの正式状態を使用します。</p>
+      <p class="wc-phase-intro">指名の確定と復元はDBの正式状態を使用します。</p>
+      ${currentTextHtml}
       <div class="koshien-phase2-meta">
         <span>開始 ${escapeHtml(formatDateTime(view.startsAt) || "未設定")}</span>
         <span>締切 ${escapeHtml(formatDateTime(view.deadlineAt) || "未設定")}</span>
