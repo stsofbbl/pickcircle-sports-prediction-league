@@ -57,6 +57,12 @@ PythonがPATHにない場合は、利用環境のPython実行ファイルをフ�
 python yoso-koshien-sim\run.py --iterations 100 --result-modes standard_upset --strategy-sets mixed
 ```
 
+単体テスト:
+
+```powershell
+python -m unittest discover -s yoso-koshien-sim\tests -v
+```
+
 本番寄り確認:
 
 ```powershell

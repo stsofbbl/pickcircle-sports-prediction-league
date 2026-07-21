@@ -20,4 +20,3 @@ def select_revenge_team(
         return None
     weights = [teams[team_id].sqrt_odds_capped for team_id in candidates]
     return rng.choices(candidates, weights=weights, k=1)[0]
-

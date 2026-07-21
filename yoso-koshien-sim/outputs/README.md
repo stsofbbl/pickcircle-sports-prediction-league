@@ -9,4 +9,3 @@
 - `winner_distribution.csv`
 - `zombie_impact.csv`
 - `revenge_impact.csv`
-

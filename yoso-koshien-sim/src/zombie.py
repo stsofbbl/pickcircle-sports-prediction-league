@@ -40,4 +40,3 @@ def apply_zombie_penalty(players: list[PlayerState], finish_by_team: dict[str, s
         elif count >= 2:
             adjusted[team_id] = 0.0
     return adjusted, dict(hit_counts)
-

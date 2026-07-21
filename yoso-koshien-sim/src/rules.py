@@ -74,4 +74,3 @@ class PlayerState:
     revenge_pick: str | None
     zombie_target: str | None
     final_prediction: dict[str, int | str] | None
-

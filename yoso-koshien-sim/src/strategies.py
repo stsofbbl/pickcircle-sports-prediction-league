@@ -99,4 +99,3 @@ def draft_phase2_teams(players: list[PlayerState], best16: set[str], provisional
             pick = weighted_sample_without_replacement(candidates, weights, 1, rng)[0]
             player.phase2_picks.append(pick)
             available.remove(pick)
-

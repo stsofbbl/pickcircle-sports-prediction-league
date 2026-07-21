@@ -57,4 +57,3 @@ def calculate_phase3_scores(players: list[PlayerState], actual_final: dict[str, 
     for name in nearest_names:
         scores[name] = FINAL_SCORE_NEAREST_POINTS
     return scores, exact
-
