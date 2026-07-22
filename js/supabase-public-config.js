@@ -39,3 +39,9 @@ const jhbfAdminVisibilityScript = document.createElement("script");
 jhbfAdminVisibilityScript.src = "./js/jhbf-admin-visibility.js";
 jhbfAdminVisibilityScript.async = false;
 document.head.appendChild(jhbfAdminVisibilityScript);
+
+// Add the isolated two-school/one-game test event controls after the importer is installed.
+const jhbfTestEventScript = document.createElement("script");
+jhbfTestEventScript.src = "./js/jhbf-test-event.js";
+jhbfTestEventScript.async = false;
+document.head.appendChild(jhbfTestEventScript);
