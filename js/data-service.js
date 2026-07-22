@@ -692,7 +692,11 @@
     const event = events?.[0];
     if (!event) return { skipped: true, reason: "koshien event is not found", league, membership };
 
-    const [{ data: teams, error: teamsError }, { data: results, error: resultsError }] = await Promise.all([
+    const [
+      { data: teams, error: teamsError },
+      { data: results, error: resultsError },
+      { data: members, error: membersError },
+    ] = await Promise.all([
       supabase
         .from("event_teams")
         .select("name, seed, metadata")
@@ -703,9 +707,14 @@
         .select("payload, updated_at")
         .eq("event_id", event.id)
         .maybeSingle(),
+      supabase
+        .from("league_members")
+        .select("user_id, role, profiles(display_name)")
+        .eq("league_id", league.id),
     ]);
     if (teamsError) throw teamsError;
     if (resultsError) throw resultsError;
+    if (membersError) throw membersError;
 
     const predictionSelect = isPredictionPublic(event)
       ? supabase
@@ -730,6 +739,7 @@
       },
       event,
       teams: teams || [],
+      members: members || [],
       predictions: predictions || [],
       results: results || null,
       predictionsPublic: isPredictionPublic(event),
