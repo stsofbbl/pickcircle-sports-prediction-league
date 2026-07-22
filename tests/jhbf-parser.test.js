@@ -11,6 +11,12 @@ function fixture(name) {
   return fs.readFileSync(path.join(__dirname, "fixtures", name), "utf8");
 }
 
+function assertIncludes(actual, expected) {
+  Object.entries(expected).forEach(([key, value]) => {
+    assert.deepEqual(actual[key], value, `unexpected ${key}`);
+  });
+}
+
 test("parses multiple completed 2025 summer results", async () => {
   const api = await parser();
   const result = api.parseJhbfResultsHtml(fixture("jhbf-2025-summer.html"), {
@@ -21,7 +27,7 @@ test("parses multiple completed 2025 summer results", async () => {
     matchDate: "2025-08-12",
   });
   assert.equal(result.rows.length, 3);
-  assert.deepEqual(result.rows[0], assert.objectContaining({
+  assertIncludes(result.rows[0], {
     externalKey: "jhbf:summer:2025:2025-08-12:1",
     roundKey: "R2",
     teamANameRaw: "聖光学院",
@@ -30,7 +36,7 @@ test("parses multiple completed 2025 summer results", async () => {
     teamBScore: 6,
     winnerNameRaw: "山梨学院",
     status: "completed",
-  }));
+  });
 });
 
 test("parses an extra-inning 2026 spring result and excludes unfinished games", async () => {
@@ -42,14 +48,14 @@ test("parses an extra-inning 2026 spring result and excludes unfinished games", 
     matchDate: "2026-03-22",
   });
   assert.equal(result.rows.length, 3);
-  assert.deepEqual(result.rows[0], assert.objectContaining({
+  assertIncludes(result.rows[0], {
     externalKey: "jhbf:senbatsu:2026:2026-03-22:1",
     roundKey: "R1",
     teamANameRaw: "神戸国際大付",
     teamBNameRaw: "九州国際大付",
     teamAScore: 3,
     teamBScore: 4,
-  }));
+  });
   assert.equal(result.rows.some((row) => row.dailyMatchNo === 4), false);
 });
 
