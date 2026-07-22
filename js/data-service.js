@@ -46,6 +46,101 @@
     return { supabase, user };
   }
 
+  async function laterPhaseContext() {
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user) throw new Error("後半フェーズにはオンラインログインが必要です。");
+    return { supabase, user };
+  }
+
+  async function laterPhaseRpc(name, args, stage) {
+    const { supabase } = await laterPhaseContext();
+    const { data, error } = await supabase.rpc(name, args);
+    if (error) throw koshienSaveError(stage, error, "後半フェーズの保存に失敗しました。");
+    return data;
+  }
+
+  function normalizedLaterPayload(payload = {}) {
+    return {
+      eventId: String(payload.eventId || "").trim(),
+      teamId: String(payload.teamId || "").trim(),
+      version: Number(payload.version),
+      requestId: String(payload.requestId || "").trim(),
+    };
+  }
+
+  async function loadLaterPhaseState(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("後半フェーズのevent_idが必要です。");
+    await laterPhaseRpc("refresh_koshien_phase_schedule", { p_event_id: normalizedEventId }, "later_phase_schedule");
+    return laterPhaseRpc("get_koshien_later_phase_state", { p_event_id: normalizedEventId }, "later_phase_load");
+  }
+
+  async function saveRevengePick(payload = {}) {
+    const value = normalizedLaterPayload(payload);
+    if (!value.eventId || !value.teamId || !Number.isInteger(value.version) || !value.requestId) throw new Error("リベンジ保存payloadを確認してください。");
+    return laterPhaseRpc("save_koshien_revenge_pick", {
+      p_event_id: value.eventId,
+      p_target_team_id: value.teamId,
+      p_expected_version: value.version,
+      p_request_id: value.requestId,
+    }, "revenge_pick");
+  }
+
+  async function saveZombiePrediction(payload = {}) {
+    const value = normalizedLaterPayload(payload);
+    if (!value.eventId || !value.teamId || !Number.isInteger(value.version) || !value.requestId) throw new Error("ゾンビ保存payloadを確認してください。");
+    return laterPhaseRpc("save_koshien_zombie_prediction", {
+      p_event_id: value.eventId,
+      p_target_team_id: value.teamId,
+      p_expected_version: value.version,
+      p_request_id: value.requestId,
+    }, "zombie_prediction");
+  }
+
+  async function savePhase3Prediction(payload = {}) {
+    const eventId = String(payload.eventId || "").trim();
+    const requestId = String(payload.requestId || "").trim();
+    const scoreA = Number(payload.scoreA);
+    const scoreB = Number(payload.scoreB);
+    const version = Number(payload.version);
+    if (!eventId || !requestId || !Number.isInteger(version) || !Number.isInteger(scoreA) || scoreA < 0
+      || !Number.isInteger(scoreB) || scoreB < 0 || scoreA === scoreB) throw new Error("フェーズ3保存payloadを確認してください。");
+    return laterPhaseRpc("save_koshien_phase3_prediction", {
+      p_event_id: eventId,
+      p_score_a: scoreA,
+      p_score_b: scoreB,
+      p_expected_version: version,
+      p_request_id: requestId,
+    }, "phase3_prediction");
+  }
+
+  async function prepareLaterPhase({ eventId, phase, opensAt, deadlineAt } = {}) {
+    const rpcNames = {
+      best16: "prepare_koshien_best16_phases",
+      zombie: "prepare_koshien_zombie_phase",
+      phase3: "prepare_koshien_phase3",
+    };
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId || !rpcNames[phase] || !opensAt || !deadlineAt) throw new Error("後半フェーズ準備payloadを確認してください。");
+    return laterPhaseRpc(rpcNames[phase], {
+      p_event_id: normalizedEventId,
+      p_opens_at: opensAt,
+      p_deadline_at: deadlineAt,
+    }, `${phase}_prepare`);
+  }
+
+  async function setLaterPhaseStatus({ eventId, phase, action } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId || !["best16", "zombie", "phase3"].includes(phase)
+      || !["open", "lock"].includes(action)) throw new Error("後半フェーズ操作payloadを確認してください。");
+    return laterPhaseRpc("set_koshien_later_phase_status", {
+      p_event_id: normalizedEventId,
+      p_phase_key: phase,
+      p_action: action,
+    }, `${phase}_${action}`);
+  }
+
   async function loadPhase2DraftState(eventId) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("フェーズ2ドラフトのevent_idが必要です。");
@@ -438,61 +533,6 @@
       if (error) throw error;
     }
 
-    const { error: revengeDeleteError } = await supabase
-      .from("revenge_picks")
-      .delete()
-      .eq("event_id", eventId)
-      .eq("player_id", player.id);
-    if (revengeDeleteError) throw revengeDeleteError;
-    const revengeTeam = teamByName.get(prediction.revengePick);
-    if (revengeTeam) {
-      const { error } = await supabase.from("revenge_picks").insert({
-        event_id: eventId,
-        player_id: player.id,
-        target_team_id: revengeTeam.id,
-        payload: { source_type: "app_selected" },
-      });
-      if (error) throw error;
-    }
-
-    const { error: zombieDeleteError } = await supabase
-      .from("zombie_predictions")
-      .delete()
-      .eq("event_id", eventId)
-      .eq("player_id", player.id);
-    if (zombieDeleteError) throw zombieDeleteError;
-    const zombieTeam = teamByName.get(prediction.zombiePick);
-    if (zombieTeam) {
-      const { error } = await supabase.from("zombie_predictions").insert({
-        event_id: eventId,
-        player_id: player.id,
-        team_id: zombieTeam.id,
-        payload: { target_team_name: prediction.zombiePick },
-      });
-      if (error) throw error;
-    }
-
-    const finalScore = prediction.finalScorePrediction || {};
-    const hasFinalScore = finalScore.champion || finalScore.runnerUp || finalScore.championScore !== "" || finalScore.runnerUpScore !== "";
-    if (!hasFinalScore) {
-      const { error: finalScoreDeleteError } = await supabase
-        .from("final_score_predictions")
-        .delete()
-        .eq("event_id", eventId)
-        .eq("player_id", player.id);
-      if (finalScoreDeleteError) throw finalScoreDeleteError;
-    }
-    if (hasFinalScore) {
-      const { error } = await supabase.from("final_score_predictions").upsert({
-        event_id: eventId,
-        player_id: player.id,
-        champion_team_id: teamByName.get(finalScore.champion)?.id || null,
-        runner_up_team_id: teamByName.get(finalScore.runnerUp)?.id || null,
-        champion_score: finalScore.championScore === "" ? null : Number(finalScore.championScore),
-        runner_up_score: finalScore.runnerUpScore === "" ? null : Number(finalScore.runnerUpScore),
-      }, { onConflict: "event_id,player_id" });
-      if (error) throw error;
-    }
     return { player, teamRows };
   }
 
@@ -726,6 +766,12 @@
       loadSnapshot: loadKoshienSnapshot,
       loadPhase2DraftState,
       savePhase2DraftPick,
+      loadLaterPhaseState,
+      saveRevengePick,
+      saveZombiePrediction,
+      savePhase3Prediction,
+      prepareLaterPhase,
+      setLaterPhaseStatus,
     },
     local: {
       loadState: loadLocalState,
