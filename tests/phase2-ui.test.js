@@ -72,9 +72,10 @@ test("formal phase 2 is refreshed after the atomic official result transaction",
   const end = app.indexOf("\nfunction ", start + 20);
   const handler = app.slice(start, end);
   const firstSave = handler.indexOf("await saveKoshienOnlineNow");
-  const refresh = handler.indexOf("await refreshKoshienPhase2DraftState({ renderAfter: false })");
+  const refresh = handler.indexOf("refreshKoshienPhase2DraftState({ renderAfter: false })");
   assert.ok(firstSave >= 0);
   assert.ok(refresh > firstSave);
+  assert.match(handler, /await Promise\.all\(\[/);
   assert.equal(handler.indexOf("await saveKoshienOnlineNow", firstSave + 1), -1);
 });
 
