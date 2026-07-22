@@ -315,6 +315,11 @@ let koshienPhase2DraftLoading = false;
 let koshienPhase2DraftSaving = false;
 let koshienPhase2DraftMessage = "";
 let koshienPhase2DraftMessageKind = "";
+let koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
+let koshienLaterPhaseLoading = false;
+let koshienLaterPhaseSaving = false;
+let koshienLaterPhaseMessage = "";
+let koshienLaterPhaseMessageKind = "";
 
 function loadAuthUsers() {
   try {
@@ -451,6 +456,8 @@ async function handleSupabaseAuthEvent(event) {
     lastKoshienOnlineLoadUserId = "";
     koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
     koshienPhase2DraftMessage = "";
+    koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
+    koshienLaterPhaseMessage = "";
     renderAuthState();
     render();
     return;
@@ -1572,7 +1579,10 @@ async function loadKoshienOnlineState({ force = false } = {}) {
       if (snapshot?.ok) {
         applyKoshienOnlineSnapshot(snapshot);
         lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
-        await refreshKoshienPhase2DraftState({ renderAfter: false });
+        await Promise.all([
+          refreshKoshienPhase2DraftState({ renderAfter: false }),
+          refreshKoshienLaterPhaseState({ renderAfter: false }),
+        ]);
         render();
         setConnectionMessage(`Supabaseから甲子園データを読み込みました。${snapshot.predictionsPublic ? "締切後のため他メンバーの予想も取得しています。" : "締切前のため自分の予想だけ取得しています。"}`);
       } else if (snapshot?.skipped) {
@@ -1645,6 +1655,40 @@ async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
   }
 }
 
+function applyKoshienLaterPhaseResponse(response, eventId = state.event?.id) {
+  if (!response || String(response.event_id || "") !== String(eventId || "")) throw new Error("後半フェーズ状態のevent_idが一致しません。");
+  koshienLaterPhaseView = { ...response, eventId: String(eventId || ""), loadedFromDb: true };
+  return koshienLaterPhaseView;
+}
+
+async function refreshKoshienLaterPhaseState({ renderAfter = true } = {}) {
+  const service = window.YosoDataService?.koshien;
+  const eventId = String(state.event?.id || "");
+  if (!eventId || !currentAuthUser() || !service?.loadLaterPhaseState) {
+    koshienLaterPhaseView = { eventId, loadedFromDb: false, rounds: {}, teams: [] };
+    if (renderAfter) render();
+    return koshienLaterPhaseView;
+  }
+  koshienLaterPhaseLoading = true;
+  if (renderAfter) render();
+  try {
+    const response = await service.loadLaterPhaseState(eventId);
+    if (String(state.event?.id || "") !== eventId) return koshienLaterPhaseView;
+    applyKoshienLaterPhaseResponse(response, eventId);
+    koshienLaterPhaseMessage = "";
+    koshienLaterPhaseMessageKind = "";
+  } catch (error) {
+    console.warn("Koshien later phase load failed", error);
+    koshienLaterPhaseView = { eventId, loadedFromDb: false, rounds: {}, teams: [], error: true };
+    koshienLaterPhaseMessage = "後半フェーズを読み込めませんでした。最新状態を再取得してください。";
+    koshienLaterPhaseMessageKind = "error";
+  } finally {
+    koshienLaterPhaseLoading = false;
+    if (renderAfter) render();
+  }
+  return koshienLaterPhaseView;
+}
+
 function createKoshienPhase2RequestId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   const bytes = new Uint8Array(16);
@@ -1708,6 +1752,99 @@ async function confirmKoshienPhase2DraftPick() {
     koshienPhase2DraftSaving = false;
     render();
   }
+}
+
+async function saveKoshienLaterChoice(kind) {
+  if (koshienLaterPhaseSaving) return;
+  const service = window.YosoDataService?.koshien;
+  const eventId = String(state.event?.id || "");
+  const roundKey = kind === "revenge" ? "revenge" : kind === "zombie" ? "zombie" : "phase3";
+  const round = koshienLaterPhaseView.rounds?.[roundKey];
+  if (!service || !round || !koshienLaterPhaseView.loadedFromDb) {
+    koshienLaterPhaseMessage = "最新状態を取得してから保存してください。";
+    koshienLaterPhaseMessageKind = "error";
+    render();
+    return;
+  }
+  koshienLaterPhaseSaving = true;
+  koshienLaterPhaseMessage = "保存しています…";
+  koshienLaterPhaseMessageKind = "pending";
+  render();
+  try {
+    let response;
+    const requestId = createKoshienPhase2RequestId();
+    if (kind === "revenge") {
+      const teamId = els.eventForm.querySelector("[data-koshien-revenge-team]")?.value || "";
+      if (!teamId) throw new Error("リベンジ校を選択してください。");
+      response = await service.saveRevengePick({ eventId, teamId, version: Number(round.version), requestId });
+    } else if (kind === "zombie") {
+      const teamId = els.eventForm.querySelector("[data-koshien-zombie-team]")?.value || "";
+      if (!teamId) throw new Error("ゾンビ対象校を選択してください。");
+      response = await service.saveZombiePrediction({ eventId, teamId, version: Number(round.version), requestId });
+    } else {
+      const scoreA = els.eventForm.querySelector("[data-koshien-phase3-score='a']")?.value;
+      const scoreB = els.eventForm.querySelector("[data-koshien-phase3-score='b']")?.value;
+      const validation = window.YosoKoshienLaterPhases?.validateFinalScore(scoreA, scoreB);
+      if (!validation?.ok) throw new Error(validation?.message || "決勝スコアを確認してください。");
+      response = await service.savePhase3Prediction({
+        eventId, scoreA: validation.scoreA, scoreB: validation.scoreB, version: Number(round.version), requestId,
+      });
+    }
+    applyKoshienLaterPhaseResponse(response, eventId);
+    koshienLaterPhaseMessage = "保存しました。";
+    koshienLaterPhaseMessageKind = "success";
+  } catch (error) {
+    console.warn("Koshien later phase save failed", error);
+    await refreshKoshienLaterPhaseState({ renderAfter: false });
+    koshienLaterPhaseMessage = error?.message || "保存できませんでした。最新状態へ戻しました。";
+    koshienLaterPhaseMessageKind = "error";
+  } finally {
+    koshienLaterPhaseSaving = false;
+    render();
+  }
+}
+
+async function prepareKoshienLaterPhase(phase, root) {
+  const opensAt = root?.querySelector(`[data-koshien-later-opens="${phase}"]`)?.value;
+  const deadlineAt = root?.querySelector(`[data-koshien-later-deadline="${phase}"]`)?.value;
+  if (!opensAt || !deadlineAt) {
+    setKoshienMatchMessage("開始時刻と締切を入力してください。", "error");
+    renderActiveEventManager();
+    return;
+  }
+  setKoshienMatchMessage("後半フェーズを準備しています…", "success");
+  renderActiveEventManager();
+  try {
+    const response = await window.YosoDataService.koshien.prepareLaterPhase({
+      eventId: String(state.event.id), phase, opensAt: new Date(opensAt).toISOString(), deadlineAt: new Date(deadlineAt).toISOString(),
+    });
+    applyKoshienLaterPhaseResponse(response, state.event.id);
+    await refreshKoshienPhase2DraftState({ renderAfter: false });
+    setKoshienMatchMessage(`${phase === "best16" ? "ベスト16・リベンジ・フェーズ2" : phase === "zombie" ? "ゾンビ" : "フェーズ3"}を準備しました。`, "success");
+  } catch (error) {
+    console.warn("Koshien later phase preparation failed", error);
+    setKoshienMatchMessage(error?.message || "後半フェーズを準備できませんでした。", "error");
+  }
+  renderActiveEventManager();
+  render();
+}
+
+async function setKoshienLaterPhaseStatus(phase, action) {
+  setKoshienMatchMessage(action === "open" ? "後半フェーズを公開しています…" : "後半フェーズを締め切っています…", "success");
+  renderActiveEventManager();
+  try {
+    const response = await window.YosoDataService.koshien.setLaterPhaseStatus({
+      eventId: String(state.event.id), phase, action,
+    });
+    applyKoshienLaterPhaseResponse(response, state.event.id);
+    await refreshKoshienPhase2DraftState({ renderAfter: false });
+    setKoshienMatchMessage(action === "open" ? "入力を公開しました。" : "入力を締め切りました。", "success");
+  } catch (error) {
+    console.warn("Koshien later phase status change failed", error);
+    setKoshienMatchMessage(error?.message || "後半フェーズの状態を変更できませんでした。", "error");
+  }
+  renderActiveEventManager();
+  render();
 }
 
 function koshienLoadSkipMessage(reason) {
@@ -2331,6 +2468,7 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
       <span>${canEditResults ? "勝ち上がりと決勝スコア結果を入力できます。入力後に結果を提出してください。" : "管理者権限、または確定状態を確認してください。"}</span>
     </div>
     ${resultFlowPanel()}
+    ${koshienLaterAdminControls(canEditResults)}
     ${koshienMatchResultEditor(teams, disabledResults)}
     <div class="entry-block koshien-results">
       <div class="block-head">
@@ -2361,6 +2499,37 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
       ${koshienTeamMetaEditor(teams)}
     </details>
   `;
+}
+
+function koshienLocalDateTime(offsetMs = 0) {
+  const date = new Date(Date.now() + offsetMs - (new Date().getTimezoneOffset() * 60 * 1000));
+  return date.toISOString().slice(0, 16);
+}
+
+function koshienLaterAdminControls(canEditResults) {
+  const definitions = [
+    { phase: "best16", title: "ベスト16確定", description: "リベンジ資格と正式フェーズ2ドラフトを同時に準備" },
+    { phase: "zombie", title: "ベスト4確定", description: "フェーズ2全滅者のゾンビ資格を準備" },
+    { phase: "phase3", title: "決勝カード確定", description: "決勝2校を固定してフェーズ3を準備" },
+  ].filter((item) => item.phase !== "zombie" || state.event.config?.zombieEnabled !== false);
+  return `
+    <div class="entry-block koshien-results">
+      <div class="block-head"><div><h3>後半フェーズ進行</h3><p class="helper-text">各到達段階の試合カード・結果を保存してから準備してください。</p></div></div>
+      <div class="koshien-later-admin-grid">
+        ${definitions.map((item) => {
+          const key = item.phase === "best16" ? "revenge" : item.phase;
+          const status = koshienLaterPhaseView.rounds?.[key]?.status || "未準備";
+          return `<div class="koshien-later-admin-card">
+            <strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.description)}</span><small>状態: ${escapeHtml(status)}</small>
+            <label class="field"><span>開始</span><input type="datetime-local" data-koshien-later-opens="${item.phase}" value="${koshienLocalDateTime()}" ${canEditResults ? "" : "disabled"}></label>
+            <label class="field"><span>締切</span><input type="datetime-local" data-koshien-later-deadline="${item.phase}" value="${koshienLocalDateTime(86400000)}" ${canEditResults ? "" : "disabled"}></label>
+            <button class="ghost-button" type="button" data-koshien-later-prepare="${item.phase}" ${canEditResults ? "" : "disabled"}>準備</button>
+            <button class="ghost-button" type="button" data-koshien-later-status="${item.phase}:open" ${canEditResults && status === "ready" ? "" : "disabled"}>公開</button>
+            <button class="ghost-button" type="button" data-koshien-later-status="${item.phase}:lock" ${canEditResults && ["ready", "open", "completed"].includes(status) ? "" : "disabled"}>締切</button>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
 }
 
 function koshienMatchResultEditor(teams, disabledResults) {
@@ -2444,6 +2613,20 @@ function bindActiveEventManagerInputs() {
   const finalized = isResultFinalized(state.event);
   const canEditSettings = isCurrentUserAdmin() && !finalized;
   const canEditResults = isCurrentUserAdmin() && !finalized;
+
+  root.querySelectorAll("[data-koshien-later-prepare]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!canEditResults) return;
+      prepareKoshienLaterPhase(button.dataset.koshienLaterPrepare, root);
+    });
+  });
+  root.querySelectorAll("[data-koshien-later-status]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!canEditResults) return;
+      const [phase, action] = button.dataset.koshienLaterStatus.split(":");
+      setKoshienLaterPhaseStatus(phase, action);
+    });
+  });
 
   root.querySelectorAll("[data-manage-event-name]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -3194,8 +3377,8 @@ function renderKoshienForm() {
       <span>出場校編集と勝ち上がり結果は「大会編集」タブで管理します。</span>
     </div>
     ${activePhase === "phase1" ? participantKoshienBlock(participant, teams) : ""}
-    ${activePhase === "phase2" ? participantKoshienDraftBlock(participant, teams) : ""}
-    ${activePhase === "phase3" ? participantKoshienFinalScoreBlock(participant, teams) : ""}
+    ${activePhase === "phase2" ? `${koshienRevengeBlock()}${participantKoshienDraftBlock(participant, teams)}` : ""}
+    ${activePhase === "phase3" ? `${koshienZombieBlock()}${participantKoshienFinalScoreBlock()}` : ""}
     ${showPublic ? koshienPublicPredictions(teams) : ""}
   `;
   bindGenericInputs();
@@ -3321,6 +3504,7 @@ async function saveKoshienMatchResult(matchId) {
   const completed = window.YosoKoshienResults.completeMatch(match);
   Object.assign(match, completed.match);
   applyKoshienMatchFinishes();
+  if (koshienLaterPhaseView.eventId === String(state.event.id)) koshienLaterPhaseView.official_scores = [];
   saveLocalStateOnly();
   setKoshienMatchMessage(`${koshienRoundLabel(match.round)} ${match.match_no} を保存しました。ランキングを再計算しました。`, "success");
   renderScoresOnly();
@@ -3334,7 +3518,10 @@ async function saveKoshienMatchResult(matchId) {
   renderActiveEventManager();
   try {
     const result = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
-    await refreshKoshienPhase2DraftState({ renderAfter: false });
+    await Promise.all([
+      refreshKoshienPhase2DraftState({ renderAfter: false }),
+      refreshKoshienLaterPhaseState({ renderAfter: false }),
+    ]);
     setKoshienMatchMessage(koshienSaveOutcomeMessage(result, "Supabaseへ結果を保存しました。"), result?.skipped || result?.partial ? "error" : "success");
   } catch (error) {
     setKoshienMatchMessage(koshienStructuredSaveErrorMessage(error), "error");
@@ -3571,26 +3758,76 @@ function participantKoshienDraftBlock() {
   `;
 }
 
-function participantKoshienFinalScoreBlock(name, teams) {
-  ensurePrediction(name);
-  const prediction = state.event.predictions[name];
-  prediction.finalScorePrediction ||= { champion: "", runnerUp: "", championScore: "", runnerUpScore: "" };
-  const finalScore = prediction.finalScorePrediction;
-  const zombieOptions = koshienZombieOptions(name);
+function koshienLaterTeamName(teamId) {
+  return koshienLaterPhaseView.teams?.find((team) => String(team.team_id) === String(teamId))?.name || "高校";
+}
+
+function koshienLaterRoundOpen(round) {
+  return Boolean(round?.status === "open"
+    && (!round.opens_at || Date.now() >= Date.parse(round.opens_at))
+    && (!round.deadline_at || Date.now() < Date.parse(round.deadline_at)));
+}
+
+function koshienLaterMessage() {
+  const kind = koshienLaterPhaseMessageKind ? ` is-${koshienLaterPhaseMessageKind}` : "";
+  return `<p class="koshien-phase2-message${kind}" role="status" aria-live="polite">${escapeHtml(koshienLaterPhaseMessage)}</p>`;
+}
+
+function koshienRevengeBlock() {
+  const round = koshienLaterPhaseView.rounds?.revenge;
+  const eligibility = koshienLaterPhaseView.revenge?.eligibility;
+  const pick = koshienLaterPhaseView.revenge?.pick;
+  if (koshienLaterPhaseLoading) return `<div class="entry-block"><h3>リベンジカード</h3><p>正式状態を読み込んでいます…</p></div>`;
+  if (!round) return `<div class="entry-block"><h3>リベンジカード</h3><p class="helper-text">ベスト16確定後、対象者だけ選択できます。</p>${koshienLaterMessage()}</div>`;
+  if (!eligibility?.eligible) return `<div class="entry-block"><h3>リベンジカード</h3><p class="helper-text">フェーズ1指名校がベスト16に残っているため、今回は対象外です。</p></div>`;
+  const options = (eligibility.allowed_team_ids || []).map((teamId) => `<option value="${escapeAttr(teamId)}" ${String(pick?.target_team_id || "") === String(teamId) ? "selected" : ""}>${escapeHtml(koshienLaterTeamName(teamId))}</option>`).join("");
+  const canSave = koshienLaterRoundOpen(round) && !koshienLaterPhaseSaving;
   return `
-    <div class="entry-block koshien-participant">
+    <div class="entry-block koshien-later-participant">
+      <div class="wc-participant-head"><h3>リベンジカード</h3><span>${eligibility.fallback_allowed ? "ベスト16から選択" : "直接倒した高校から選択"}</span></div>
+      <p class="wc-phase-intro">ベスト16到達分1.5を差し引き、それ以降の勝ち上がりだけ得点になります。</p>
+      <label class="field"><span>リベンジ校</span><select data-koshien-revenge-team ${canSave ? "" : "disabled"}><option value="">高校を選択</option>${options}</select></label>
+      <div class="koshien-phase2-actions"><button class="primary-button" type="button" data-koshien-later-save="revenge" ${canSave ? "" : "disabled"}>リベンジ校を保存</button></div>
+      <p class="helper-text">締切 ${escapeHtml(formatDateTime(round.deadline_at) || "未設定")}</p>${koshienLaterMessage()}
+    </div>`;
+}
+
+function koshienZombieBlock() {
+  const round = koshienLaterPhaseView.rounds?.zombie;
+  const eligibility = koshienLaterPhaseView.zombie?.eligibility;
+  const prediction = koshienLaterPhaseView.zombie?.prediction;
+  if (!round) return `<div class="entry-block"><h3>ゾンビモード</h3><p class="helper-text">ベスト4確定後、フェーズ2の4校が全滅した人だけ参加できます。</p></div>`;
+  if (!eligibility?.eligible) return `<div class="entry-block"><h3>ゾンビモード</h3><p class="helper-text">フェーズ2保有校がベスト4に残っているため、今回は対象外です。</p></div>`;
+  const options = (eligibility.allowed_team_ids || []).map((teamId) => `<option value="${escapeAttr(teamId)}" ${String(prediction?.team_id || "") === String(teamId) ? "selected" : ""}>${escapeHtml(koshienLaterTeamName(teamId))}</option>`).join("");
+  const canSave = koshienLaterRoundOpen(round) && !koshienLaterPhaseSaving;
+  return `
+    <div class="entry-block koshien-later-participant">
+      <div class="wc-participant-head"><h3>ゾンビモード</h3><span>準決勝敗退校を予想</span></div>
+      <p class="wc-phase-intro">的中1人なら所有者の40点を20点へ、2人以上なら0点へ調整します。ゾンビ本人への加点はありません。</p>
+      <label class="field"><span>準決勝で敗退する高校</span><select data-koshien-zombie-team ${canSave ? "" : "disabled"}><option value="">高校を選択</option>${options}</select></label>
+      <div class="koshien-phase2-actions"><button class="primary-button" type="button" data-koshien-later-save="zombie" ${canSave ? "" : "disabled"}>ゾンビ予想を保存</button></div>
+      <p class="helper-text">締切 ${escapeHtml(formatDateTime(round.deadline_at) || "未設定")}</p>${koshienLaterMessage()}
+    </div>`;
+}
+
+function participantKoshienFinalScoreBlock() {
+  const round = koshienLaterPhaseView.rounds?.phase3;
+  const prediction = koshienLaterPhaseView.phase3?.prediction;
+  if (!round) return `<div class="entry-block"><h3>フェーズ3・決勝スコア</h3><p class="helper-text">決勝進出2校が確定すると入力できます。</p>${koshienLaterMessage()}</div>`;
+  const canSave = koshienLaterRoundOpen(round) && !koshienLaterPhaseSaving;
+  return `
+    <div class="entry-block koshien-later-participant">
       <div class="wc-participant-head">
-        <h3>${escapeHtml(name)} のYOSO</h3>
+        <h3>フェーズ3・決勝スコア</h3>
         <span>決勝スコア</span>
       </div>
-      <p class="wc-phase-intro">フェーズ3は決勝カードとスコア予想です。第1・第2フェーズの得点とは別枠で集計します。</p>
+      <p class="wc-phase-intro">決勝2校は公式結果から固定されています。完全一致50点、完全一致者がいない場合の最接近者は30点です。</p>
       <div class="form-grid">
-        <label class="field"><span>優勝校予想</span><select data-koshien-final-score="${escapeAttr(name)}:champion">${optionList(teams, finalScore.champion)}</select></label>
-        <label class="field"><span>準優勝校予想</span><select data-koshien-final-score="${escapeAttr(name)}:runnerUp">${optionList(teams, finalScore.runnerUp)}</select></label>
-        <label class="field"><span>優勝校得点</span><input data-koshien-final-score="${escapeAttr(name)}:championScore" type="number" min="0" step="1" value="${escapeAttr(finalScore.championScore)}"></label>
-        <label class="field"><span>準優勝校得点</span><input data-koshien-final-score="${escapeAttr(name)}:runnerUpScore" type="number" min="0" step="1" value="${escapeAttr(finalScore.runnerUpScore)}"></label>
-        <label class="field"><span>ゾンビ指定</span><select data-koshien-zombie-pick="${escapeAttr(name)}">${optionList(zombieOptions, prediction.zombiePick)}</select></label>
+        <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_a_id))}</span><input data-koshien-phase3-score="a" type="number" min="0" step="1" value="${escapeAttr(prediction?.predicted_score_a ?? "")}" ${canSave ? "" : "disabled"}></label>
+        <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_b_id))}</span><input data-koshien-phase3-score="b" type="number" min="0" step="1" value="${escapeAttr(prediction?.predicted_score_b ?? "")}" ${canSave ? "" : "disabled"}></label>
       </div>
+      <div class="koshien-phase2-actions"><button class="primary-button" type="button" data-koshien-later-save="phase3" ${canSave ? "" : "disabled"}>決勝スコア予想を保存</button></div>
+      <p class="helper-text">同点予想はできません。締切 ${escapeHtml(formatDateTime(round.deadline_at) || "未設定")}</p>${koshienLaterMessage()}
     </div>
   `;
 }
@@ -4148,6 +4385,7 @@ function bindGenericInputs() {
       state.event.config.activePhase = button.dataset.koshienPhase;
       render();
       if (button.dataset.koshienPhase === "phase2") await refreshKoshienPhase2DraftState();
+      if (["phase2", "phase3"].includes(button.dataset.koshienPhase)) await refreshKoshienLaterPhaseState();
     });
   });
   els.eventForm.querySelectorAll("[data-wc-phase]").forEach((button) => {
@@ -4427,6 +4665,9 @@ function bindGenericInputs() {
   });
   els.eventForm.querySelectorAll("[data-koshien-phase2-refresh]").forEach((button) => {
     button.addEventListener("click", () => refreshKoshienPhase2DraftState());
+  });
+  els.eventForm.querySelectorAll("[data-koshien-later-save]").forEach((button) => {
+    button.addEventListener("click", () => saveKoshienLaterChoice(button.dataset.koshienLaterSave));
   });
   els.eventForm.querySelectorAll("[data-koshien-revenge-pick]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -5240,6 +5481,27 @@ function koshienHasScorableResults(event = state.event) {
 }
 
 function koshienScoreRows() {
+  const officialRows = koshienLaterPhaseView.eventId === String(state.event?.id || "")
+    && koshienLaterPhaseView.loadedFromDb
+    ? koshienLaterPhaseView.official_scores || []
+    : [];
+  if (officialRows.length && koshienHasScorableResults(state.event)) {
+    return window.YosoKoshienResults.rankScoreRows(officialRows.map((row) => ({
+      name: row.display_name || "参加者",
+      playerId: row.player_id || "",
+      profileId: row.profile_id || "",
+      score: Number(row.total_score) || 0,
+      breakdown: {
+        phase1: Number(row.phase1_score) || 0,
+        revenge: Number(row.revenge_score) || 0,
+        phase2: Number(row.phase2_score) || 0,
+        zombie: Number(row.zombie_score) || 0,
+        phase3: Number(row.phase3_score) || 0,
+        ...(row.breakdown || {}),
+      },
+      detail: `フェーズ1 ${formatScore(row.phase1_score)} / リベンジ ${formatScore(row.revenge_score)} / フェーズ2 ${formatScore(row.phase2_score)} / ゾンビ ${formatScore(row.zombie_score)} / フェーズ3 ${formatScore(row.phase3_score)}`,
+    })));
+  }
   const phase2Projection = koshienFormalPhase2Projection();
   const participants = phase2Projection
     ? window.YosoKoshienPhase2Draft.resolveFormalPhase2Participants({
@@ -5321,8 +5583,11 @@ function koshienRevengeScore(prediction) {
   const team = prediction.revengePick;
   if (!team) return 0;
   const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
-  if (!["best8", "best4", "runner_up", "champion"].includes(finish)) return 0;
-  return koshienTeamScore(finish) * koshienSqrtOdds(team);
+  return window.YosoKoshienLaterPhases?.calculateRevengeScore({
+    finishKey: finish,
+    sqrtOdds: koshienSqrtOdds(team),
+    sqrtOddsCap: Number(state.event.config.sqrtOddsCap) || 50,
+  }) || 0;
 }
 
 function koshienPhase3Score(name, prediction) {

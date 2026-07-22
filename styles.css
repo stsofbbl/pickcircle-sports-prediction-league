@@ -740,6 +740,26 @@ input[type="number"],
   gap: 8px;
 }
 
+.koshien-later-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.koshien-later-admin-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.koshien-later-admin-card > span,
+.koshien-later-admin-card > small {
+  color: var(--muted, #aaa5ad);
+}
+
 .koshien-phase2-slot {
   display: grid;
   gap: 4px;
@@ -1679,6 +1699,9 @@ dialog::backdrop {
 }
 
 @media (max-width: 900px) {
+  .koshien-later-admin-grid {
+    grid-template-columns: 1fr;
+  }
   .workspace,
   .match-grid {
     grid-template-columns: 1fr;

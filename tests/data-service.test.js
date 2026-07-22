@@ -221,6 +221,35 @@ test("saveSnapshot returns ok only after matches, scores, and raw results succee
   assert.equal(supabase.calls.some((call) => ["matches", "scores", "results"].includes(call.table)), false);
 });
 
+test("phase 1 autosave never writes later-phase tables directly", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.predictions.Admin = {
+    teams: ["Team A", "Team B"],
+    captain: "Team A",
+    revengePick: "Team A",
+    zombiePick: "Team B",
+    finalScorePrediction: { champion: "Team A", runnerUp: "Team B", championScore: 5, runnerUpScore: 3 },
+  };
+  event.results = { matches: [], finishes: {} };
+
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  const writtenTables = supabase.calls.filter((call) => call.table).map((call) => call.table);
+  assert.equal(writtenTables.includes("revenge_picks"), false);
+  assert.equal(writtenTables.includes("zombie_predictions"), false);
+  assert.equal(writtenTables.includes("final_score_predictions"), false);
+  assert.equal(writtenTables.includes("phase1_picks"), true);
+});
+
 test("resultWait result save does not rewrite prediction tables after the deadline", async () => {
   const supabase = createSupabaseMock();
   const service = loadDataService(supabase.client);
