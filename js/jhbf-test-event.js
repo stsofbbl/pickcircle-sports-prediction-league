@@ -171,6 +171,9 @@
 
   function configureExistingImporter(rootElement) {
     if (!isJhbfImportTestEvent(state?.event)) return;
+    rootElement.querySelectorAll("[data-manage-event-name], [data-manage-event-deadline], [data-event-status]").forEach((control) => {
+      control.disabled = true;
+    });
     const competition = rootElement.querySelector("[data-jhbf-competition]");
     const year = rootElement.querySelector("[data-jhbf-year]");
     const baseDate = rootElement.querySelector("[data-jhbf-base-date]");
