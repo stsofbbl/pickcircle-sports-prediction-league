@@ -33,3 +33,9 @@ const jhbfResultImportScript = document.createElement("script");
 jhbfResultImportScript.src = "./js/jhbf-result-import.js";
 jhbfResultImportScript.async = false;
 document.head.appendChild(jhbfResultImportScript);
+
+// Remove the importer panel from non-admin manager screens after the importer installs its render hook.
+const jhbfAdminVisibilityScript = document.createElement("script");
+jhbfAdminVisibilityScript.src = "./js/jhbf-admin-visibility.js";
+jhbfAdminVisibilityScript.async = false;
+document.head.appendChild(jhbfAdminVisibilityScript);
