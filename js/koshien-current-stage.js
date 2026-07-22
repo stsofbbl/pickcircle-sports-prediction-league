@@ -1,4 +1,39 @@
-(function (root) {
+(function (root, factory) {
+  "use strict";
+
+  const api = factory();
+  if (typeof module === "object" && module.exports) module.exports = api;
+  if (root) root.YosoKoshienCurrentStage = api;
+
+  if (!root || typeof root.addEventListener !== "function") return;
+  root.addEventListener("load", () => {
+    if (typeof applyKoshienMatchFinishes !== "function") return;
+    applyKoshienMatchFinishes = function applyKoshienCurrentStageFinishes() {
+      normalizeKoshienEvent(state.event);
+      const matches = state.event.results.matches || [];
+      state.event.results.finishes = api.deriveCurrentStages({
+        teams: state.event.config.teams || [],
+        matches,
+        teamMeta: state.event.config.teamMeta || {},
+      });
+
+      const finalMatch = matches.find((match) => (
+        match.round === "F"
+        && match.status === "completed"
+        && match.winner_id
+        && match.loser_id
+      ));
+      if (finalMatch) {
+        state.event.results.finalScore = {
+          champion: finalMatch.winner_id,
+          runnerUp: finalMatch.loser_id,
+          championScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_a : finalMatch.score_b,
+          runnerUpScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_b : finalMatch.score_a,
+        };
+      }
+    };
+  }, { once: true });
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
   const ROUND_PROGRESS = Object.freeze({
@@ -51,33 +86,5 @@
     ]).filter(([, stage]) => stage));
   }
 
-  root.YosoKoshienCurrentStage = Object.freeze({ currentStageForTeam, deriveCurrentStages, loserStage });
-
-  root.addEventListener("load", () => {
-    if (typeof applyKoshienMatchFinishes !== "function") return;
-    applyKoshienMatchFinishes = function applyKoshienCurrentStageFinishes() {
-      normalizeKoshienEvent(state.event);
-      const matches = state.event.results.matches || [];
-      state.event.results.finishes = deriveCurrentStages({
-        teams: state.event.config.teams || [],
-        matches,
-        teamMeta: state.event.config.teamMeta || {},
-      });
-
-      const finalMatch = matches.find((match) => (
-        match.round === "F"
-        && match.status === "completed"
-        && match.winner_id
-        && match.loser_id
-      ));
-      if (finalMatch) {
-        state.event.results.finalScore = {
-          champion: finalMatch.winner_id,
-          runnerUp: finalMatch.loser_id,
-          championScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_a : finalMatch.score_b,
-          runnerUpScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_b : finalMatch.score_a,
-        };
-      }
-    };
-  }, { once: true });
-})(typeof globalThis !== "undefined" ? globalThis : window);
+  return Object.freeze({ currentStageForTeam, deriveCurrentStages, loserStage });
+});
