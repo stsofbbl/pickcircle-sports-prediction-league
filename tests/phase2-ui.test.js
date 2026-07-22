@@ -47,13 +47,40 @@ test("phase 2 controls expose pending, ownership, refresh and accessible status"
   assert.match(app, /開始時刻前のため指名できません/);
 });
 
-test("formal DB draft never scores stale display-name keyed local picks", () => {
-  assert.match(app, /function koshienFormalPhase2ScoringPending/);
-  assert.match(app, /if \(koshienFormalPhase2ScoringPending\(\)\) return 0/);
-  assert.match(app, /koshienPhase2DraftView\.formalDraftExists === true/);
+test("formal DB draft scores its ID-owned picks and never scores stale local picks", () => {
+  assert.match(app, /calculateFormalPhase2Scores/);
+  assert.match(app, /finishesByTeamId/);
+  assert.match(app, /phase2Projection\.byPlayerId/);
+  assert.match(app, /resolveFormalPhase2Participants/);
   assert.match(app, /koshienPhase2DraftView\.eventId !== currentEventId/);
-  assert.match(app, /if \(!isSupabaseAuthEnabled\(\)\) return false/);
   assert.match(app, /旧ローカル指名は正式得点に加算しません/);
+  assert.doesNotMatch(app, /displayName === name/);
+  assert.doesNotMatch(app, /results\.finishes\[team\.name\]/);
+  assert.doesNotMatch(app.slice(app.indexOf("function koshienScoreRows"), app.indexOf("function koshienPhase3Score")), /phase2DraftPicks/);
+  assert.match(app, /if \(koshienScorable\) return window\.YosoKoshienResults\.rankScoreRows\(koshienRows\)/);
+  assert.doesNotMatch(app, /koshienRows\.find\(\(item\) => item\.name === name\)/);
+});
+
+test("duplicate Koshien display names keep the current prediction addressable by profile ID", () => {
+  assert.match(app, /function currentKoshienParticipantName\(\)/);
+  assert.match(app, /prediction\?\.profileId[\s\S]*=== profileId/);
+  assert.match(app, /const currentParticipantKey = predictionEntries\.find\(\(entry\) => entry\.row\.user_id === snapshot\.currentUser\?\.id\)\?\.participantKey/);
+});
+
+test("formal phase 2 is refreshed after the atomic official result transaction", () => {
+  const start = app.indexOf("async function saveKoshienMatchResult");
+  const end = app.indexOf("\nfunction ", start + 20);
+  const handler = app.slice(start, end);
+  const firstSave = handler.indexOf("await saveKoshienOnlineNow");
+  const refresh = handler.indexOf("await refreshKoshienPhase2DraftState({ renderAfter: false })");
+  assert.ok(firstSave >= 0);
+  assert.ok(refresh > firstSave);
+  assert.equal(handler.indexOf("await saveKoshienOnlineNow", firstSave + 1), -1);
+});
+
+test("scoreboard displays competition rank supplied by the score rows", () => {
+  assert.match(app, /rankLabel\(row\.rank \?\? index \+ 1\)/);
+  assert.match(app, /if \(koshienScorable\) return window\.YosoKoshienResults\.rankScoreRows\(koshienRows\)/);
 });
 
 test("failed conflict reload does not claim that formal state was restored", () => {

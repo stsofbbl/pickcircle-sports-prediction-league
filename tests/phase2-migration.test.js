@@ -17,6 +17,13 @@ const HARDENING_MIGRATION_PATH = path.join(
   "migrations",
   "20260721104248_harden_koshien_phase2_rpc_permissions.sql",
 );
+const SCORING_MIGRATION_PATH = path.join(
+  __dirname,
+  "..",
+  "supabase",
+  "migrations",
+  "20260722130000_connect_koshien_phase2_scoring.sql",
+);
 
 test("phase 2 migration is additive, guarded, and explicitly exposed only to authenticated users", () => {
   const sql = fs.readFileSync(FOUNDATION_MIGRATION_PATH, "utf8");
@@ -126,4 +133,36 @@ test("ready state freezes the draw snapshot and only allows forward transitions"
   assert.match(sql, /old\.status = 'completed' and new\.status = 'locked'/i);
   assert.match(sql, /completed phase 2 draft requires exactly sixteen picks/i);
   assert.match(sql, /new\.version := old\.version \+ 1/i);
+});
+
+test("phase 2 read state exposes profile and official finish IDs for scoring", () => {
+  const sql = fs.readFileSync(SCORING_MIGRATION_PATH, "utf8");
+  assert.match(sql, /create or replace function public\.get_koshien_phase2_draft_state/i);
+  assert.match(sql, /'profile_id', p\.profile_id/i);
+  assert.match(sql, /'finish_key'/i);
+  assert.match(sql, /m\.winner_team_id = t\.id[\s\S]*'champion'/i);
+  assert.match(sql, /m\.loser_team_id = t\.id/i);
+  assert.match(sql, /when 'R3' then 'best16'/i);
+  assert.match(sql, /when 'QF' then 'best8'/i);
+  assert.match(sql, /when 'SF' then 'best4'/i);
+  assert.match(sql, /when 'F' then 'runner_up'/i);
+});
+
+test("phase 2 score is recomputed after match rows inside the result transaction", () => {
+  const scoringSql = fs.readFileSync(SCORING_MIGRATION_PATH, "utf8");
+  const resultSql = fs.readFileSync(path.join(
+    __dirname,
+    "..",
+    "supabase",
+    "migrations",
+    "20260720050030_align_koshien_match_results.sql",
+  ), "utf8");
+  assert.match(scoringSql, /create or replace function public\.recompute_koshien_phase2_score/i);
+  assert.match(scoringSql, /before insert or update on public\.scores/i);
+  assert.match(scoringSql, /final_match\.winner_team_id = dp\.team_id[\s\S]*then 100/i);
+  assert.match(scoringSql, /when 'QF' then 20/i);
+  assert.match(scoringSql, /when 'SF' then 40/i);
+  assert.match(scoringSql, /when 'F' then 60/i);
+  assert.match(scoringSql, /new\.phase2_score := v_formal_score/i);
+  assert.ok(resultSql.indexOf("insert into public.matches") < resultSql.indexOf("insert into public.scores"));
 });

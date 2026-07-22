@@ -11,6 +11,13 @@
   const ROUND_COUNT = 4;
   const PICK_COUNT = PLAYER_COUNT * ROUND_COUNT;
   const ELIGIBLE_FINISHES = new Set(["best16", "best8", "best4", "runner_up", "champion"]);
+  const OFFICIAL_PHASE2_POINTS = Object.freeze({
+    best16: 0,
+    best8: 20,
+    best4: 40,
+    runner_up: 60,
+    champion: 100,
+  });
 
   function unique(values) {
     return new Set(values).size === values.length;
@@ -144,6 +151,50 @@
 
   function pickedTeamIds(picks = []) {
     return new Set((Array.isArray(picks) ? picks : []).map((pick) => normalizedId(pick?.team_id)).filter(Boolean));
+  }
+
+  function normalizePhase2Finish(finish) {
+    const aliases = {
+      runnerUp: "runner_up",
+      semifinal: "best4",
+      quarterfinal: "best8",
+    };
+    return aliases[finish] || normalizedId(finish);
+  }
+
+  function calculateFormalPhase2Scores({ players = [], picks = [], finishesByTeamId = {} } = {}) {
+    const playerIds = players.map((player) => normalizedId(player?.playerId || player?.player_id || player?.id));
+    if (!playerIds.length || playerIds.some((playerId) => !playerId) || !unique(playerIds)) {
+      throw new Error("formal phase 2 players must contain unique player IDs");
+    }
+    const playerIdSet = new Set(playerIds);
+    const seenTeamIds = new Set();
+    const rowsByPlayerId = new Map(playerIds.map((playerId) => [playerId, {
+      playerId,
+      score: 0,
+      teams: [],
+    }]));
+
+    (Array.isArray(picks) ? picks : []).forEach((pick) => {
+      const playerId = normalizedId(pick?.playerId || pick?.player_id);
+      const teamId = normalizedId(pick?.teamId || pick?.team_id);
+      if (!playerIdSet.has(playerId)) throw new Error(`formal phase 2 pick owner is unknown: ${playerId || "missing"}`);
+      if (!teamId) throw new Error("formal phase 2 pick team ID is missing");
+      if (seenTeamIds.has(teamId)) throw new Error(`formal phase 2 team is duplicated: ${teamId}`);
+      seenTeamIds.add(teamId);
+
+      const finish = normalizePhase2Finish(finishesByTeamId[teamId]);
+      const score = Number(OFFICIAL_PHASE2_POINTS[finish]) || 0;
+      const row = rowsByPlayerId.get(playerId);
+      row.score += score;
+      row.teams.push({ teamId, finish, score });
+    });
+
+    const rows = playerIds.map((playerId) => rowsByPlayerId.get(playerId));
+    return {
+      byPlayerId: Object.fromEntries(rows.map((row) => [row.playerId, row.score])),
+      rows,
+    };
   }
 
   function rankingFromDraft(draft) {
@@ -295,8 +346,16 @@
       version: Number(draft.version) || 0,
       orderedPlayerIds,
       snakeOrder: createSnakeOrder(rankedPlayers),
-      players: playerRows.map((player) => ({ playerId: normalizedId(player.player_id), displayName: player.display_name || "参加者" })),
-      eligibleTeams: eligibleTeamIds.map((teamId) => ({ teamId, name: teamsById.get(teamId).name || "高校" })),
+      players: playerRows.map((player) => ({
+        playerId: normalizedId(player.player_id),
+        profileId: normalizedId(player.profile_id),
+        displayName: player.display_name || "参加者",
+      })),
+      eligibleTeams: eligibleTeamIds.map((teamId) => ({
+        teamId,
+        name: teamsById.get(teamId).name || "高校",
+        finish: normalizePhase2Finish(teamsById.get(teamId).finish_key),
+      })),
       picks: picks.map((pick) => ({
         id: normalizedId(pick.id),
         teamId: normalizedId(pick.team_id),
@@ -319,12 +378,43 @@
     };
   }
 
+  function resolveFormalPhase2Participants({ players = [], predictions = {} } = {}) {
+    const predictionEntries = Array.isArray(predictions)
+      ? predictions.map((prediction, index) => [String(index), prediction])
+      : Object.entries(predictions || {});
+    const predictionsByProfileId = new Map();
+    predictionEntries.forEach(([predictionKey, prediction]) => {
+      const profileId = normalizedId(prediction?.profileId || prediction?.profile_id);
+      if (!profileId) return;
+      if (predictionsByProfileId.has(profileId)) {
+        throw new Error(`duplicate prediction profile ID: ${profileId}`);
+      }
+      predictionsByProfileId.set(profileId, { predictionKey, prediction });
+    });
+
+    return players.map((player) => {
+      const playerId = normalizedId(player?.playerId || player?.player_id);
+      const profileId = normalizedId(player?.profileId || player?.profile_id);
+      if (!playerId || !profileId) throw new Error("formal phase 2 player IDs are required");
+      const resolved = predictionsByProfileId.get(profileId);
+      return {
+        playerId,
+        profileId,
+        displayName: player.displayName || player.display_name || "参加者",
+        predictionKey: resolved?.predictionKey || "",
+        prediction: resolved?.prediction || null,
+      };
+    });
+  }
+
   return {
     ELIGIBLE_FINISHES,
+    OFFICIAL_PHASE2_POINTS,
     PICK_COUNT,
     PLAYER_COUNT,
     ROUND_COUNT,
     buildDraftViewState,
+    calculateFormalPhase2Scores,
     createSnakeOrder,
     deriveCurrentTurn,
     extractBest16Candidates,
@@ -333,6 +423,7 @@
     pickAssignment,
     pickedTeamIds,
     resolvePhase1Ranking,
+    resolveFormalPhase2Participants,
     validatePhase1Standings,
     validatePickPayload,
     validateSnakeOrder,

@@ -39,8 +39,8 @@ function dbState(overrides = {}) {
   return {
     draft: draftRow,
     viewer_player_id: "player-2",
-    players: ranked.map((playerId, index) => ({ player_id: playerId, display_name: `Player ${index + 1}` })),
-    teams: draftRow.eligible_team_ids.map((teamId, index) => ({ team_id: teamId, name: `School ${index + 1}` })),
+    players: ranked.map((playerId, index) => ({ player_id: playerId, profile_id: `profile-${index + 1}`, display_name: `Player ${index + 1}` })),
+    teams: draftRow.eligible_team_ids.map((teamId, index) => ({ team_id: teamId, name: `School ${index + 1}`, finish_key: index === 0 ? "champion" : "best16" })),
     picks: completedPicks(2),
     ...overrides,
   };
@@ -210,7 +210,25 @@ test("DB response restores current turn, picked schools, owners, and changed dis
   assert.equal(view.currentTurn.displayName, "Renamed");
   assert.equal(view.pickedTeamIds.length, 2);
   assert.equal(view.ownerByTeamId["team-2"].playerId, "player-3");
+  assert.equal(view.players[1].profileId, "profile-2");
+  assert.equal(view.eligibleTeams[0].finish, "champion");
   assert.equal(view.canViewerPick, true);
+});
+
+test("formal participants resolve duplicate display names by profile ID", () => {
+  const view = draft.buildDraftViewState(dbState());
+  const players = view.players.map((player) => ({ ...player, displayName: "同名" }));
+  const predictions = Object.fromEntries(players.map((player, index) => [
+    `internal-${index + 1}`,
+    { profileId: player.profileId, teams: [`pick-${index + 1}`] },
+  ]));
+
+  const resolved = draft.resolveFormalPhase2Participants({ players, predictions });
+
+  assert.equal(resolved.length, 4);
+  assert.deepEqual(resolved.map((row) => row.displayName), ["同名", "同名", "同名", "同名"]);
+  assert.deepEqual(resolved.map((row) => row.predictionKey), ["internal-1", "internal-2", "internal-3", "internal-4"]);
+  assert.deepEqual(resolved.map((row) => row.prediction.teams[0]), ["pick-1", "pick-2", "pick-3", "pick-4"]);
 });
 
 test("DB response tolerates duplicate display names but rejects duplicate IDs and sparse picks", () => {
@@ -265,4 +283,45 @@ test("persisted not_ready row with empty setup stays a normal unavailable state"
     status: "not_ready",
     message: "phase 2 draft setup is not complete",
   });
+});
+
+test("formal phase 2 picks score by player and team IDs with the official fixed points", () => {
+  const result = draft.calculateFormalPhase2Scores({
+    players: ranked.map((playerId) => ({ playerId, displayName: "Same name" })),
+    picks: [
+      { playerId: "player-1", teamId: "team-1" },
+      { playerId: "player-1", teamId: "team-2" },
+      { playerId: "player-1", teamId: "team-3" },
+      { playerId: "player-1", teamId: "team-4" },
+      { playerId: "player-2", teamId: "team-5" },
+    ],
+    finishesByTeamId: {
+      "team-1": "champion",
+      "team-2": "runner_up",
+      "team-3": "best4",
+      "team-4": "best8",
+      "team-5": "best16",
+    },
+  });
+
+  assert.deepEqual(result.byPlayerId, {
+    "player-1": 220,
+    "player-2": 0,
+    "player-3": 0,
+    "player-4": 0,
+  });
+  assert.deepEqual(result.rows.find((row) => row.playerId === "player-1").teams, [
+    { teamId: "team-1", finish: "champion", score: 100 },
+    { teamId: "team-2", finish: "runner_up", score: 60 },
+    { teamId: "team-3", finish: "best4", score: 40 },
+    { teamId: "team-4", finish: "best8", score: 20 },
+  ]);
+});
+
+test("formal phase 2 scoring rejects ownership rows outside the fixed player IDs", () => {
+  assert.throws(() => draft.calculateFormalPhase2Scores({
+    players: ranked.map((playerId) => ({ playerId })),
+    picks: [{ playerId: "outside-player", teamId: "team-1" }],
+    finishesByTeamId: { "team-1": "champion" },
+  }), /pick owner/i);
 });

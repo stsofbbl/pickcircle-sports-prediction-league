@@ -144,7 +144,7 @@
     if (!Array.isArray(scoreRows) || !scoreRows.length) return [];
     const { data: players, error: playersError } = await supabase
       .from("players")
-      .select("id, display_name")
+      .select("id, profile_id, display_name")
       .eq("league_id", leagueId);
     if (playersError) throw playersError;
     return window.YosoKoshienResults.buildScoreRows({ eventId, players: players || [], scoreRows });
