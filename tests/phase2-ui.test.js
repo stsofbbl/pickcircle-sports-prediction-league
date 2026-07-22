@@ -61,10 +61,15 @@ test("formal DB draft scores its ID-owned picks and never scores stale local pic
   assert.doesNotMatch(app, /koshienRows\.find\(\(item\) => item\.name === name\)/);
 });
 
-test("duplicate Koshien display names keep the current prediction addressable by profile ID", () => {
+test("league members stay visible while duplicate names and the current prediction remain addressable by profile ID", () => {
   assert.match(app, /function currentKoshienParticipantName\(\)/);
   assert.match(app, /prediction\?\.profileId[\s\S]*=== profileId/);
-  assert.match(app, /const currentParticipantKey = predictionEntries\.find\(\(entry\) => entry\.row\.user_id === snapshot\.currentUser\?\.id\)\?\.participantKey/);
+  assert.match(app, /const memberRows = \(snapshot\.members \|\| \[\]\)/);
+  assert.match(app, /const participantKeyByUserId = new Map/);
+  assert.match(app, /const currentParticipantKey = participantKeyByUserId\.get\(snapshot\.currentUser\?\.id\)/);
+  assert.match(app, /predictionEntries\.find\(\(entry\) => entry\.row\.user_id === snapshot\.currentUser\?\.id\)\?\.participantKey/);
+  assert.match(app, /participantEntries\.forEach\(\(\{ userId, displayName, participantKey \}\) => \{/);
+  assert.match(app, /onlineEvent\.predictions\[participantKey\]\.profileId = userId/);
 });
 
 test("formal phase 2 is refreshed after the atomic official result transaction", () => {
