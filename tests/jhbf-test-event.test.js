@@ -7,6 +7,10 @@ const migration = fs.readFileSync(
   path.join(__dirname, "../supabase/migrations/20260723060000_add_jhbf_minimal_import_test_event.sql"),
   "utf8",
 );
+const protectionMigration = fs.readFileSync(
+  path.join(__dirname, "../supabase/migrations/20260723061000_protect_jhbf_test_event_marker.sql"),
+  "utf8",
+);
 const uiSource = fs.readFileSync(path.join(__dirname, "../js/jhbf-test-event.js"), "utf8");
 const configSource = fs.readFileSync(path.join(__dirname, "../js/supabase-public-config.js"), "utf8");
 const moduleApi = require("../js/jhbf-test-event.js");
@@ -66,6 +70,15 @@ test("reset and delete are restricted to the deterministic marked test event", (
   assert.match(migration, /delete from public\.events/);
 });
 
+test("normal event saves preserve the fixed test marker and identity", () => {
+  assert.match(protectionMigration, /create or replace function public\.protect_jhbf_import_test_event_marker/);
+  assert.match(protectionMigration, /before update on public\.events/);
+  assert.match(protectionMigration, /new\.name := old\.name/);
+  assert.match(protectionMigration, /new\.league_id := old\.league_id/);
+  assert.match(protectionMigration, /jsonb_set\(coalesce\(new\.rules/);
+  assert.match(protectionMigration, /revoke all on function public\.protect_jhbf_import_test_event_marker\(\) from public, anon, authenticated/);
+});
+
 test("admin UI exposes only harness controls and reuses the existing importer", () => {
   assert.match(configSource, /js\/jhbf-test-event\.js/);
   assert.match(uiSource, /テスト大会を作成/);
@@ -77,6 +90,7 @@ test("admin UI exposes only harness controls and reuses the existing importer", 
   assert.match(uiSource, /delete_jhbf_import_test_event/);
   assert.match(uiSource, /loadKoshienOnlineState\(\{ force: true \}\)/);
   assert.match(uiSource, /data-jhbf-fetch/);
+  assert.match(uiSource, /\[data-manage-event-name\], \[data-manage-event-deadline\], \[data-event-status\]/);
   assert.doesNotMatch(uiSource, /functions\.invoke/);
   assert.doesNotMatch(uiSource, /fetch\s*\(/);
 });
