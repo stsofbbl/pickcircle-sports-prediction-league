@@ -1,5 +1,8 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const vm = require("node:vm");
 
 const currentStage = require("../js/koshien-current-stage.js");
 
@@ -53,4 +56,31 @@ test("deriveCurrentStages keeps current winners and final losers together", () =
     C: "best4",
     D: "initial_loss",
   });
+});
+
+test("browser bootstrap replaces applyKoshienMatchFinishes after load", () => {
+  let onLoad;
+  const context = {
+    globalThis: null,
+    addEventListener(type, handler) {
+      if (type === "load") onLoad = handler;
+    },
+    applyKoshienMatchFinishes() {},
+    normalizeKoshienEvent() {},
+    state: {
+      event: {
+        config: { teams: ["A", "B"], teamMeta: {} },
+        results: { matches: [completed("R1", "A", "B")] },
+      },
+    },
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+  const script = fs.readFileSync(path.join(__dirname, "..", "js", "koshien-current-stage.js"), "utf8");
+  vm.runInContext(script, context);
+  assert.equal(typeof onLoad, "function");
+  onLoad();
+  context.applyKoshienMatchFinishes();
+  assert.equal(context.state.event.results.finishes.A, "first_win_then_loss");
+  assert.equal(context.state.event.results.finishes.B, "initial_loss");
 });
