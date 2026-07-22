@@ -8,6 +8,7 @@ const DATA_SERVICE_PATH = path.join(__dirname, "..", "js", "data-service.js");
 
 function createSupabaseMock({ rpcError = null, teamError = null, playersError = null } = {}) {
   const calls = [];
+  const queries = [];
   const teamRows = [
     { id: "team-a-id", name: "Team A", odds: 4, sqrt_odds: 2 },
     { id: "team-b-id", name: "Team B", odds: 9, sqrt_odds: 3 },
@@ -19,13 +20,16 @@ function createSupabaseMock({ rpcError = null, teamError = null, playersError = 
       this.operation = "select";
       this.payload = null;
       this.options = null;
+      this.filters = {};
+      this.expectsList = false;
     }
 
     select() {
       return this;
     }
 
-    eq() {
+    eq(column, value) {
+      this.filters[column] = value;
       return this;
     }
 
@@ -34,6 +38,7 @@ function createSupabaseMock({ rpcError = null, teamError = null, playersError = 
     }
 
     limit() {
+      this.expectsList = true;
       return this.resolve();
     }
 
@@ -71,9 +76,37 @@ function createSupabaseMock({ rpcError = null, teamError = null, playersError = 
     }
 
     resolve() {
+      queries.push({ table: this.table, operation: this.operation, filters: { ...this.filters } });
       if (this.table === "leagues") return { data: [{ id: "league-id", invite_code: "league-code" }], error: null };
-      if (this.table === "league_members") return { data: { league_id: "league-id", role: "admin" }, error: null };
+      if (this.table === "league_members" && this.filters.user_id) {
+        return { data: { league_id: "league-id", role: "admin" }, error: null };
+      }
+      if (this.table === "league_members") {
+        return {
+          data: [
+            { user_id: "user-id", role: "admin", profiles: { display_name: "Admin" } },
+            { user_id: "friend-1", role: "member", profiles: { display_name: "イノ" } },
+            { user_id: "friend-2", role: "member", profiles: { display_name: "ギン" } },
+            { user_id: "friend-3", role: "member", profiles: { display_name: "テストくん" } },
+          ],
+          error: null,
+        };
+      }
       if (this.table === "profiles") return { data: { display_name: "Admin" }, error: null };
+      if (this.table === "events" && this.operation === "select" && this.expectsList) {
+        return {
+          data: [{
+            id: "event-id",
+            league_id: "league-id",
+            name: "YOSO 夏の甲子園2026",
+            preset_type: "koshien",
+            status: "open",
+            prediction_deadline: "2099-08-31T15:00:00.000Z",
+            rules: {},
+          }],
+          error: null,
+        };
+      }
       if (this.table === "events" && this.operation === "select") return { data: { id: "event-id" }, error: null };
       if (this.table === "players" && this.operation === "upsert") return { data: { id: "player-id" }, error: null };
       if (this.table === "players") return { data: [{ id: "player-id", display_name: "Admin" }], error: playersError };
@@ -84,6 +117,7 @@ function createSupabaseMock({ rpcError = null, teamError = null, playersError = 
 
   return {
     calls,
+    queries,
     client: {
       from(table) {
         return new Query(table);
@@ -289,4 +323,20 @@ test("prediction-only fallback reports partial when structured tables are missin
   assert.equal(result.partial, true);
   assert.deepEqual(Array.from(result.warnings), ["structured_tables_missing"]);
   assert.equal(result.stages.structured, false);
+});
+
+test("loadSnapshot returns all league members while predictions remain private before the deadline", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.members)), [
+    { user_id: "user-id", role: "admin", profiles: { display_name: "Admin" } },
+    { user_id: "friend-1", role: "member", profiles: { display_name: "イノ" } },
+    { user_id: "friend-2", role: "member", profiles: { display_name: "ギン" } },
+    { user_id: "friend-3", role: "member", profiles: { display_name: "テストくん" } },
+  ]);
+  const predictionQuery = supabase.queries.find((call) => call.table === "predictions" && call.operation === "select");
+  assert.equal(predictionQuery?.filters?.user_id, "user-id");
 });

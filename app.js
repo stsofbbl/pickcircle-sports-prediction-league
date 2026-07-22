@@ -1858,26 +1858,44 @@ function koshienLoadSkipMessage(reason) {
 function applyKoshienOnlineSnapshot(snapshot) {
   const eventRow = snapshot.event;
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
-  const predictionRows = (snapshot.predictions || []).map((row) => ({
-    row,
+  const memberRows = (snapshot.members || []).map((row) => ({
+    userId: row.user_id,
     displayName: row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`),
   })).filter((entry) => entry.displayName);
-  const displayNameCounts = predictionRows.reduce((counts, entry) => {
+  const memberNameByUserId = new Map(memberRows.map((entry) => [entry.userId, entry.displayName]));
+  const predictionRows = (snapshot.predictions || []).map((row) => ({
+    row,
+    displayName: memberNameByUserId.get(row.user_id) || row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`),
+  })).filter((entry) => entry.displayName);
+  const participantRows = memberRows.length ? memberRows : predictionRows.map((entry) => ({
+    userId: entry.row.user_id,
+    displayName: entry.displayName,
+  }));
+  const displayNameCounts = participantRows.reduce((counts, entry) => {
     counts[entry.displayName] = (counts[entry.displayName] || 0) + 1;
     return counts;
   }, {});
-  const predictionEntries = predictionRows.map((entry) => ({
+  const participantEntries = participantRows.map((entry) => ({
     ...entry,
     participantKey: displayNameCounts[entry.displayName] > 1
-      ? `${entry.displayName} (${String(entry.row.user_id || "").slice(0, 8)})`
+      ? `${entry.displayName} (${String(entry.userId || "").slice(0, 8)})`
       : entry.displayName,
   }));
-  const duplicatedDisplayNames = new Set(predictionEntries
-    .filter((entry) => displayNameCounts[entry.displayName] > 1)
-    .map((entry) => entry.displayName));
-  const retainedParticipants = state.participants.filter((name) => !duplicatedDisplayNames.has(name));
-  const currentParticipantKey = predictionEntries.find((entry) => entry.row.user_id === snapshot.currentUser?.id)?.participantKey || currentName;
-  const participants = uniqueStrings([...retainedParticipants, currentParticipantKey, ...predictionEntries.map((entry) => entry.participantKey)]);
+  const participantKeyByUserId = new Map(participantEntries.map((entry) => [entry.userId, entry.participantKey]));
+  const predictionEntries = predictionRows.map((entry) => ({
+    ...entry,
+    participantKey: participantKeyByUserId.get(entry.row.user_id) || (displayNameCounts[entry.displayName] > 1
+      ? `${entry.displayName} (${String(entry.row.user_id || "").slice(0, 8)})`
+      : entry.displayName),
+  }));
+  const currentParticipantKey = participantKeyByUserId.get(snapshot.currentUser?.id)
+    || predictionEntries.find((entry) => entry.row.user_id === snapshot.currentUser?.id)?.participantKey
+    || currentName;
+  const participants = uniqueStrings([
+    ...participantEntries.map((entry) => entry.participantKey),
+    currentParticipantKey,
+    ...predictionEntries.map((entry) => entry.participantKey),
+  ]);
   const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
   const rules = eventRow.rules || {};
   const onlineEvent = normalizeEvent({
@@ -1899,6 +1917,10 @@ function applyKoshienOnlineSnapshot(snapshot) {
     resultFlow: statusToResultFlow(eventRow.status),
   }, { ...state, participants });
 
+  participantEntries.forEach(({ userId, displayName, participantKey }) => {
+    onlineEvent.predictions[participantKey].profileId = userId || "";
+    onlineEvent.predictions[participantKey].displayName = displayName;
+  });
   predictionEntries.forEach(({ row, displayName, participantKey }) => {
     onlineEvent.predictions[participantKey] = row.payload || createPrediction("koshien");
     onlineEvent.predictions[participantKey].profileId = row.user_id || "";
