@@ -148,26 +148,27 @@
   }
 
   function buildScoreRows({ eventId, players = [], scoreRows = [] }) {
+    const playersById = new Map(players.map((player) => [String(player.id || ""), player]));
+    const playersByProfileId = new Map(players.map((player) => [String(player.profile_id || ""), player]));
     const playersByName = new Map();
     players.forEach((player) => {
       const rows = playersByName.get(player.display_name) || [];
       rows.push(player);
       playersByName.set(player.display_name, rows);
     });
-    const ambiguousNames = [...playersByName.entries()]
-      .filter(([, rows]) => rows.length > 1)
-      .map(([name]) => name);
-    if (ambiguousNames.length) {
-      throw new Error(`players.display_name が重複しています: ${ambiguousNames.join(", ")}`);
-    }
-    const missingNames = scoreRows
-      .map((row) => row.name)
-      .filter((name) => !playersByName.get(name)?.[0]?.id);
-    if (missingNames.length) {
-      throw new Error(`scores保存先のplayer_idを確認できません: ${[...new Set(missingNames)].join(", ")}`);
-    }
     return scoreRows.map((row) => {
-      const player = playersByName.get(row.name)[0];
+      const officialPlayerId = String(row.playerId || row.player_id || "");
+      const officialProfileId = String(row.profileId || row.profile_id || "");
+      const namedPlayers = playersByName.get(row.name) || [];
+      if (!officialPlayerId && !officialProfileId && namedPlayers.length > 1) {
+        throw new Error(`players.display_name が重複しています: ${row.name}`);
+      }
+      const player = officialPlayerId
+        ? playersById.get(officialPlayerId)
+        : officialProfileId ? playersByProfileId.get(officialProfileId) : namedPlayers[0];
+      if (!player?.id) {
+        throw new Error(`scores保存先のplayer_idを確認できません: ${officialPlayerId || officialProfileId || row.name}`);
+      }
       const breakdown = row.breakdown || {};
       return {
         event_id: eventId,
@@ -186,5 +187,21 @@
     });
   }
 
-  return { OFFICIAL_PHASE1_POINTS, buildMatchRows, buildScoreRows, calculatePhase1Breakdown, completeMatch, loserFinishForRound, normalizeFinish, validateMatchResult };
+  function rankScoreRows(rows = []) {
+    const sorted = [...rows].sort((left, right) => (
+      (Number(right.score) - Number(left.score))
+      || ((left.tiebreakDelta ?? Infinity) - (right.tiebreakDelta ?? Infinity))
+    ));
+    let previousScore;
+    let previousRank = 0;
+    return sorted.map((row, index) => {
+      const score = Number(row.score) || 0;
+      const rank = index > 0 && score === previousScore ? previousRank : index + 1;
+      previousScore = score;
+      previousRank = rank;
+      return { ...row, rank };
+    });
+  }
+
+  return { OFFICIAL_PHASE1_POINTS, buildMatchRows, buildScoreRows, calculatePhase1Breakdown, completeMatch, loserFinishForRound, normalizeFinish, rankScoreRows, validateMatchResult };
 });

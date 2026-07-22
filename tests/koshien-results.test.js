@@ -171,6 +171,59 @@ test("scores payload maps participant names to player_id and keeps the breakdown
   }]);
 });
 
+test("scores payload preserves an official player ID even when display names are duplicated", () => {
+  const rows = koshien.buildScoreRows({
+    eventId: "event-id",
+    players: [
+      { id: "player-1", display_name: "Same name" },
+      { id: "player-2", display_name: "Same name" },
+    ],
+    scoreRows: [{
+      playerId: "player-2",
+      name: "Same name",
+      score: 100,
+      breakdown: { phase1: 0, phase2: 100, phase3: 0, revenge: 0, zombie: 0 },
+    }],
+  });
+
+  assert.equal(rows[0].player_id, "player-2");
+  assert.equal(rows[0].phase2_score, 100);
+});
+
+test("scores payload resolves duplicate display names by profile ID before a formal draft exists", () => {
+  const rows = koshien.buildScoreRows({
+    eventId: "event-1",
+    players: [
+      { id: "player-1", profile_id: "profile-1", display_name: "同名" },
+      { id: "player-2", profile_id: "profile-2", display_name: "同名" },
+    ],
+    scoreRows: [{
+      name: "同名",
+      profileId: "profile-2",
+      score: 20,
+      breakdown: { phase1: 20, phase2: 0, phase3: 0, revenge: 0, zombie: 0 },
+    }],
+  });
+
+  assert.equal(rows[0].player_id, "player-2");
+});
+
+test("competition ranking gives tied totals the same rank", () => {
+  const rows = koshien.rankScoreRows([
+    { name: "Third", score: 80 },
+    { name: "First A", score: 100 },
+    { name: "First B", score: 100 },
+    { name: "Fourth", score: 40 },
+  ]);
+
+  assert.deepEqual(rows.map((row) => [row.name, row.rank]), [
+    ["First A", 1],
+    ["First B", 1],
+    ["Third", 3],
+    ["Fourth", 4],
+  ]);
+});
+
 test("completing a valid match sets completed status and the opposite team as loser", () => {
   const completed = koshien.completeMatch(validMatch());
   assert.equal(completed.ok, true);

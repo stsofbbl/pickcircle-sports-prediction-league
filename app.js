@@ -1526,7 +1526,7 @@ function saveLocalStateOnly() {
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-async function saveKoshienOnlineNow({ participantName = currentParticipantName(), updateConnection = true } = {}) {
+async function saveKoshienOnlineNow({ participantName = currentKoshienParticipantName(), updateConnection = true } = {}) {
   if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.saveSnapshot) {
     return { skipped: true, reason: "autoSaveKoshien is disabled" };
   }
@@ -1721,10 +1721,26 @@ function koshienLoadSkipMessage(reason) {
 function applyKoshienOnlineSnapshot(snapshot) {
   const eventRow = snapshot.event;
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
-  const predictionNames = (snapshot.predictions || [])
-    .map((row) => row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`))
-    .filter(Boolean);
-  const participants = uniqueStrings([...state.participants, currentName, ...predictionNames]);
+  const predictionRows = (snapshot.predictions || []).map((row) => ({
+    row,
+    displayName: row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`),
+  })).filter((entry) => entry.displayName);
+  const displayNameCounts = predictionRows.reduce((counts, entry) => {
+    counts[entry.displayName] = (counts[entry.displayName] || 0) + 1;
+    return counts;
+  }, {});
+  const predictionEntries = predictionRows.map((entry) => ({
+    ...entry,
+    participantKey: displayNameCounts[entry.displayName] > 1
+      ? `${entry.displayName} (${String(entry.row.user_id || "").slice(0, 8)})`
+      : entry.displayName,
+  }));
+  const duplicatedDisplayNames = new Set(predictionEntries
+    .filter((entry) => displayNameCounts[entry.displayName] > 1)
+    .map((entry) => entry.displayName));
+  const retainedParticipants = state.participants.filter((name) => !duplicatedDisplayNames.has(name));
+  const currentParticipantKey = predictionEntries.find((entry) => entry.row.user_id === snapshot.currentUser?.id)?.participantKey || currentName;
+  const participants = uniqueStrings([...retainedParticipants, currentParticipantKey, ...predictionEntries.map((entry) => entry.participantKey)]);
   const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
   const rules = eventRow.rules || {};
   const onlineEvent = normalizeEvent({
@@ -1746,11 +1762,11 @@ function applyKoshienOnlineSnapshot(snapshot) {
     resultFlow: statusToResultFlow(eventRow.status),
   }, { ...state, participants });
 
-  (snapshot.predictions || []).forEach((row) => {
-    const name = row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`);
-    if (!name) return;
-    onlineEvent.predictions[name] = row.payload || createPrediction("koshien");
-    normalizeKoshienPrediction(onlineEvent, name);
+  predictionEntries.forEach(({ row, displayName, participantKey }) => {
+    onlineEvent.predictions[participantKey] = row.payload || createPrediction("koshien");
+    onlineEvent.predictions[participantKey].profileId = row.user_id || "";
+    onlineEvent.predictions[participantKey].displayName = displayName;
+    normalizeKoshienPrediction(onlineEvent, participantKey);
   });
 
   state.participants = participants;
@@ -1902,6 +1918,7 @@ function createPrediction(templateId) {
   if (base === "rankingOdds") return { picks: ["", "", "", ""], odds: [1, 1, 1, 1] };
   if (base === "draft") return { teams: ["", ""], bonusScore: "" };
   if (base === "koshien") return {
+    profileId: "",
     teams: Array(8).fill(""),
     captain: "",
     revengePick: "",
@@ -1973,6 +1990,7 @@ function normalizeKoshienPrediction(event, name) {
   event.predictions ||= {};
   event.predictions[name] ||= createPrediction(event.templateId);
   const prediction = event.predictions[name];
+  prediction.profileId = prediction.profileId || "";
   const pickCount = Number(event.config?.pickCount) || templates.koshien.pickCount;
   prediction.teams = normalizeFixedArray(prediction.teams, pickCount);
   prediction.captain = prediction.captain || "";
@@ -2666,6 +2684,16 @@ function currentParticipantName() {
   return state.participants[0] || "あなた";
 }
 
+function currentKoshienParticipantName() {
+  const profileId = String(currentAuthUser()?.id || "");
+  if (profileId && baseTemplateId(state.event?.templateId) === "koshien") {
+    const entry = Object.entries(state.event?.predictions || {})
+      .find(([, prediction]) => String(prediction?.profileId || "") === profileId);
+    if (entry) return entry[0];
+  }
+  return currentParticipantName();
+}
+
 function isCurrentUserAdmin() {
   const user = currentAuthUser();
   if (user?.role === "admin") return true;
@@ -3141,7 +3169,7 @@ function participantDraftBlock(name, teams) {
 function renderKoshienForm() {
   normalizeKoshienEvent(state.event);
   const teams = getTeams();
-  const participant = currentParticipantName();
+  const participant = currentKoshienParticipantName();
   const activePhase = state.event.config.activePhase || "phase1";
   const showPublic = state.event.status !== "open" || isResultFinalized(state.event);
   els.eventForm.innerHTML = `
@@ -3305,7 +3333,8 @@ async function saveKoshienMatchResult(matchId) {
   setKoshienMatchMessage("Supabaseへ保存しています...", "success");
   renderActiveEventManager();
   try {
-    const result = await saveKoshienOnlineNow({ participantName: currentParticipantName(), updateConnection: false });
+    const result = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
+    await refreshKoshienPhase2DraftState({ renderAfter: false });
     setKoshienMatchMessage(koshienSaveOutcomeMessage(result, "Supabaseへ結果を保存しました。"), result?.skipped || result?.partial ? "error" : "success");
   } catch (error) {
     setKoshienMatchMessage(koshienStructuredSaveErrorMessage(error), "error");
@@ -3533,7 +3562,7 @@ function participantKoshienDraftBlock() {
           <button class="ghost-button" type="button" data-koshien-phase2-refresh ${koshienPhase2DraftSaving || koshienPhase2DraftLoading ? "disabled" : ""}>最新状態を取得</button>
         </div>
       </div>
-      <p class="helper-text">正式なフェーズ2得点の参加者IDへの反映は未実装です。旧ローカル指名は正式得点に加算しません。</p>
+      <p class="helper-text">正式ドラフトの参加者ID・高校IDから得点を計算します。旧ローカル指名は正式得点に加算しません。</p>
       ${!view.canViewerPick && !view.completed ? `<p class="helper-text">現在の参加者本人だけが操作できます。他の手番は閲覧のみです。</p>` : ""}
       ${startsBefore && !view.completed ? `<p class="helper-text">開始時刻前のため指名できません。</p>` : ""}
       ${deadlinePassed && !view.completed ? `<p class="helper-text">締切を過ぎているため指名できません。</p>` : ""}
@@ -4433,7 +4462,7 @@ function bindGenericInputs() {
         setKoshienPhase1Message(name, validation.message);
         return;
       }
-      const shouldSaveOnline = name === currentParticipantName() && window.YosoDataService?.shouldAutoSaveKoshien?.();
+      const shouldSaveOnline = name === currentKoshienParticipantName() && window.YosoDataService?.shouldAutoSaveKoshien?.();
       if (shouldSaveOnline && !currentAuthUser()) {
         setKoshienPhase1Message(name, "オンライン保存にはログインが必要です。ログインまたは新規登録してください。");
         return;
@@ -5064,7 +5093,7 @@ function renderScores() {
   const rows = calculateScores();
   els.scoreboard.innerHTML = rows.map((row, index) => `
     <div class="score-row ${scoreRowClass(index)}">
-      <div class="rank ${rankClass(index)}">${rankLabel(index)}</div>
+      <div class="rank ${rankClass(row.rank ?? index + 1)}">${rankLabel(row.rank ?? index + 1)}</div>
       <div class="score-meta">
         <strong>${escapeHtml(row.name)}</strong>
         <span>${escapeHtml(row.detail)}</span>
@@ -5102,12 +5131,12 @@ function scoreBreakdownMarkup(row) {
   `;
 }
 
-function rankLabel(index) {
-  return ["1", "2", "3"][index] || String(index + 1);
+function rankLabel(rank) {
+  return String(rank || "-");
 }
 
-function rankClass(index) {
-  return ["rank-gold", "rank-silver", "rank-bronze"][index] || "";
+function rankClass(rank) {
+  return ({ 1: "rank-gold", 2: "rank-silver", 3: "rank-bronze" })[rank] || "";
 }
 
 function scoreRowClass(index) {
@@ -5133,7 +5162,8 @@ function calculateScores() {
   const templateId = baseTemplateId(state.event.templateId);
   const koshienScorable = templateId === "koshien" && koshienHasScorableResults(state.event);
   const koshienRows = koshienScorable ? koshienScoreRows() : [];
-  return state.participants.map((name) => {
+  if (koshienScorable) return window.YosoKoshienResults.rankScoreRows(koshienRows);
+  const rows = state.participants.map((name) => {
     ensurePrediction(name);
     if (baseTemplateId(state.event.templateId) !== "worldCup" && !isResultFinalized(state.event) && !koshienScorable) {
       return { name, score: 0, detail: state.event?.resultFlow?.status === "submitted" ? "結果承認待ち" : "結果未確定" };
@@ -5159,14 +5189,6 @@ function calculateScores() {
       score = prediction.teams.reduce((total, team) => total + (template.finishPoints[state.event.results.finishes[team]] || 0), 0);
       if (state.event.results.scoreBonusWinner === name) score += 30;
       detail = "ドラフト到達点 + スコアボーナス";
-    }
-    if (templateId === "koshien") {
-      const prediction = state.event.predictions[name];
-      normalizeKoshienPrediction(state.event, name);
-      const row = koshienRows.find((item) => item.name === name);
-      score = row?.score || 0;
-      detail = row?.detail || "8校ピック + キャプテン1.2倍";
-      return { name, score, detail, tiebreakDelta: row?.tiebreakDelta, breakdown: row?.breakdown };
     }
     if (templateId === "fightCard") {
       const prediction = state.event.predictions[name];
@@ -5206,7 +5228,8 @@ function calculateScores() {
       detail = "GL + 単勝 + 複勝 + 個人賞 + 決勝";
     }
     return { name, score, detail };
-  }).sort((a, b) => (b.score - a.score) || ((a.tiebreakDelta ?? Infinity) - (b.tiebreakDelta ?? Infinity)));
+  });
+  return rows.sort((a, b) => (b.score - a.score) || ((a.tiebreakDelta ?? Infinity) - (b.tiebreakDelta ?? Infinity)));
 }
 
 function koshienHasScorableResults(event = state.event) {
@@ -5217,24 +5240,57 @@ function koshienHasScorableResults(event = state.event) {
 }
 
 function koshienScoreRows() {
-  return state.participants.map((name) => {
-    ensurePrediction(name);
-    const prediction = state.event.predictions[name];
+  const phase2Projection = koshienFormalPhase2Projection();
+  const participants = phase2Projection
+    ? window.YosoKoshienPhase2Draft.resolveFormalPhase2Participants({
+      players: koshienPhase2DraftView.players,
+      predictions: state.event.predictions,
+    })
+    : state.participants.map((name) => ({
+      playerId: "",
+      profileId: state.event.predictions[name]?.profileId || "",
+      displayName: state.event.predictions[name]?.displayName || name,
+      prediction: state.event.predictions[name] || createPrediction("koshien"),
+    }));
+  return participants.map((participant) => {
+    const name = participant.displayName;
+    const prediction = participant.prediction || createPrediction("koshien");
     const phase1Breakdown = koshienPhase1Breakdown(prediction);
     const phase1 = phase1Breakdown.total;
     const revenge = koshienRevengeScore(prediction);
-    const phase2Base = koshienPhase2BaseScore(prediction);
-    const phase2Adjusted = koshienPhase2Score(name, prediction);
+    const phase2Base = phase2Projection
+      ? Number(phase2Projection.byPlayerId[participant.playerId]) || 0
+      : 0;
+    const phase2Adjusted = phase2Base;
     const zombie = phase2Adjusted - phase2Base;
     const phase3 = koshienPhase3Score(name, prediction);
     const score = phase1 + revenge + phase2Base + zombie + phase3;
     return {
       name,
+      playerId: participant.playerId || "",
+      profileId: participant.profileId || "",
       score,
       tiebreakDelta: Infinity,
       breakdown: { phase1, revenge, phase2: phase2Base, zombie, phase3, schoolLines: phase1Breakdown.lines },
       detail: `フェーズ1 ${formatScore(phase1)} / リベンジ ${formatScore(revenge)} / フェーズ2 ${formatScore(phase2Base)} / ゾンビ ${formatScore(zombie)} / フェーズ3 ${formatScore(phase3)}`,
     };
+  });
+}
+
+function koshienFormalPhase2Projection() {
+  const currentEventId = String(state.event?.id || "");
+  if (!koshienPhase2DraftView.available
+    || !koshienPhase2DraftView.loadedFromDb
+    || koshienPhase2DraftView.eventId !== currentEventId
+    || koshienPhase2DraftView.formalDraftExists !== true) return null;
+  const finishesByTeamId = Object.fromEntries(koshienPhase2DraftView.eligibleTeams.map((team) => [
+    team.teamId,
+    team.finish,
+  ]));
+  return window.YosoKoshienPhase2Draft.calculateFormalPhase2Scores({
+    players: koshienPhase2DraftView.players,
+    picks: koshienPhase2DraftView.picks,
+    finishesByTeamId,
   });
 }
 
@@ -5269,28 +5325,6 @@ function koshienRevengeScore(prediction) {
   return koshienTeamScore(finish) * koshienSqrtOdds(team);
 }
 
-function koshienPhase2Score(name, prediction) {
-  if (koshienFormalPhase2ScoringPending()) return 0;
-  const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
-  return uniquePicks.reduce((total, team) => total + koshienPhase2TeamScore(name, team), 0);
-}
-
-function koshienPhase2BaseScore(prediction) {
-  if (koshienFormalPhase2ScoringPending()) return 0;
-  const uniquePicks = [...new Set(normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean))];
-  return uniquePicks.reduce((total, team) => {
-    const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
-    return total + Number(state.event.config.phase2Points?.[finish] ?? templates.koshien.phase2Points?.[finish] ?? 0);
-  }, 0);
-}
-
-function koshienFormalPhase2ScoringPending() {
-  if (!isSupabaseAuthEnabled()) return false;
-  const currentEventId = String(state.event?.id || "");
-  if (!koshienPhase2DraftView.loadedFromDb || koshienPhase2DraftView.eventId !== currentEventId) return true;
-  return koshienPhase2DraftView.formalDraftExists === true;
-}
-
 function koshienPhase3Score(name, prediction) {
   const pick = prediction.finalScorePrediction || {};
   const actual = state.event.results.finalScore || {};
@@ -5316,16 +5350,6 @@ function koshienSqrtOdds(team) {
 function koshienTeamScore(finish) {
   const normalized = koshienNormalizeFinish(finish);
   return Number(state.event.config.stagePoints?.[normalized] ?? templates.koshien.stagePoints?.[normalized] ?? 0);
-}
-
-function koshienPhase2TeamScore(ownerName, team) {
-  const finish = koshienNormalizeFinish(state.event.results.finishes[team]);
-  let score = Number(state.event.config.phase2Points?.[finish] ?? templates.koshien.phase2Points?.[finish] ?? 0);
-  if (!state.event.config.zombieEnabled || finish !== "best4") return score;
-  const hits = koshienZombieHitCount(team, ownerName);
-  if (hits >= 2) return 0;
-  if (hits === 1) return 20;
-  return score;
 }
 
 function koshienNormalizeFinish(finish) {
@@ -5401,16 +5425,6 @@ function koshienZombieEligible(prediction) {
   const picks = normalizeFixedArray(prediction.phase2DraftPicks, state.event.config.phase2DraftCount || 4).filter(Boolean);
   return picks.length === (state.event.config.phase2DraftCount || 4)
     && picks.every((team) => state.event.results.finishes[team] && !koshienReachedAtLeast(team, "best4"));
-}
-
-function koshienZombieHitCount(team, ownerName) {
-  return state.participants.reduce((count, name) => {
-    if (name === ownerName) return count;
-    ensurePrediction(name);
-    const prediction = state.event.predictions[name];
-    if (!koshienZombieEligible(prediction)) return count;
-    return prediction.zombiePick === team ? count + 1 : count;
-  }, 0);
 }
 
 function koshienFinalScoreReady(score) {
