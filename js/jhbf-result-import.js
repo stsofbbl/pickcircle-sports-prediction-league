@@ -411,15 +411,27 @@
       const saveResult = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
       if (saveResult?.skipped || saveResult?.partial) throw new Error("Supabaseへの結果保存が完了しませんでした。");
       onlineSaved = true;
-      await recordImports(view.eventId, selectedRows.map((row) => ({
-        source: "jhbf",
-        externalKey: row.externalKey,
-        sourceUrl: row.sourceUrl,
-        fetchedAt: row.fetchedAt,
-        importedMatchId: row.match.matchId,
-        normalizedPayload: row.canonicalPayload,
-        rawPayload: row.rawPayload || {},
-      })));
+      const savedContext = await loadContext(view.eventId);
+      const savedMatches = Array.isArray(savedContext.matches) ? savedContext.matches : [];
+      const auditRows = selectedRows.map((row) => {
+        const savedMatch = savedMatches.find((match) => match.matchId
+          && match.roundKey === row.canonicalPayload.roundKey
+          && unorderedPairMatches(
+            match.team1Id, match.team2Id,
+            row.canonicalPayload.team1Id, row.canonicalPayload.team2Id,
+          ));
+        if (!savedMatch?.matchId) throw new Error("保存後の公式試合IDを確認できませんでした。");
+        return {
+          source: "jhbf",
+          externalKey: row.externalKey,
+          sourceUrl: row.sourceUrl,
+          fetchedAt: row.fetchedAt,
+          importedMatchId: savedMatch.matchId,
+          normalizedPayload: row.canonicalPayload,
+          rawPayload: row.rawPayload || {},
+        };
+      });
+      await recordImports(view.eventId, auditRows);
       if (typeof refreshKoshienPhase2DraftState === "function") await refreshKoshienPhase2DraftState({ renderAfter: false });
       if (typeof refreshKoshienLaterPhaseState === "function") await refreshKoshienLaterPhaseState({ renderAfter: false });
       await refreshPreview();
