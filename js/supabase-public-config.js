@@ -27,3 +27,9 @@ const koshienCurrentStageScript = document.createElement("script");
 koshienCurrentStageScript.src = "./js/koshien-current-stage.js";
 koshienCurrentStageScript.async = false;
 document.head.appendChild(koshienCurrentStageScript);
+
+// Load the admin-only JHBF result importer; it reuses the existing result save flow after app.js is ready.
+const jhbfResultImportScript = document.createElement("script");
+jhbfResultImportScript.src = "./js/jhbf-result-import.js";
+jhbfResultImportScript.async = false;
+document.head.appendChild(jhbfResultImportScript);
