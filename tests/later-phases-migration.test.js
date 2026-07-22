@@ -6,6 +6,7 @@ const test = require("node:test");
 const migrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722190000_add_koshien_later_phases.sql");
 const rosterMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722193000_scope_best16_to_submitted_roster.sql");
 const lifecycleMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722200000_harden_koshien_later_phase_lifecycle.sql");
+const triggerPermissionMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722202000_revoke_koshien_trigger_execution.sql");
 
 test("later-phase migration provides server-owned round snapshots and authenticated RPC writes", () => {
   const sql = fs.readFileSync(migrationPath, "utf8");
@@ -65,4 +66,9 @@ test("later phases have explicit prepare open lock scheduling and result correct
   assert.match(sql, /zombieEnabled/i);
   assert.match(sql, /winner-changing result corrections are locked/i);
   assert.match(sql, /exactly four submitted players are required/i);
+});
+
+test("the internal result protection trigger cannot be called as a public RPC", () => {
+  const sql = fs.readFileSync(triggerPermissionMigrationPath, "utf8");
+  assert.match(sql, /revoke all on function public\.protect_koshien_opened_later_results\(\) from anon, authenticated, public/i);
 });
