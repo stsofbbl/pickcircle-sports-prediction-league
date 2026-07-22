@@ -21,3 +21,8 @@ window.YOSO_SUPABASE_CONFIG = {
     autoSaveKoshien: true,
   },
 };
+
+// Load the current-stage scorer before app.js; it installs the override after all scripts finish loading.
+const koshienCurrentStageScript = document.createElement("script");
+koshienCurrentStageScript.src = "./js/koshien-current-stage.js";
+document.head.appendChild(koshienCurrentStageScript);
