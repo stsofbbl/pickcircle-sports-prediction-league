@@ -1,0 +1,27 @@
+name: YOSO tests
+
+on:
+  pull_request:
+    branches:
+      - codex/vercel-release-candidate
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run all Node tests
+        run: node --test tests/*.test.js
+      - name: Check JavaScript syntax
+        run: |
+          node --check app.js
+          find js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Check whitespace errors
+        run: git diff --check origin/${{ github.base_ref }}...HEAD
