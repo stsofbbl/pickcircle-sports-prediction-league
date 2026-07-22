@@ -17,15 +17,37 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - name: Run all Node tests
-        run: node --test tests/*.test.js
+        id: node-tests
+        shell: bash
+        run: |
+          set +e
+          node --test tests/*.test.js > test-output.txt 2>&1
+          status=$?
+          tail -n 160 test-output.txt
+          exit $status
+      - name: Upload Node test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yoso-node-test-output
+          path: test-output.txt
+          if-no-files-found: error
+          retention-days: 7
       - name: Check JavaScript syntax
         run: |
           node --check app.js
           find js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Check Edge Function
+        run: deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
       - name: Check whitespace errors
         if: github.event_name == 'pull_request'
         run: git diff --check origin/${{ github.base_ref }}...HEAD
