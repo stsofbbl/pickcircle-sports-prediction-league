@@ -24,7 +24,22 @@ jobs:
         with:
           deno-version: v2.x
       - name: Run all Node tests
-        run: node --test tests/*.test.js
+        id: node-tests
+        shell: bash
+        run: |
+          set +e
+          node --test tests/*.test.js > test-output.txt 2>&1
+          status=$?
+          tail -n 160 test-output.txt
+          exit $status
+      - name: Upload Node test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yoso-node-test-output
+          path: test-output.txt
+          if-no-files-found: error
+          retention-days: 7
       - name: Check JavaScript syntax
         run: |
           node --check app.js
