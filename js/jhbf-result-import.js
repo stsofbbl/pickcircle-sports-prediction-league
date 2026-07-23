@@ -4,8 +4,20 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.YosoJhbfResults = api;
   if (root && typeof root.addEventListener === "function") {
-    if (root.document?.readyState === "complete") root.setTimeout(() => api.installBrowser(), 0);
-    else root.addEventListener("load", () => api.installBrowser(), { once: true });
+    const maxInstallAttempts = 200;
+    const installRetryDelayMs = 50;
+    const installWithRetry = (attempt = 0) => {
+      if (api.installBrowser()) return;
+      if (attempt < maxInstallAttempts) {
+        root.setTimeout(() => installWithRetry(attempt + 1), installRetryDelayMs);
+      }
+    };
+    if (!api.installBrowser()) {
+      root.setTimeout(() => installWithRetry(), 0);
+      if (root.document?.readyState !== "complete") {
+        root.addEventListener("load", () => installWithRetry(), { once: true });
+      }
+    }
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
@@ -22,6 +34,9 @@
     context: null,
     warnings: [],
   };
+  let browserInstalled = false;
+  let managerObserver = null;
+  let ensurePanelQueued = false;
 
   function normalizeSchoolName(value) {
     return String(value || "")
@@ -470,7 +485,45 @@
     });
   }
 
+  function ensureDomPanel() {
+    ensurePanelQueued = false;
+    const manager = document.querySelector("#activeEventManager");
+    if (!manager) return;
+    const isAdmin = typeof canCurrentUserManageLeague === "function"
+      ? canCurrentUserManageLeague()
+      : typeof isCurrentUserAdmin === "function" && isCurrentUserAdmin();
+    const isKoshien = typeof baseTemplateId === "function"
+      && baseTemplateId(state.event?.templateId) === "koshien";
+    const canEditResults = isAdmin
+      && isKoshien
+      && typeof isResultFinalized === "function"
+      && !isResultFinalized(state.event);
+    if (!canEditResults) {
+      manager.querySelectorAll(".koshien-jhbf-import").forEach((panel) => panel.remove());
+      return;
+    }
+    if (manager.querySelector(".koshien-jhbf-import")) return;
+    manager.insertAdjacentHTML("beforeend", importPanel(canEditResults));
+    bindControls();
+  }
+
+  function queueEnsureDomPanel() {
+    if (ensurePanelQueued) return;
+    ensurePanelQueued = true;
+    setTimeout(ensureDomPanel, 0);
+  }
+
+  function observeManager() {
+    if (managerObserver || typeof MutationObserver !== "function") return;
+    const manager = document.querySelector("#activeEventManager");
+    if (!manager) return;
+    managerObserver = new MutationObserver(queueEnsureDomPanel);
+    managerObserver.observe(manager, { childList: true });
+    queueEnsureDomPanel();
+  }
+
   function installBrowser() {
+    if (browserInstalled) return true;
     if (typeof renderKoshienManagerPanel !== "function" || typeof bindActiveEventManagerInputs !== "function") return false;
     const originalPanel = renderKoshienManagerPanel;
     const originalBind = bindActiveEventManagerInputs;
@@ -482,7 +535,9 @@
       originalBind();
       bindControls();
     };
+    browserInstalled = true;
     renderActiveEventManager();
+    observeManager();
     return true;
   }
 

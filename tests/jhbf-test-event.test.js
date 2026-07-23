@@ -11,8 +11,12 @@ const protectionMigration = fs.readFileSync(
   path.join(__dirname, "../supabase/migrations/20260723061000_protect_jhbf_test_event_marker.sql"),
   "utf8",
 );
+const generatedOddsFixMigration = fs.readFileSync(
+  path.join(__dirname, "../supabase/migrations/20260723062000_fix_jhbf_test_event_generated_odds.sql"),
+  "utf8",
+);
 const uiSource = fs.readFileSync(path.join(__dirname, "../js/jhbf-test-event.js"), "utf8");
-const configSource = fs.readFileSync(path.join(__dirname, "../js/supabase-public-config.js"), "utf8");
+const indexSource = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
 const moduleApi = require("../js/jhbf-test-event.js");
 
 test("defines one isolated historical game with exact JHBF names and source date", () => {
@@ -79,8 +83,29 @@ test("normal event saves preserve the fixed test marker and identity", () => {
   assert.match(protectionMigration, /revoke all on function public\.protect_jhbf_import_test_event_marker\(\) from public, anon, authenticated/);
 });
 
+test("create and reset let Postgres calculate generated odds columns", () => {
+  assert.match(generatedOddsFixMigration, /create or replace function public\.create_jhbf_import_test_event/);
+  assert.match(generatedOddsFixMigration, /create or replace function public\.reset_jhbf_import_test_event/);
+
+  const teamInsertColumnLists = [...generatedOddsFixMigration.matchAll(
+    /insert into public\.teams \(([^)]+)\)/g,
+  )].map((match) => match[1]);
+
+  assert.equal(teamInsertColumnLists.length, 2);
+  for (const columns of teamInsertColumnLists) {
+    assert.match(columns, /\bodds\b/);
+    assert.doesNotMatch(columns, /\bsqrt_odds\b/);
+    assert.doesNotMatch(columns, /\bsqrt_odds_capped\b/);
+  }
+
+  const oddsOneRows = generatedOddsFixMigration.match(
+    /(?:v_event_id|p_event_id), '[^']+', '[^']+', [12], 2, 1,/g,
+  ) || [];
+  assert.equal(oddsOneRows.length, 4);
+});
+
 test("admin UI exposes only harness controls and reuses the existing importer", () => {
-  assert.match(configSource, /js\/jhbf-test-event\.js/);
+  assert.match(indexSource, /js\/jhbf-test-event\.js/);
   assert.match(uiSource, /テスト大会を作成/);
   assert.match(uiSource, /過去結果を取得/);
   assert.match(uiSource, /テスト大会を初期化/);
@@ -90,6 +115,7 @@ test("admin UI exposes only harness controls and reuses the existing importer", 
   assert.match(uiSource, /delete_jhbf_import_test_event/);
   assert.match(uiSource, /loadKoshienOnlineState\(\{ force: true \}\)/);
   assert.match(uiSource, /data-jhbf-fetch/);
+  assert.match(uiSource, /YosoJhbfResults\?\.installBrowser/);
   assert.match(uiSource, /\[data-manage-event-name\], \[data-manage-event-deadline\], \[data-event-status\]/);
   assert.doesNotMatch(uiSource, /functions\.invoke/);
   assert.doesNotMatch(uiSource, /fetch\s*\(/);

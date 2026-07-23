@@ -202,6 +202,7 @@
   }
 
   function installBrowser() {
+    if (typeof window !== "undefined") window.YosoJhbfResults?.installBrowser?.();
     if (typeof renderKoshienManagerPanel !== "function" || typeof bindActiveEventManagerInputs !== "function") return false;
     const originalPanel = renderKoshienManagerPanel;
     const originalBind = bindActiveEventManagerInputs;

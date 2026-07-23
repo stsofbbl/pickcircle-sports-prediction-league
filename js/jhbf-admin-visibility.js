@@ -6,7 +6,9 @@
     const originalBind = bindActiveEventManagerInputs;
     bindActiveEventManagerInputs = function bindActiveEventManagerInputsWithJhbfVisibility() {
       originalBind();
-      const isAdmin = typeof canCurrentUserManageLeague === "function" && canCurrentUserManageLeague();
+      const isAdmin = typeof canCurrentUserManageLeague === "function"
+        ? canCurrentUserManageLeague()
+        : typeof isCurrentUserAdmin === "function" && isCurrentUserAdmin();
       if (!isAdmin) {
         document.querySelectorAll(".koshien-jhbf-import").forEach((panel) => panel.remove());
       }

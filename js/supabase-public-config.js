@@ -21,27 +21,3 @@ window.YOSO_SUPABASE_CONFIG = {
     autoSaveKoshien: true,
   },
 };
-
-// Load the current-stage scorer before app.js; it installs the override after all scripts finish loading.
-const koshienCurrentStageScript = document.createElement("script");
-koshienCurrentStageScript.src = "./js/koshien-current-stage.js";
-koshienCurrentStageScript.async = false;
-document.head.appendChild(koshienCurrentStageScript);
-
-// Load the admin-only JHBF result importer; it reuses the existing result save flow after app.js is ready.
-const jhbfResultImportScript = document.createElement("script");
-jhbfResultImportScript.src = "./js/jhbf-result-import.js";
-jhbfResultImportScript.async = false;
-document.head.appendChild(jhbfResultImportScript);
-
-// Remove the importer panel from non-admin manager screens after the importer installs its render hook.
-const jhbfAdminVisibilityScript = document.createElement("script");
-jhbfAdminVisibilityScript.src = "./js/jhbf-admin-visibility.js";
-jhbfAdminVisibilityScript.async = false;
-document.head.appendChild(jhbfAdminVisibilityScript);
-
-// Add the isolated two-school/one-game test event controls after the importer is installed.
-const jhbfTestEventScript = document.createElement("script");
-jhbfTestEventScript.src = "./js/jhbf-test-event.js";
-jhbfTestEventScript.async = false;
-document.head.appendChild(jhbfTestEventScript);
