@@ -298,6 +298,14 @@
     return data;
   }
 
+  async function reopenKoshienResults(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("結果確定取消のevent_idが必要です。");
+    return laterPhaseRpc("reopen_koshien_results", {
+      p_event_id: normalizedEventId,
+    }, "result_reopen");
+  }
+
   async function saveKoshienResultTransaction({ supabase, league, event, teamRows, scoreRows }) {
     const eventId = String(event.id);
     const teamByName = new Map(teamRows.map((team) => [team.name, team]));
@@ -843,6 +851,7 @@
       prepareLaterPhase,
       setLaterPhaseStatus,
       cancelKoshienMatchResult,
+      reopenKoshienResults,
     },
     local: {
       loadState: loadLocalState,

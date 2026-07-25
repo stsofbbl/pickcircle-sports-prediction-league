@@ -3396,22 +3396,26 @@ async function reopenFinalizedResults() {
   if (!window.confirm("大会全体の結果確定を取り消しますか？入力済みの試合結果は残り、承認だけがリセットされます。")) return;
   const previousStatus = state.event.status;
   const previousFlow = JSON.parse(JSON.stringify(state.event.resultFlow || createResultFlow()));
-  state.event.status = "resultWait";
-  state.event.resultFlow.status = "none";
-  state.event.resultFlow.submittedBy = "";
-  state.event.resultFlow.submittedAt = "";
-  state.event.resultFlow.approvals = {};
-  state.event.resultFlow.finalizedAt = "";
-  saveLocalStateOnly();
-  render();
+  const applyReopenedState = () => {
+    state.event.status = "resultWait";
+    state.event.resultFlow.status = "none";
+    state.event.resultFlow.submittedBy = "";
+    state.event.resultFlow.submittedAt = "";
+    state.event.resultFlow.approvals = {};
+    state.event.resultFlow.finalizedAt = "";
+    saveLocalStateOnly();
+  };
   try {
     const shouldSaveOnline = baseTemplateId(state.event?.templateId) === "koshien"
       && window.YosoDataService?.shouldAutoSaveKoshien?.();
     if (shouldSaveOnline) {
       if (!currentAuthUser()) throw new Error("オンラインの管理者ログインが必要です。");
-      const result = await saveKoshienOnlineNow({ updateConnection: false });
-      if (result?.skipped || result?.partial) throw new Error("オンライン保存が完了しませんでした。");
+      if (!window.YosoDataService?.koshien?.reopenKoshienResults) {
+        throw new Error("結果確定取消のDB更新機能を利用できません。");
+      }
+      await window.YosoDataService.koshien.reopenKoshienResults(String(state.event.id));
     }
+    applyReopenedState();
     setKoshienMatchMessage("大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。", "success");
   } catch (error) {
     state.event.status = previousStatus;
@@ -3764,8 +3768,10 @@ async function cancelKoshienMatchResult(matchId) {
   } catch (error) {
     state.event.results = previousResults;
     saveLocalStateOnly();
-    setKoshienMatchMessage(/downstream phase is already prepared/i.test(error?.message || "")
-      ? "後半フェーズを準備済みのため取り消せません。先に対象フェーズのリセットが必要です。"
+    setKoshienMatchMessage(/dependent completed match exists/i.test(error?.message || "")
+      ? "この勝者が進んだ後続試合は確定済みです。先に後続試合の結果を取り消してください。"
+      : /downstream phase is already prepared/i.test(error?.message || "")
+        ? "後半フェーズを準備済みのため取り消せません。先に対象フェーズのリセットが必要です。"
       : (error?.message || "試合結果を取り消せませんでした。元の結果へ戻しました。"), "error");
   }
   renderScoresOnly();
