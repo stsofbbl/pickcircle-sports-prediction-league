@@ -2172,11 +2172,15 @@ function normalizeKoshienTeamMeta(teams, meta = {}) {
     const current = meta?.[name] || {};
     const odds = Number(current.odds) > 0 ? Number(current.odds) : 1;
     const startRound = Number(current.startRound) === 2 || index < 15 ? 2 : 1;
-    return [name, {
+    const next = {
       startRound,
       odds,
       sqrtOdds: Math.round(Math.sqrt(odds) * 1000) / 1000,
-    }];
+    };
+    if (current.district) next.district = String(current.district);
+    if (current.source) next.source = String(current.source);
+    if (Number.isInteger(Number(current.sourceYear))) next.sourceYear = Number(current.sourceYear);
+    return [name, next];
   }));
 }
 
@@ -2806,6 +2810,7 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
   const candidateCount = candidateCountForEvent(event);
   const missingText = missingCount > 0 ? `未入力 ${missingCount}項目` : "入力済み";
   const adminOnly = isCurrentUserAdmin() ? "" : "disabled";
+  const canUseOfficialData = canOpenOfficialDataForEvent(event);
   return `
     <article class="tournament-card">
       <div class="tournament-main">
@@ -2826,6 +2831,7 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
         ${showManageActions
           ? `
             <a class="ghost-link admin-action ${adminOnly ? "is-disabled" : ""}" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+            ${canUseOfficialData ? `<a class="ghost-link admin-action" href="#active" data-event-action="official-data" data-event-id="${escapeAttr(event.id)}" data-jhbf-open-panel>公式データ取得</a>` : ""}
             <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
           `
           : `<a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>`}
@@ -2857,6 +2863,7 @@ function resultWaitCardMarkup(event) {
   const sport = sportMeta(event.templateId);
   const adminOnly = isCurrentUserAdmin() ? "" : "disabled";
   const finalized = isResultFinalized(event);
+  const canUseOfficialData = canOpenOfficialDataForEvent(event);
   return `
     <article class="tournament-card muted-card">
       <div class="tournament-main">
@@ -2872,6 +2879,7 @@ function resultWaitCardMarkup(event) {
       </div>
       <div class="tournament-actions is-manage">
         <a class="primary-link admin-action ${adminOnly || finalized ? "is-disabled" : ""}" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
+        ${canUseOfficialData ? `<a class="ghost-link admin-action" href="#active" data-event-action="official-data" data-event-id="${escapeAttr(event.id)}" data-jhbf-open-panel>公式データ取得</a>` : ""}
         <a class="ghost-link ${finalized ? "is-disabled" : ""}" href="#active" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
         <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
       </div>
@@ -2945,6 +2953,13 @@ function candidateCountForEvent(event) {
   }
   const teams = Array.isArray(event.config?.teams) ? event.config.teams : templates[base]?.teams || [];
   return teams.length;
+}
+
+function canOpenOfficialDataForEvent(event) {
+  return Boolean(event)
+    && isCurrentUserAdmin()
+    && baseTemplateId(event.templateId) === "koshien"
+    && !isResultFinalized(event);
 }
 
 function requiredApprovalCount() {

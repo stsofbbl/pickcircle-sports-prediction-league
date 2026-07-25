@@ -216,6 +216,9 @@
       startRound,
       odds,
       sqrtOdds: Math.round(Math.sqrt(odds) * 10000) / 10000,
+      district: meta.district || "",
+      source: meta.source || "",
+      sourceYear: Number.isInteger(Number(meta.sourceYear)) ? Number(meta.sourceYear) : null,
     };
   }
 
@@ -483,7 +486,12 @@
           seed: index + 1,
           start_round: meta.startRound,
           odds: meta.odds,
-          metadata: { source: "yoso-koshien", sqrt_odds_snapshot: meta.sqrtOdds },
+          metadata: {
+            source: meta.source || "yoso-koshien",
+            district: meta.district || null,
+            source_year: meta.sourceYear || null,
+            sqrt_odds_snapshot: meta.sqrtOdds,
+          },
         };
       });
       const { data, error } = await supabase

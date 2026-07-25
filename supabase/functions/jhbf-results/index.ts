@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
-import { parseJhbfResultsHtml } from "../_shared/jhbf-parser.mjs";
+import { parseJhbfRepresentativeTeamsHtml, parseJhbfResultsHtml } from "../_shared/jhbf-parser.mjs";
 
 const CORS_HEADERS = Object.freeze({
   "Access-Control-Allow-Origin": "*",
@@ -14,10 +14,11 @@ const MAX_REDIRECTS = 2;
 const FETCH_TIMEOUT_MS = 12_000;
 
 interface FetchRequest {
+  kind: "results" | "representatives";
   eventId: string;
   competitionType: "summer" | "senbatsu";
   year: number;
-  baseDate: string;
+  baseDate?: string;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -34,17 +35,21 @@ function errorMessage(error: unknown): string {
 function parseRequest(value: unknown): FetchRequest {
   const body = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const eventId = String(body.eventId || "").trim();
+  const kind = body.kind === "representatives" ? "representatives" : "results";
   const competitionType = body.competitionType === "senbatsu" ? "senbatsu" : body.competitionType === "summer" ? "summer" : "";
   const year = Number(body.year);
   const baseDate = String(body.baseDate || "").trim();
   if (!eventId) throw new Error("eventId is required");
   if (!competitionType) throw new Error("competitionType must be summer or senbatsu");
   if (!Number.isInteger(year) || year < 2020 || year > 2035) throw new Error("year must be between 2020 and 2035");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDate) || Number.isNaN(Date.parse(`${baseDate}T00:00:00+09:00`))) {
-    throw new Error("baseDate must be YYYY-MM-DD");
+  if (kind === "results") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDate) || Number.isNaN(Date.parse(`${baseDate}T00:00:00+09:00`))) {
+      throw new Error("baseDate must be YYYY-MM-DD");
+    }
+    if (Number(baseDate.slice(0, 4)) !== year) throw new Error("baseDate year must match year");
   }
-  if (Number(baseDate.slice(0, 4)) !== year) throw new Error("baseDate year must match year");
-  return { eventId, competitionType, year, baseDate };
+  if (kind === "representatives" && competitionType !== "summer") throw new Error("representatives are only supported for summer");
+  return { kind, eventId, competitionType, year, baseDate: kind === "results" ? baseDate : undefined };
 }
 
 function dateInJapan(value: string, offsetDays: number): string {
@@ -61,9 +66,15 @@ function sourceUrlFor(request: FetchRequest, date: string): URL {
   return new URL(`https://www.jhbf.or.jp/${root}/${request.year}/schedule/schedule_${compactDate}.html`);
 }
 
+function representativeSourceUrlFor(request: FetchRequest): URL {
+  return new URL(`https://www.jhbf.or.jp/sensyuken/${request.year}/team/`);
+}
+
 function assertAllowedJhbfUrl(url: URL, request: FetchRequest): void {
   const expectedRoot = request.competitionType === "summer" ? "sensyuken" : "senbatsu";
-  const expectedPath = new RegExp(`^/${expectedRoot}/${request.year}/schedule/schedule_[0-9]{8}\\.html$`);
+  const expectedPath = request.kind === "representatives"
+    ? new RegExp(`^/${expectedRoot}/${request.year}/team/?$`)
+    : new RegExp(`^/${expectedRoot}/${request.year}/schedule/schedule_[0-9]{8}\\.html$`);
   if (url.protocol !== "https:" || !ALLOWED_HOSTS.has(url.hostname) || url.username || url.password || url.port || url.search || url.hash
     || !expectedPath.test(url.pathname)) {
     throw new Error("JHBF source URL was rejected by the allowlist");
@@ -137,6 +148,24 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "invalid_request", message: errorMessage(error) }, 400);
   }
 
+  if (request.kind === "representatives") {
+    try {
+      const requestedUrl = representativeSourceUrlFor(request);
+      assertAllowedJhbfUrl(requestedUrl, request);
+      const fetched = await fetchAllowedHtml(requestedUrl, request);
+      const parsed = parseJhbfRepresentativeTeamsHtml(fetched.html, {
+        sourceUrl: fetched.url,
+        fetchedAt: new Date().toISOString(),
+        competitionType: request.competitionType,
+        year: request.year,
+      });
+      return jsonResponse({ source: SOURCE, rows: parsed.rows, warnings: parsed.warnings, sourceUrls: [fetched.url], fetchedAt: new Date().toISOString() });
+    } catch (error) {
+      console.error("JHBF representative fetch failed", errorMessage(error));
+      return jsonResponse({ error: "jhbf_fetch_failed", message: "日本高野連公式の代表校一覧を取得できませんでした。既存データは変更していません。" }, 502);
+    }
+  }
+
   const { data: fetchState, error: startError } = await supabase.rpc("request_koshien_external_fetch", {
     p_event_id: request.eventId,
     p_source: SOURCE,
@@ -147,7 +176,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const fetchId = String(fetchState?.fetchId || fetchState?.fetch_id || "");
-  const dates = [dateInJapan(request.baseDate, 0), dateInJapan(request.baseDate, -1)];
+  const dates = [dateInJapan(request.baseDate || "", 0), dateInJapan(request.baseDate || "", -1)];
   const sourceUrls: string[] = [];
   const rows: Record<string, unknown>[] = [];
   const warnings: string[] = [];

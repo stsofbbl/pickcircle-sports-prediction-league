@@ -154,4 +154,59 @@ export function parseJhbfResultsHtml(html, options = {}) {
   return { rows, warnings, textSample: "" };
 }
 
+export function parseJhbfRepresentativeTeamsHtml(html, options = {}) {
+  const {
+    sourceUrl = "",
+    fetchedAt = new Date().toISOString(),
+    competitionType = "summer",
+    year,
+  } = options;
+  if (!Number.isInteger(Number(year))) throw new Error("year is required");
+
+  const rows = [];
+  const warnings = [];
+  const htmlRows = [...String(html || "").matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
+  htmlRows.forEach((rowMatch) => {
+    const cells = [...rowMatch[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)]
+      .map((cell) => normalizeSchoolName(htmlToStructuredText(cell[1])));
+    if (cells.length < 2) return;
+    const districtName = cells[0];
+    const schoolName = cells[1];
+    if (!districtName || districtName === "地方大会" || /^-+$/.test(districtName)) return;
+    rows.push({
+      source: "jhbf",
+      sourceUrl,
+      fetchedAt,
+      competitionYear: Number(year),
+      competitionType,
+      districtName,
+      schoolName,
+      rawPayload: { cells },
+    });
+  });
+  const text = htmlToStructuredText(html);
+  if (rows.length) return { rows, warnings, textSample: "" };
+  text.split("\n").forEach((line) => {
+    if (!line.includes("|")) return;
+    const parts = line.split("|").map((part) => normalizeSchoolName(part));
+    if (parts.length < 2) return;
+    const districtName = parts[0];
+    const schoolName = parts[1];
+    if (!districtName || districtName === "地方大会" || /^-+$/.test(districtName)) return;
+    if (districtName.includes("大会情報") || districtName.includes("出場校")) return;
+    rows.push({
+      source: "jhbf",
+      sourceUrl,
+      fetchedAt,
+      competitionYear: Number(year),
+      competitionType,
+      districtName,
+      schoolName,
+      rawPayload: { line },
+    });
+  });
+  if (!rows.length) warnings.push("representative_table_not_found");
+  return { rows, warnings, textSample: rows.length ? "" : text.slice(0, 300) };
+}
+
 export { normalizeSchoolName, roundKeyFor };

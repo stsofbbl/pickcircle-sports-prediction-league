@@ -33,10 +33,24 @@
     rows: [],
     context: null,
     warnings: [],
+    representativeRows: [],
+    representativeWarnings: [],
+    representativeMessage: "",
+    representativeMessageKind: "",
   };
   let browserInstalled = false;
   let managerObserver = null;
   let ensurePanelQueued = false;
+
+  const EXPECTED_SUMMER_DISTRICTS = Object.freeze([
+    "北北海道", "南北海道", "青森", "岩手", "宮城", "秋田", "山形",
+    "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "東東京",
+    "西東京", "神奈川", "山梨", "新潟", "長野", "富山", "石川",
+    "福井", "静岡", "愛知", "岐阜", "三重", "滋賀", "京都",
+    "大阪", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山",
+    "広島", "山口", "香川", "徳島", "愛媛", "高知", "福岡",
+    "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄",
+  ]);
 
   function normalizeSchoolName(value) {
     return String(value || "")
@@ -149,6 +163,63 @@
     });
   }
 
+  function districtFromCandidateName(name) {
+    const normalized = String(name || "").normalize("NFKC").replace(/\s+/g, "").trim();
+    const district = normalized.endsWith("代表") ? normalized.slice(0, -2) : "";
+    return EXPECTED_SUMMER_DISTRICTS.includes(district) ? district : "";
+  }
+
+  function currentRepresentativeMap(teams = [], teamMeta = {}) {
+    const byDistrict = new Map();
+    teams.forEach((team, index) => {
+      const metaDistrict = teamMeta?.[team]?.district;
+      const district = EXPECTED_SUMMER_DISTRICTS.includes(metaDistrict)
+        ? metaDistrict
+        : districtFromCandidateName(team) || EXPECTED_SUMMER_DISTRICTS[index] || "";
+      if (district && !byDistrict.has(district)) byDistrict.set(district, team);
+    });
+    return byDistrict;
+  }
+
+  function buildRepresentativePreview(sourceRows = [], currentTeams = [], teamMeta = {}) {
+    const districtCounts = new Map();
+    const schoolCounts = new Map();
+    const byDistrict = new Map();
+    sourceRows.forEach((row) => {
+      const districtName = String(row.districtName || "").trim();
+      const schoolName = String(row.schoolName || "").trim();
+      if (!districtName) return;
+      districtCounts.set(districtName, (districtCounts.get(districtName) || 0) + 1);
+      if (schoolName) schoolCounts.set(normalizeSchoolName(schoolName), (schoolCounts.get(normalizeSchoolName(schoolName)) || 0) + 1);
+      if (!byDistrict.has(districtName)) byDistrict.set(districtName, { ...row, districtName, schoolName });
+    });
+
+    const currentByDistrict = currentRepresentativeMap(currentTeams, teamMeta);
+    const rows = EXPECTED_SUMMER_DISTRICTS.map((districtName) => {
+      const source = byDistrict.get(districtName) || { districtName, schoolName: "" };
+      const currentName = currentByDistrict.get(districtName) || "";
+      return {
+        ...source,
+        currentName,
+        changed: normalizeSchoolName(currentName) !== normalizeSchoolName(source.schoolName),
+      };
+    });
+
+    const missingDistricts = EXPECTED_SUMMER_DISTRICTS.filter((district) => !byDistrict.has(district));
+    const emptyDistricts = rows.filter((row) => !row.schoolName).map((row) => row.districtName);
+    const duplicateDistricts = [...districtCounts].filter(([, count]) => count > 1).map(([district]) => district);
+    const duplicateSchools = [...schoolCounts].filter(([, count]) => count > 1).map(([school]) => school);
+    const completeCount = rows.filter((row) => row.schoolName).length;
+    const valid = rows.length === 49
+      && completeCount === 49
+      && !missingDistricts.length
+      && !emptyDistricts.length
+      && !duplicateDistricts.length
+      && !duplicateSchools.length;
+
+    return { rows, valid, completeCount, missingDistricts, emptyDistricts, duplicateDistricts, duplicateSchools };
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -168,9 +239,10 @@
 
   function sourceConfig() {
     const config = state.event?.config?.externalResults || {};
+    const eventYear = Number((String(state.event?.name || "").match(/20\d{2}/) || [])[0]);
     return {
       competitionType: config.competitionType === "senbatsu" ? "senbatsu" : "summer",
-      year: Number.isInteger(Number(config.year)) ? Number(config.year) : 2026,
+      year: Number.isInteger(Number(config.year)) ? Number(config.year) : Number.isInteger(eventYear) ? eventYear : 2026,
     };
   }
 
@@ -194,6 +266,10 @@
       throw wrapped;
     }
     return data || { rows: [], warnings: [] };
+  }
+
+  async function fetchRepresentatives(payload) {
+    return fetchResults({ ...payload, kind: "representatives" });
   }
 
   async function loadContext(eventId) {
@@ -268,11 +344,41 @@
       </article>`).join("")}</div>`;
   }
 
+  function representativeRowsMarkup(preview) {
+    if (!view.representativeRows.length && !view.representativeMessage) {
+      return `<p class="helper-text">代表校を取得すると、地区ごとの公式表記と現在の候補との差分を表示します。</p>`;
+    }
+    const problems = [
+      preview.missingDistricts.length ? `地区不足: ${preview.missingDistricts.join("、")}` : "",
+      preview.emptyDistricts.length ? `未決定: ${preview.emptyDistricts.join("、")}` : "",
+      preview.duplicateDistricts.length ? `地区重複: ${preview.duplicateDistricts.join("、")}` : "",
+      preview.duplicateSchools.length ? `学校名重複: ${preview.duplicateSchools.join("、")}` : "",
+    ].filter(Boolean);
+    return `
+      <div class="history-list">
+        <article class="history-row">
+          <span>取得件数: ${preview.completeCount} / 49</span>
+          <strong>${preview.valid ? "49代表校へ反映できます" : "49校が揃うまで反映できません"}</strong>
+          <small>${problems.length ? escapeHtml(problems.join(" / ")) : "地区・代表校の対応を確認してください。既存候補がある場合は上書きされます。"}</small>
+        </article>
+        ${preview.rows.map((row) => `
+          <article class="history-row">
+            <span>${escapeHtml(row.districtName)}</span>
+            <strong>${escapeHtml(row.schoolName || "未決定")}</strong>
+            <small>現在: ${escapeHtml(row.currentName || "未登録")} / ${row.changed ? "差分あり" : "差分なし"}</small>
+          </article>`).join("")}
+      </div>`;
+  }
+
   function importPanel(canEditResults) {
     if (!view.baseDate) view.baseDate = jstDateValue();
     const config = sourceConfig();
     const readyCount = view.rows.filter((row) => row.status === "ready").length;
     const disabled = !canEditResults || view.loading || view.applying ? "disabled" : "";
+    const currentTeams = typeof getTeams === "function" ? getTeams() : state.event?.config?.teams || [];
+    const representativePreview = buildRepresentativePreview(view.representativeRows, currentTeams, state.event?.config?.teamMeta || {});
+    const representativesDisabled = !canEditResults || view.loading || view.applying ? "disabled" : "";
+    const applyRepresentativesDisabled = representativesDisabled || !representativePreview.valid ? "disabled" : "";
     return `
       <div class="entry-block koshien-jhbf-import">
         <div class="block-head">
@@ -291,8 +397,24 @@
           <label class="field"><span>取得基準日</span><input data-jhbf-base-date type="date" value="${escapeHtml(view.baseDate)}" ${disabled}></label>
         </div>
         <div class="result-flow-actions">
+          <button class="ghost-button" type="button" data-jhbf-fetch-representatives ${representativesDisabled}>代表校を取得</button>
           <button class="primary-button" type="button" data-jhbf-fetch ${disabled}>${view.loading ? "取得中…" : "最新結果を取得"}</button>
           ${readyCount ? `<button class="ghost-button" type="button" data-jhbf-apply ${disabled}>選択した結果を反映</button>` : ""}
+        </div>
+        <div class="entry-block">
+          <div class="block-head">
+            <div>
+              <h3>夏の甲子園 代表校取得</h3>
+              <p class="helper-text">高野連公式の代表校一覧を表示します。取得だけではDBへ保存しません。</p>
+            </div>
+            <span class="status-label ${representativePreview.valid ? "open" : "pending"}">${representativePreview.completeCount}/49</span>
+          </div>
+          ${view.representativeWarnings.length ? `<p class="helper-text">取得メモ: ${escapeHtml(view.representativeWarnings.join("、"))}</p>` : ""}
+          ${view.representativeMessage ? `<p class="auth-message is-${escapeHtml(view.representativeMessageKind || "pending")}" role="status">${escapeHtml(view.representativeMessage)}</p>` : ""}
+          <div class="result-flow-actions">
+            <button class="primary-button" type="button" data-jhbf-apply-representatives ${applyRepresentativesDisabled}>49代表校へ反映</button>
+          </div>
+          ${representativeRowsMarkup(representativePreview)}
         </div>
         ${view.warnings.length ? `<p class="helper-text">取得メモ: ${escapeHtml(view.warnings.join("、"))}</p>` : ""}
         ${view.message ? `<p class="auth-message is-${escapeHtml(view.messageKind || "pending")}" role="status">${escapeHtml(view.message)}</p>` : ""}
@@ -313,6 +435,10 @@
     view.rows = [];
     view.context = null;
     view.warnings = [];
+    view.representativeRows = [];
+    view.representativeWarnings = [];
+    view.representativeMessage = "";
+    view.representativeMessageKind = "";
   }
 
   async function refreshPreview() {
@@ -349,6 +475,94 @@
       view.messageKind = "error";
     } finally {
       view.loading = false;
+      renderActiveEventManager();
+    }
+  }
+
+  async function handleFetchRepresentatives(root) {
+    const config = sourceConfig();
+    const year = Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    state.event.config.externalResults = { competitionType: "summer", year };
+    saveLocalStateOnly();
+    view.loading = true;
+    view.representativeMessage = "日本高野連公式から代表校一覧を取得しています…";
+    view.representativeMessageKind = "pending";
+    renderActiveEventManager();
+    try {
+      const response = await fetchRepresentatives({ eventId: view.eventId, competitionType: "summer", year });
+      view.representativeRows = Array.isArray(response.rows) ? response.rows : [];
+      view.representativeWarnings = Array.isArray(response.warnings) ? response.warnings : [];
+      const preview = buildRepresentativePreview(view.representativeRows, getTeams(), state.event?.config?.teamMeta || {});
+      view.representativeMessage = `${preview.completeCount}校を取得しました。49校が揃った場合だけ反映できます。`;
+      view.representativeMessageKind = preview.valid ? "success" : "pending";
+    } catch (error) {
+      console.warn("JHBF representative fetch failed", error);
+      view.representativeRows = [];
+      view.representativeWarnings = [];
+      view.representativeMessage = error?.message || "代表校一覧を取得できませんでした。既存データは変更していません。";
+      view.representativeMessageKind = "error";
+    } finally {
+      view.loading = false;
+      renderActiveEventManager();
+    }
+  }
+
+  function representativeTeamMeta(previewRows, currentTeams, currentMeta, year) {
+    const currentByDistrict = currentRepresentativeMap(currentTeams, currentMeta);
+    return Object.fromEntries(previewRows.map((row, index) => {
+      const previousName = currentByDistrict.get(row.districtName) || "";
+      const previous = currentMeta?.[row.schoolName] || currentMeta?.[previousName] || {};
+      const odds = Number(previous.odds) > 0 ? Number(previous.odds) : 1;
+      const startRound = Number(previous.startRound) === 2 || index < 15 ? 2 : 1;
+      return [row.schoolName, {
+        startRound,
+        odds,
+        sqrtOdds: Math.round(Math.sqrt(odds) * 1000) / 1000,
+        district: row.districtName,
+        source: "jhbf",
+        sourceYear: year,
+      }];
+    }));
+  }
+
+  async function handleApplyRepresentatives() {
+    const config = sourceConfig();
+    const currentTeams = getTeams();
+    const currentMeta = state.event?.config?.teamMeta || {};
+    const preview = buildRepresentativePreview(view.representativeRows, currentTeams, currentMeta);
+    if (!preview.valid) {
+      view.representativeMessage = "49代表校が揃っていないため反映できません。";
+      view.representativeMessageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
+    const confirmed = window.confirm("現在の49代表校候補を高野連公式表記で上書きします。よろしいですか？");
+    if (!confirmed) return;
+    const beforeConfig = JSON.parse(JSON.stringify(state.event.config || {}));
+    view.applying = true;
+    view.representativeMessage = "49代表校を保存しています…";
+    view.representativeMessageKind = "pending";
+    renderActiveEventManager();
+    try {
+      const nextTeams = preview.rows.map((row) => row.schoolName);
+      state.event.config.teams = nextTeams;
+      state.event.config.teamMeta = representativeTeamMeta(preview.rows, currentTeams, currentMeta, config.year);
+      state.event.config.externalResults = { competitionType: "summer", year: config.year };
+      normalizeKoshienEvent(state.event);
+      saveLocalStateOnly();
+      renderScoresOnly();
+      const saveResult = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
+      if (saveResult?.skipped || saveResult?.partial) throw new Error("Supabaseへの代表校保存が完了しませんでした。");
+      view.representativeMessage = "49代表校を反映し、オンラインへ保存しました。";
+      view.representativeMessageKind = "success";
+    } catch (error) {
+      state.event.config = beforeConfig;
+      saveLocalStateOnly();
+      renderScoresOnly();
+      view.representativeMessage = error?.message || "49代表校を保存できませんでした。既存候補へ戻しました。";
+      view.representativeMessageKind = "error";
+    } finally {
+      view.applying = false;
       renderActiveEventManager();
     }
   }
@@ -478,10 +692,32 @@
   function bindControls() {
     const root = document.querySelector("#activeEventManager");
     if (!root) return;
+    root.querySelector("[data-jhbf-fetch-representatives]")?.addEventListener("click", () => handleFetchRepresentatives(root));
+    root.querySelector("[data-jhbf-apply-representatives]")?.addEventListener("click", () => handleApplyRepresentatives());
     root.querySelector("[data-jhbf-fetch]")?.addEventListener("click", () => handleFetch(root));
     root.querySelector("[data-jhbf-apply]")?.addEventListener("click", () => handleApply(root));
     root.querySelectorAll("[data-jhbf-save-alias]").forEach((button) => {
       button.addEventListener("click", () => handleAlias(button));
+    });
+  }
+
+  function scrollToImportPanel() {
+    setTimeout(() => {
+      ensureDomPanel();
+      const panel = document.querySelector(".koshien-jhbf-import");
+      if (!panel) return;
+      panel.open = true;
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
+  function bindOpenPanelShortcut() {
+    if (document.body?.dataset.jhbfOpenPanelBound === "1") return;
+    if (typeof document.addEventListener !== "function") return;
+    if (document.body) document.body.dataset.jhbfOpenPanelBound = "1";
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("[data-jhbf-open-panel]")) return;
+      scrollToImportPanel();
     });
   }
 
@@ -536,6 +772,7 @@
       bindControls();
     };
     browserInstalled = true;
+    bindOpenPanelShortcut();
     renderActiveEventManager();
     observeManager();
     return true;
@@ -546,6 +783,7 @@
     stableStringify,
     buildCanonicalPayload,
     buildImportPreview,
+    buildRepresentativePreview,
     sameCompletedMatch,
     installBrowser,
   });

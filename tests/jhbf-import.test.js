@@ -84,3 +84,30 @@ test("saved database result is detected and differing score is blocked", () => {
   assert.equal(api.buildImportPreview([row({ teamAScore: 3 })], savedContext)[0].status, "conflict");
   assert.equal(api.sameCompletedMatch(savedContext.matches[0], ready.canonicalPayload), true);
 });
+
+test("representative preview requires all 49 districts before apply", () => {
+  const partial = api.buildRepresentativePreview([
+    { districtName: "北北海道", schoolName: "白樺学園" },
+    { districtName: "南北海道", schoolName: "札幌日大" },
+  ], ["北北海道代表", "南北海道代表"], {});
+  assert.equal(partial.valid, false);
+  assert.equal(partial.completeCount, 2);
+  assert.ok(partial.missingDistricts.includes("青森"));
+
+  const districts = [
+    "北北海道", "南北海道", "青森", "岩手", "宮城", "秋田", "山形",
+    "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "東東京",
+    "西東京", "神奈川", "山梨", "新潟", "長野", "富山", "石川",
+    "福井", "静岡", "愛知", "岐阜", "三重", "滋賀", "京都",
+    "大阪", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山",
+    "広島", "山口", "香川", "徳島", "愛媛", "高知", "福岡",
+    "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄",
+  ];
+  const complete = api.buildRepresentativePreview(
+    districts.map((district, index) => ({ districtName: district, schoolName: `School ${index + 1}` })),
+    districts.map((district) => `${district}代表`),
+    {},
+  );
+  assert.equal(complete.valid, true);
+  assert.equal(complete.completeCount, 49);
+});

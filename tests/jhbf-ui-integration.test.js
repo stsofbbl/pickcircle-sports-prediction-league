@@ -6,6 +6,7 @@ const vm = require("node:vm");
 
 const moduleSource = fs.readFileSync(path.join(__dirname, "../js/jhbf-result-import.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
+const appSource = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
 
 test("admin manager loads the semi-automatic JHBF result module", () => {
   assert.match(indexSource, /js\/jhbf-result-import\.js/);
@@ -32,10 +33,20 @@ test("manager extensions load deterministically after app.js", () => {
 
 test("browser integration invokes only fixed Edge Function and audited RPCs", () => {
   assert.match(moduleSource, /functions\.invoke\("jhbf-results"/);
+  assert.match(moduleSource, /kind: "representatives"/);
+  assert.match(moduleSource, /代表校を取得/);
+  assert.match(moduleSource, /49代表校へ反映/);
   assert.match(moduleSource, /get_koshien_external_import_context/);
   assert.match(moduleSource, /save_koshien_external_team_alias/);
   assert.match(moduleSource, /record_koshien_external_imports/);
   assert.doesNotMatch(moduleSource, /fetch\s*\(\s*["'`]https:\/\/www\.jhbf/);
+});
+
+test("tournament cards expose a shortcut to the reused official data panel", () => {
+  assert.match(appSource, /data-jhbf-open-panel/);
+  assert.match(appSource, /公式データ取得/);
+  assert.match(appSource, /canOpenOfficialDataForEvent/);
+  assert.match(moduleSource, /scrollToImportPanel/);
 });
 
 test("browser installer retries when app manager globals become ready after load", () => {
