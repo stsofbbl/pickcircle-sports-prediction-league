@@ -140,7 +140,7 @@
       const match = candidates[0];
       const canonicalPayload = buildCanonicalPayload(row, match, teamAId, teamBId);
       const existingImport = importByKey.get(row.externalKey);
-      if (existingImport) {
+      if (existingImport && existingImport.status !== "canceled") {
         const same = stableStringify(existingImport.normalizedPayload) === stableStringify(canonicalPayload);
         return {
           ...row, teamAId, teamBId, unresolvedNames: [], match, canonicalPayload, existingImport,
