@@ -41,6 +41,14 @@ test("admin can explicitly open and lock a prepared later phase", async () => {
   ]);
 });
 
+test("admin result reopen uses one event-scoped atomic RPC", async () => {
+  const { service, calls } = loadService();
+  await service.koshien.reopenKoshienResults("event-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    { name: "reopen_koshien_results", args: { p_event_id: "event-1" } },
+  ]);
+});
+
 test("revenge zombie and phase 3 saves send only server-owned IDs scores version and request ID", async () => {
   const { service, calls } = loadService();
   await service.koshien.saveRevengePick({ eventId: "event-1", teamId: "team-1", version: 2, requestId: "request-1" });

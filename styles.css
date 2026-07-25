@@ -276,6 +276,33 @@ body.auth-locked .app-shell {
   gap: 8px;
 }
 
+.league-admin-manager,
+.league-admin-list {
+  display: grid;
+  gap: 10px;
+}
+
+.league-admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.league-admin-row > div {
+  display: grid;
+  gap: 3px;
+}
+
+.league-admin-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .topbar,
 .match-strip,
 .league-panel,
@@ -3159,6 +3186,15 @@ body[data-theme="day"] .bottom-nav {
 
   .active-manager-status button {
     max-width: none;
+  }
+
+  .league-admin-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .league-admin-row button {
+    width: 100%;
   }
 
   .bottom-nav {
