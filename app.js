@@ -254,6 +254,7 @@ const els = {
   approvalPolicyGroup: document.querySelector("#approvalPolicyGroup"),
   leagueName: document.querySelector("#leagueName"),
   participantList: document.querySelector("#participantList"),
+  leagueAdminManager: document.querySelector("#leagueAdminManager"),
   participantName: document.querySelector("#participantName"),
   addParticipantButton: document.querySelector("#addParticipantButton"),
   presetDetails: document.querySelector("#presetDetails"),
@@ -307,6 +308,10 @@ let authMode = "login";
 let authRecoveryMode = false;
 let lastAuthActivityWrite = 0;
 let onlineAuthUser = null;
+let onlineLeagueId = "";
+let onlineLeagueMembers = [];
+let onlineLeagueAdminMessage = "";
+let onlineLeagueAdminSaving = false;
 let pendingKoshienSyncTimer = null;
 let pendingKoshienLoadPromise = null;
 let lastKoshienOnlineLoadUserId = "";
@@ -453,6 +458,9 @@ async function handleSupabaseAuthEvent(event) {
   if (authRecoveryMode) return;
   if (event === "SIGNED_OUT") {
     applyOnlineAuthUser(null);
+    onlineLeagueId = "";
+    onlineLeagueMembers = [];
+    onlineLeagueAdminMessage = "";
     lastKoshienOnlineLoadUserId = "";
     koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
     koshienPhase2DraftMessage = "";
@@ -1858,6 +1866,13 @@ function koshienLoadSkipMessage(reason) {
 function applyKoshienOnlineSnapshot(snapshot) {
   const eventRow = snapshot.event;
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
+  onlineLeagueId = String(snapshot.league?.id || "");
+  onlineLeagueMembers = (snapshot.members || []).map((row) => ({
+    userId: String(row.user_id || ""),
+    displayName: row.profiles?.display_name
+      || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`),
+    role: row.role === "admin" ? "admin" : "member",
+  })).filter((row) => row.userId);
   const memberRows = (snapshot.members || []).map((row) => ({
     userId: row.user_id,
     displayName: row.profiles?.display_name || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`),
@@ -1914,7 +1929,9 @@ function applyKoshienOnlineSnapshot(snapshot) {
     },
     predictions: Object.fromEntries(participants.map((name) => [name, createPrediction("koshien")])),
     results: snapshot.results?.payload || createResults("koshien"),
-    resultFlow: statusToResultFlow(eventRow.status),
+    resultFlow: rules.resultFlow && Object.keys(rules.resultFlow).length
+      ? rules.resultFlow
+      : statusToResultFlow(eventRow.status),
   }, { ...state, participants });
 
   participantEntries.forEach(({ userId, displayName, participantKey }) => {
@@ -2294,6 +2311,7 @@ function render() {
   if (els.leagueName) els.leagueName.value = state.leagueName;
   renderConnectionSettings();
   renderParticipants();
+  renderLeagueAdminManager();
   renderTemplates();
   renderPresetDescription();
   updatePresetSummary();
@@ -2419,9 +2437,9 @@ function koshienRuleGuideMarkup({ event = state.event, compact = false } = {}) {
 
 function renderActiveTournaments() {
   if (!els.activeTournamentCards) return;
-  const activeEvents = eventsByStatus("open", "resultWait");
+  const activeEvents = eventsByStatus("open", "resultWait", "finalized");
   els.activeTournamentCards.innerHTML = activeEvents.length
-    ? activeEvents.map((event) => event.status === "resultWait"
+    ? activeEvents.map((event) => ["resultWait", "finalized"].includes(event.status)
       ? resultWaitCardMarkup(event)
       : tournamentCardMarkup(event, {
         status: "予想受付中",
@@ -2600,6 +2618,9 @@ function koshienMatchRow(match, teams, disabledResults) {
       <label class="field"><span>勝者</span><select data-koshien-match-winner="${escapeAttr(match.match_id)}" ${disabledResults}>${optionList(winnerOptions, match.winner_id)}</select></label>
       <span class="status-label ${match.status === "completed" ? "open" : "pending"}">${match.status === "completed" ? "完了" : "未実施"}</span>
       <button class="ghost-button" type="button" data-koshien-match-save="${escapeAttr(match.match_id)}" ${disabledResults}>結果保存</button>
+      ${match.status === "completed"
+        ? `<button class="ghost-button danger-action" type="button" data-koshien-match-cancel="${escapeAttr(match.match_id)}" ${disabledResults}>結果取消</button>`
+        : ""}
     </div>
   `;
 }
@@ -2793,6 +2814,13 @@ function bindActiveEventManagerInputs() {
       saveKoshienMatchResult(button.dataset.koshienMatchSave);
     });
   });
+  root.querySelectorAll("[data-koshien-match-cancel]").forEach((button) => {
+    button.disabled = !canEditResults;
+    button.addEventListener("click", () => {
+      if (!canEditResults) return;
+      cancelKoshienMatchResult(button.dataset.koshienMatchCancel);
+    });
+  });
   root.querySelectorAll("[data-result-submit]").forEach((button) => {
     button.addEventListener("click", submitResults);
   });
@@ -2801,6 +2829,9 @@ function bindActiveEventManagerInputs() {
       const select = button.closest(".result-flow-actions")?.querySelector("[data-result-approver]");
       approveResults(select?.value || currentParticipantName());
     });
+  });
+  root.querySelectorAll("[data-result-reopen]").forEach((button) => {
+    button.addEventListener("click", reopenFinalizedResults);
   });
 }
 
@@ -3007,6 +3038,7 @@ function finalizeResultsIfReady() {
   if (approvalCount(state.event) < requiredApprovalCountForEvent(state.event)) return;
   state.event.resultFlow.status = "finalized";
   state.event.resultFlow.finalizedAt ||= new Date().toISOString();
+  state.event.status = "finalized";
 }
 
 function ensureResultFlow() {
@@ -3183,6 +3215,7 @@ function renderTournamentManageList() {
 
 function statusLabel(status) {
   if (status === "resultWait") return "結果待ち";
+  if (status === "finalized") return "結果確定";
   if (status === "archive") return "アーカイブ";
   return "予想受付中";
 }
@@ -3201,6 +3234,76 @@ function renderParticipants() {
     });
     els.participantList.append(chip);
   });
+}
+
+function renderLeagueAdminManager() {
+  if (!els.leagueAdminManager) return;
+  if (!isSupabaseAuthEnabled() || !currentAuthUser()) {
+    els.leagueAdminManager.innerHTML = `<p class="helper-text">オンラインログイン後に管理者を設定できます。</p>`;
+    return;
+  }
+  if (!onlineLeagueMembers.length) {
+    els.leagueAdminManager.innerHTML = `<p class="helper-text">リーグ参加者を読み込んでいます。</p>`;
+    return;
+  }
+  const canManage = isCurrentUserAdmin();
+  const adminCount = onlineLeagueMembers.filter((member) => member.role === "admin").length;
+  els.leagueAdminManager.innerHTML = `
+    <div class="league-admin-list">
+      ${onlineLeagueMembers.map((member) => {
+        const isAdmin = member.role === "admin";
+        const isLastAdmin = isAdmin && adminCount <= 1;
+        const disabled = !canManage || onlineLeagueAdminSaving || isLastAdmin;
+        return `
+          <div class="league-admin-row">
+            <div>
+              <strong>${escapeHtml(member.displayName)}</strong>
+              <span>${isAdmin ? "管理者" : "メンバー"}</span>
+            </div>
+            <button
+              class="ghost-button"
+              type="button"
+              data-league-admin-toggle="${escapeAttr(member.userId)}"
+              data-make-admin="${isAdmin ? "false" : "true"}"
+              ${disabled ? "disabled" : ""}
+            >${isAdmin ? "管理者を解除" : "管理者にする"}</button>
+          </div>`;
+      }).join("")}
+    </div>
+    <p class="auth-message" role="status">${escapeHtml(onlineLeagueAdminMessage || (canManage ? "複数人を管理者にできます。" : "管理者だけが権限を変更できます。"))}</p>
+  `;
+  els.leagueAdminManager.querySelectorAll("[data-league-admin-toggle]").forEach((button) => {
+    button.addEventListener("click", () => changeLeagueAdminRole(button));
+  });
+}
+
+async function changeLeagueAdminRole(button) {
+  if (!isCurrentUserAdmin() || onlineLeagueAdminSaving) return;
+  const userId = String(button.dataset.leagueAdminToggle || "");
+  const makeAdmin = button.dataset.makeAdmin === "true";
+  const member = onlineLeagueMembers.find((row) => row.userId === userId);
+  if (!member || !onlineLeagueId) return;
+  const actionLabel = makeAdmin ? "管理者に変更" : "管理者を解除";
+  if (!window.confirm(`${member.displayName}さんを${actionLabel}しますか？`)) return;
+
+  onlineLeagueAdminSaving = true;
+  onlineLeagueAdminMessage = `${actionLabel}しています…`;
+  renderLeagueAdminManager();
+  try {
+    await window.YosoDataService?.league?.manageAdmin?.({ leagueId: onlineLeagueId, userId, makeAdmin });
+    applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+    onlineLeagueAdminMessage = `${member.displayName}さんの権限を更新しました。`;
+    lastKoshienOnlineLoadUserId = "";
+    await loadKoshienOnlineState({ force: true });
+  } catch (error) {
+    onlineLeagueAdminMessage = /last league admin/i.test(error?.message || "")
+      ? "最後の管理者は解除できません。先に別の管理者を追加してください。"
+      : (error?.message || "管理者権限を変更できませんでした。");
+  } finally {
+    onlineLeagueAdminSaving = false;
+    renderAuthState();
+    renderLeagueAdminManager();
+  }
 }
 
 function renderTemplates() {
@@ -3271,18 +3374,52 @@ function resultFlowPanel() {
           <select data-result-approver>${approverOptions}</select>
           <button class="ghost-button" type="button" data-result-approve>承認する</button>
         ` : ""}
+        ${finalized && isCurrentUserAdmin()
+          ? `<button class="ghost-button danger-action" type="button" data-result-reopen>結果確定を取り消す</button>`
+          : ""}
       </div>
     </div>
   `;
 }
 
 function resultFlowMessage() {
-  if (isResultFinalized(state.event)) return "承認条件を満たしたため、この大会の結果はランキングに反映されています。";
+  if (isResultFinalized(state.event)) return "承認条件を満たしたためランキングへ反映済みです。管理者は確定を取り消して修正できます。";
   if (state.event.status === "resultWait" && state.event.resultFlow?.status === "submitted") {
     return "結果は提出済みです。必要承認数に達するまでランキングには反映されません。";
   }
   if (state.event.status === "resultWait") return "管理者が結果を入力して提出すると、参加者承認へ進みます。";
   return "予想受付中です。結果はまだランキングに反映されません。";
+}
+
+async function reopenFinalizedResults() {
+  if (!isCurrentUserAdmin() || !isResultFinalized(state.event)) return;
+  if (!window.confirm("大会全体の結果確定を取り消しますか？入力済みの試合結果は残り、承認だけがリセットされます。")) return;
+  const previousStatus = state.event.status;
+  const previousFlow = JSON.parse(JSON.stringify(state.event.resultFlow || createResultFlow()));
+  state.event.status = "resultWait";
+  state.event.resultFlow.status = "none";
+  state.event.resultFlow.submittedBy = "";
+  state.event.resultFlow.submittedAt = "";
+  state.event.resultFlow.approvals = {};
+  state.event.resultFlow.finalizedAt = "";
+  saveLocalStateOnly();
+  render();
+  try {
+    const shouldSaveOnline = baseTemplateId(state.event?.templateId) === "koshien"
+      && window.YosoDataService?.shouldAutoSaveKoshien?.();
+    if (shouldSaveOnline) {
+      if (!currentAuthUser()) throw new Error("オンラインの管理者ログインが必要です。");
+      const result = await saveKoshienOnlineNow({ updateConnection: false });
+      if (result?.skipped || result?.partial) throw new Error("オンライン保存が完了しませんでした。");
+    }
+    setKoshienMatchMessage("大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。", "success");
+  } catch (error) {
+    state.event.status = previousStatus;
+    state.event.resultFlow = previousFlow;
+    saveLocalStateOnly();
+    setKoshienMatchMessage(error?.message || "結果確定を取り消せませんでした。", "error");
+  }
+  render();
 }
 
 function updatePresetSummary() {
@@ -3507,6 +3644,12 @@ function koshienLoserFinishForRound(round, team) {
 function applyKoshienMatchFinishes() {
   normalizeKoshienEvent(state.event);
   const finishes = {};
+  state.event.results.finalScore = {
+    champion: "",
+    runnerUp: "",
+    championScore: "",
+    runnerUpScore: "",
+  };
   state.event.results.matches
     .filter((match) => match.status === "completed" && match.winner_id && match.loser_id)
     .forEach((match) => {
@@ -3562,6 +3705,68 @@ async function saveKoshienMatchResult(matchId) {
     setKoshienMatchMessage(koshienSaveOutcomeMessage(result, "Supabaseへ結果を保存しました。"), result?.skipped || result?.partial ? "error" : "success");
   } catch (error) {
     setKoshienMatchMessage(koshienStructuredSaveErrorMessage(error), "error");
+  }
+  renderScoresOnly();
+}
+
+function hasPreparedKoshienDownstream(roundKey) {
+  if (["R1", "R2", "R3"].includes(roundKey)) {
+    return Boolean(
+      koshienPhase2DraftView.formalDraftExists
+      || koshienLaterPhaseView.rounds?.revenge,
+    );
+  }
+  if (roundKey === "QF") return Boolean(koshienLaterPhaseView.rounds?.zombie);
+  if (roundKey === "SF") return Boolean(koshienLaterPhaseView.rounds?.phase3);
+  return false;
+}
+
+async function cancelKoshienMatchResult(matchId) {
+  const match = koshienMatchById(matchId);
+  if (!match || match.status !== "completed" || !isCurrentUserAdmin()) return;
+  if (hasPreparedKoshienDownstream(match.round)) {
+    setKoshienMatchMessage("後半フェーズを準備済みのため、この試合結果は取り消せません。先に対象フェーズのリセットが必要です。", "error");
+    renderActiveEventManager();
+    return;
+  }
+  if (!currentAuthUser() || !window.YosoDataService?.koshien?.cancelKoshienMatchResult) {
+    setKoshienMatchMessage("公式結果の取り消しにはオンラインの管理者ログインが必要です。", "error");
+    renderActiveEventManager();
+    return;
+  }
+  if (!window.confirm(`${koshienRoundLabel(match.round)} ${match.match_no} の確定結果を取り消しますか？得点とランキングも再計算されます。`)) return;
+
+  const previousResults = JSON.parse(JSON.stringify(state.event.results));
+  match.score_a = "";
+  match.score_b = "";
+  match.winner_id = "";
+  match.loser_id = "";
+  match.status = "scheduled";
+  applyKoshienMatchFinishes();
+  if (koshienLaterPhaseView.eventId === String(state.event.id)) koshienLaterPhaseView.official_scores = [];
+  saveLocalStateOnly();
+  setKoshienMatchMessage("試合結果を取り消し、Supabaseへ反映しています…", "success");
+  renderScoresOnly();
+
+  try {
+    await window.YosoDataService.koshien.cancelKoshienMatchResult({
+      eventId: String(state.event.id),
+      roundKey: match.round,
+      matchNo: Number(match.match_no),
+      resultsPayload: state.event.results,
+      scoreRows: koshienScoreRows(),
+    });
+    await Promise.all([
+      refreshKoshienPhase2DraftState({ renderAfter: false }),
+      refreshKoshienLaterPhaseState({ renderAfter: false }),
+    ]);
+    setKoshienMatchMessage(`${koshienRoundLabel(match.round)} ${match.match_no} の結果を取り消しました。得点とランキングを再計算しました。`, "success");
+  } catch (error) {
+    state.event.results = previousResults;
+    saveLocalStateOnly();
+    setKoshienMatchMessage(/downstream phase is already prepared/i.test(error?.message || "")
+      ? "後半フェーズを準備済みのため取り消せません。先に対象フェーズのリセットが必要です。"
+      : (error?.message || "試合結果を取り消せませんでした。元の結果へ戻しました。"), "error");
   }
   renderScoresOnly();
 }
@@ -4612,6 +4817,9 @@ function bindGenericInputs() {
       const select = button.closest(".result-flow-actions")?.querySelector("[data-result-approver]");
       approveResults(select?.value || currentParticipantName());
     });
+  });
+  els.eventForm.querySelectorAll("[data-result-reopen]").forEach((button) => {
+    button.addEventListener("click", reopenFinalizedResults);
   });
   els.eventForm.querySelectorAll("[data-result-index]").forEach((input) => {
     input.addEventListener("change", () => {
