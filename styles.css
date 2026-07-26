@@ -1156,9 +1156,7 @@ input[type="number"],
 }
 
 .club-pathway-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 12px;
   margin-top: 12px;
   padding: 12px;
@@ -1184,16 +1182,66 @@ input[type="number"],
   gap: 7px;
 }
 
-.club-pathway-actions span {
+.club-pathway-actions button {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--app-line);
-  border-radius: 999px;
-  color: var(--app-muted);
   font-size: 12px;
   font-weight: 900;
+}
+
+.club-pathway-summary,
+.club-request-row,
+.club-request-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.club-pathway-summary h3,
+.club-pathway-summary p,
+.club-request-row p {
+  margin: 0;
+}
+
+.club-invite-code,
+.club-request-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--app-muted);
+}
+
+.club-pathway-form,
+.club-request-list,
+.club-search-results {
+  display: grid;
+  gap: 8px;
+}
+
+.club-pathway-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-line);
+}
+
+.club-join-form .club-search-results,
+.club-join-form .club-request-row {
+  grid-column: 1 / -1;
+}
+
+.club-request-list {
+  padding-top: 8px;
+}
+
+.club-request-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--app-line);
+}
+
+.club-request-row > div:first-child {
+  min-width: 0;
 }
 
 @media (max-width: 560px) {
@@ -1201,8 +1249,22 @@ input[type="number"],
     display: grid;
   }
 
+  .club-pathway-summary,
+  .club-request-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .club-pathway-actions {
     justify-content: flex-start;
+  }
+
+  .club-pathway-form {
+    grid-template-columns: 1fr;
+  }
+
+  .club-request-actions {
+    width: 100%;
   }
 }
 

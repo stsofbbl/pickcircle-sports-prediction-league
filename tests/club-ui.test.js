@@ -34,10 +34,15 @@ test("Koshien tournament cards provide the existing rule guide from a compact mo
   assert.match(css, /\.tournament-card \.rule-guide-panel/);
 });
 
-test("club entry paths are visible on both the my page and settings while they are safely marked as preparing", () => {
-  assert.equal((html.match(/クラブを作る/g) || []).length, 2);
-  assert.equal((html.match(/クラブに参加する/g) || []).length, 2);
-  assert.equal((html.match(/クラブの作成・参加機能を準備しています。/g) || []).length, 2);
+test("club entry paths are visible on both the my page and settings with functional hosts", () => {
+  assert.equal((html.match(/data-club-pathway-host/g) || []).length, 2);
+  assert.match(app, /data-club-action="show-create"/);
+  assert.match(app, /data-club-action="show-join"/);
+  assert.match(app, /data-club-action="search"/);
+  assert.match(app, /data-club-action="lookup-invite"/);
+  assert.match(app, /data-club-action="review"/);
+  assert.match(app, /CLUB Owner/);
+  assert.match(app, /Co-Owner/);
   assert.match(css, /@media \(max-width: 560px\)[\s\S]*\.club-pathway-panel/);
 });
 

@@ -245,6 +245,7 @@ const els = {
   homeMonthScore: document.querySelector("#homeMonthScore"),
   homeTotalScore: document.querySelector("#homeTotalScore"),
   homeReadinessPanel: document.querySelector("#homeReadinessPanel"),
+  clubPathwayHosts: [...document.querySelectorAll("[data-club-pathway-host]")],
   homeTournamentCards: document.querySelector("#homeTournamentCards"),
   activeTournamentCards: document.querySelector("#activeTournamentCards"),
   activeEventManager: document.querySelector("#activeEventManager"),
@@ -312,6 +313,17 @@ let onlineLeagueId = "";
 let onlineLeagueMembers = [];
 let onlineLeagueAdminMessage = "";
 let onlineLeagueAdminSaving = false;
+let clubPathwayState = {
+  mode: "",
+  busy: false,
+  message: "",
+  messageKind: "",
+  searchResults: [],
+  inviteMatch: null,
+  myClubs: [],
+  myRequests: [],
+  pendingRequests: [],
+};
 let pendingKoshienSyncTimer = null;
 let pendingKoshienLoadPromise = null;
 let lastKoshienOnlineLoadUserId = "";
@@ -439,6 +451,7 @@ async function bootstrapSupabaseAuth() {
     await window.YosoDataService.auth.onAuthStateChange?.(handleSupabaseAuthEvent);
     applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
     if (onlineAuthUser) await loadKoshienOnlineState();
+    if (onlineAuthUser) await refreshClubPathwayData({ renderAfter: false });
   } catch (error) {
     console.warn("Supabase auth bootstrap failed", error);
     applyOnlineAuthUser(null);
@@ -461,6 +474,7 @@ async function handleSupabaseAuthEvent(event) {
     onlineLeagueId = "";
     onlineLeagueMembers = [];
     onlineLeagueAdminMessage = "";
+    clubPathwayState = { ...clubPathwayState, mode: "", message: "", searchResults: [], inviteMatch: null, myClubs: [], myRequests: [], pendingRequests: [] };
     lastKoshienOnlineLoadUserId = "";
     koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
     koshienPhase2DraftMessage = "";
@@ -474,6 +488,7 @@ async function handleSupabaseAuthEvent(event) {
     try {
       applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
       if (onlineAuthUser) await loadKoshienOnlineState();
+      if (onlineAuthUser) await refreshClubPathwayData({ renderAfter: false });
       renderAuthState();
       render();
     } catch (error) {
@@ -528,7 +543,7 @@ function renderAuthFormMode() {
 function renderAccountSettings(user = currentAuthUser()) {
   if (!user) return;
   if (els.accountUsername) els.accountUsername.value = user.username || "";
-  if (els.accountRole) els.accountRole.value = user.role === "admin" ? "管理者" : "メンバー";
+  if (els.accountRole) els.accountRole.value = clubRoleLabel(user.clubRole || (user.role === "admin" ? "co_owner" : "member"));
   if (els.accountDisplayNameInput) els.accountDisplayNameInput.value = user.displayName || "";
   if (els.accountEmailInput) els.accountEmailInput.value = user.email || "";
   if (els.accountIdleTimeout) els.accountIdleTimeout.value = String(user.idleTimeoutMinutes ?? AUTH_DEFAULT_IDLE_TIMEOUT_MINUTES);
@@ -1871,7 +1886,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
     userId: String(row.user_id || ""),
     displayName: row.profiles?.display_name
       || (row.user_id === snapshot.currentUser?.id ? currentName : `メンバー-${String(row.user_id || "").slice(0, 8)}`),
-    role: row.role === "admin" ? "admin" : "member",
+    role: row.role === "admin" ? "co_owner" : (row.role || "member"),
   })).filter((row) => row.userId);
   const memberRows = (snapshot.members || []).map((row) => ({
     userId: row.user_id,
@@ -2310,6 +2325,7 @@ function render() {
   updateEventStatuses();
   if (els.leagueName) els.leagueName.value = state.leagueName;
   renderConnectionSettings();
+  renderClubPathways();
   renderParticipants();
   renderLeagueAdminManager();
   renderTemplates();
@@ -2327,6 +2343,219 @@ function render() {
   renderShellMeta();
   renderPage();
   persist();
+}
+
+function clubRoleLabel(role) {
+  if (role === "owner") return "CLUB Owner";
+  if (role === "co_owner" || role === "admin") return "Co-Owner";
+  return "Member";
+}
+
+function isClubOwner() {
+  return currentAuthUser()?.clubRole === "owner";
+}
+
+function activeClubRecord() {
+  return clubPathwayState.myClubs.find((club) => String(club.league_id) === String(onlineLeagueId))
+    || clubPathwayState.myClubs.find((club) => String(club.league_id) === String(window.YosoSupabase?.config?.().activeLeagueId || ""))
+    || null;
+}
+
+function clubPathwayMessageMarkup() {
+  if (!clubPathwayState.message) return "";
+  return `<p class="auth-message ${clubPathwayState.messageKind === "error" ? "is-error" : ""}" role="status">${escapeHtml(clubPathwayState.message)}</p>`;
+}
+
+function clubPathwayMarkup() {
+  const user = currentAuthUser();
+  const activeClub = activeClubRecord();
+  const canUseClub = isSupabaseAuthEnabled() && Boolean(user);
+  const pendingRequests = clubPathwayState.myRequests.filter((request) => request.request_status === "pending");
+  const canReview = Boolean(activeClub && ["owner", "co_owner", "admin"].includes(activeClub.membership_role || user?.clubRole));
+  const currentRole = activeClub?.membership_role || user?.clubRole || "member";
+  const inviteCode = state.connection?.leagueId || window.YosoSupabase?.config?.().inviteCode || "";
+  const buttonDisabled = canUseClub && !clubPathwayState.busy ? "" : "disabled";
+  const pendingMarkup = pendingRequests.length
+    ? `<div class="club-request-list">${pendingRequests.map((request) => `
+      <div class="club-request-row">
+        <span>申請中</span>
+        <strong>${escapeHtml(request.league_name)}</strong>
+      </div>`).join("")}</div>`
+    : "";
+  const adminRequestsMarkup = canReview && clubPathwayState.pendingRequests.length
+    ? `<div class="club-request-list club-admin-request-list">
+      <strong>加入申請</strong>
+      ${clubPathwayState.pendingRequests.map((request) => `
+        <div class="club-request-row">
+          <div><strong>${escapeHtml(request.requester_display_name || "参加希望者")}</strong><small>${escapeHtml(formatDateTime(request.requested_at))}</small></div>
+          <div class="club-request-actions">
+            <button class="primary-button small-button" type="button" data-club-action="review" data-club-request-id="${escapeAttr(request.request_id)}" data-club-approve="true" ${buttonDisabled}>承認</button>
+            <button class="ghost-button small-button" type="button" data-club-action="review" data-club-request-id="${escapeAttr(request.request_id)}" data-club-approve="false" ${buttonDisabled}>拒否</button>
+          </div>
+        </div>`).join("")}
+    </div>`
+    : "";
+  const clubSummary = activeClub
+    ? `<div><h3>${escapeHtml(activeClub.league_name)}</h3><p>${escapeHtml(clubRoleLabel(currentRole))}として参加中です。</p>${["owner", "co_owner", "admin"].includes(currentRole) ? `<small class="club-invite-code">招待コード: ${escapeHtml(inviteCode)}</small>` : ""}</div>`
+    : `<div><h3>クラブ</h3><p>現在はどのクラブにも所属していません。</p></div>`;
+
+  let modeMarkup = "";
+  if (clubPathwayState.mode === "create") {
+    modeMarkup = `
+      <div class="club-pathway-form">
+        <label class="field compact-field"><span>クラブ名</span><input data-club-create-name type="text" maxlength="80" autocomplete="off" placeholder="例: 夏の予想部" ${buttonDisabled} /></label>
+        <button class="primary-button" type="button" data-club-action="create" ${buttonDisabled}>クラブを作成</button>
+      </div>`;
+  } else if (clubPathwayState.mode === "join") {
+    const searchResults = clubPathwayState.searchResults.length
+      ? `<div class="club-search-results">${clubPathwayState.searchResults.map((club) => `
+          <div class="club-request-row">
+            <strong>${escapeHtml(club.league_name)}</strong>
+            <button class="ghost-button small-button" type="button" data-club-action="request" data-club-league-id="${escapeAttr(club.league_id)}" ${buttonDisabled}>参加申請</button>
+          </div>`).join("")}</div>`
+      : "";
+    const inviteMatch = clubPathwayState.inviteMatch
+      ? `<div class="club-request-row"><strong>${escapeHtml(clubPathwayState.inviteMatch.league_name)}</strong><button class="ghost-button small-button" type="button" data-club-action="request" data-club-league-id="${escapeAttr(clubPathwayState.inviteMatch.league_id)}" ${buttonDisabled}>参加申請</button></div>`
+      : "";
+    modeMarkup = `
+      <div class="club-pathway-form club-join-form">
+        <label class="field compact-field"><span>クラブ名で探す</span><input data-club-search-query type="search" autocomplete="off" placeholder="2文字以上" ${buttonDisabled} /></label>
+        <button class="ghost-button" type="button" data-club-action="search" ${buttonDisabled}>検索</button>
+        ${searchResults}
+        <label class="field compact-field"><span>招待コード</span><input data-club-invite-code type="text" autocomplete="off" placeholder="招待コードを入力" ${buttonDisabled} /></label>
+        <button class="ghost-button" type="button" data-club-action="lookup-invite" ${buttonDisabled}>確認</button>
+        ${inviteMatch}
+      </div>`;
+  }
+
+  return `
+    <div class="club-pathway-summary">
+      ${clubSummary}
+      <div class="club-pathway-actions">
+        <button class="ghost-button small-button" type="button" data-club-action="show-create" ${buttonDisabled}>クラブを作る</button>
+        <button class="ghost-button small-button" type="button" data-club-action="show-join" ${buttonDisabled}>クラブに参加する</button>
+      </div>
+    </div>
+    ${modeMarkup}
+    ${pendingMarkup}
+    ${adminRequestsMarkup}
+    ${clubPathwayMessageMarkup()}
+  `;
+}
+
+function renderClubPathways() {
+  els.clubPathwayHosts.forEach((host) => {
+    host.innerHTML = clubPathwayMarkup();
+  });
+}
+
+function setClubPathwayMessage(message = "", kind = "") {
+  clubPathwayState.message = message;
+  clubPathwayState.messageKind = kind;
+  renderClubPathways();
+}
+
+function saveActiveClub(club) {
+  const leagueId = String(club?.league_id || "");
+  if (!leagueId) return;
+  const nextConfig = {
+    activeLeagueId: leagueId,
+    leagueName: club.league_name || state.leagueName,
+  };
+  if (club.invite_code) nextConfig.inviteCode = club.invite_code;
+  window.YosoSupabase?.saveConfig?.(nextConfig);
+  state.connection = normalizeConnectionSettings({
+    ...state.connection,
+    leagueId: club.invite_code || state.connection?.leagueId,
+  });
+  onlineLeagueId = leagueId;
+  lastKoshienOnlineLoadUserId = "";
+}
+
+async function refreshClubPathwayData({ renderAfter = true } = {}) {
+  if (!isSupabaseAuthEnabled() || !currentAuthUser()) {
+    clubPathwayState.myClubs = [];
+    clubPathwayState.myRequests = [];
+    clubPathwayState.pendingRequests = [];
+    if (renderAfter) renderClubPathways();
+    return;
+  }
+  try {
+    const league = window.YosoDataService?.league;
+    const clubs = await league?.listMyClubs?.() || [];
+    clubPathwayState.myClubs = clubs;
+    const requestedClub = activeClubRecord() || clubs[0];
+    if (!window.YosoSupabase?.config?.().activeLeagueId && requestedClub?.league_id) saveActiveClub(requestedClub);
+    const activeClub = activeClubRecord();
+    const [requests, pending] = await Promise.all([
+      league?.listMyJoinRequests?.() || [],
+      activeClub && ["owner", "co_owner", "admin"].includes(activeClub.membership_role)
+        ? league?.listPendingJoinRequests?.({ leagueId: activeClub.league_id }) || []
+        : [],
+    ]);
+    clubPathwayState.myRequests = requests;
+    clubPathwayState.pendingRequests = pending;
+  } catch (error) {
+    clubPathwayState.message = error?.message || "クラブ情報を取得できませんでした。";
+    clubPathwayState.messageKind = "error";
+  }
+  if (renderAfter) renderClubPathways();
+}
+
+async function handleClubPathwayAction(button) {
+  const action = button.dataset.clubAction;
+  if (action === "show-create" || action === "show-join") {
+    clubPathwayState.mode = action === "show-create" ? "create" : "join";
+    clubPathwayState.message = "";
+    clubPathwayState.searchResults = [];
+    clubPathwayState.inviteMatch = null;
+    renderClubPathways();
+    return;
+  }
+  if (!isSupabaseAuthEnabled() || !currentAuthUser()) {
+    setClubPathwayMessage("クラブ機能を使うにはオンラインログインが必要です。", "error");
+    return;
+  }
+
+  const panel = button.closest(".club-pathway-panel");
+  const readValue = (selector) => panel?.querySelector(selector)?.value.trim() || "";
+  const league = window.YosoDataService?.league;
+  clubPathwayState.busy = true;
+  renderClubPathways();
+  try {
+    if (action === "create") {
+      const club = await league?.createClub?.({ name: readValue("[data-club-create-name]") });
+      if (!club?.league_id) throw new Error("クラブを作成できませんでした。");
+      saveActiveClub(club);
+      clubPathwayState.mode = "";
+      clubPathwayState.message = `「${club.league_name}」を作成しました。`;
+    } else if (action === "search") {
+      clubPathwayState.searchResults = await league?.searchClubs?.({ query: readValue("[data-club-search-query]") }) || [];
+      clubPathwayState.inviteMatch = null;
+      clubPathwayState.message = clubPathwayState.searchResults.length ? "" : "一致するクラブが見つかりませんでした。";
+    } else if (action === "lookup-invite") {
+      clubPathwayState.inviteMatch = await league?.lookupClubInvite?.({ inviteCode: readValue("[data-club-invite-code]") });
+      clubPathwayState.searchResults = [];
+      clubPathwayState.message = clubPathwayState.inviteMatch ? "" : "有効な招待コードが見つかりませんでした。";
+    } else if (action === "request") {
+      const result = await league?.requestJoin?.({ leagueId: button.dataset.clubLeagueId });
+      clubPathwayState.mode = "";
+      clubPathwayState.message = result?.league_name ? `「${result.league_name}」へ参加申請しました。` : "参加申請しました。";
+    } else if (action === "review") {
+      const approved = button.dataset.clubApprove === "true";
+      await league?.reviewJoinRequest?.({ requestId: button.dataset.clubRequestId, approve: approved });
+      clubPathwayState.message = approved ? "加入申請を承認しました。" : "加入申請を拒否しました。";
+    }
+    clubPathwayState.messageKind = "";
+    await refreshClubPathwayData({ renderAfter: false });
+    if (action === "create") await loadKoshienOnlineState({ force: true });
+  } catch (error) {
+    clubPathwayState.message = error?.message || "クラブ操作に失敗しました。";
+    clubPathwayState.messageKind = "error";
+  } finally {
+    clubPathwayState.busy = false;
+    render();
+  }
 }
 
 function renderDashboard() {
@@ -3220,31 +3449,30 @@ function renderLeagueAdminManager() {
     els.leagueAdminManager.innerHTML = `<p class="helper-text">リーグ参加者を読み込んでいます。</p>`;
     return;
   }
-  const canManage = isCurrentUserAdmin();
-  const adminCount = onlineLeagueMembers.filter((member) => member.role === "admin").length;
+  const canManage = isClubOwner();
   els.leagueAdminManager.innerHTML = `
     <div class="league-admin-list">
       ${onlineLeagueMembers.map((member) => {
-        const isAdmin = member.role === "admin";
-        const isLastAdmin = isAdmin && adminCount <= 1;
-        const disabled = !canManage || onlineLeagueAdminSaving || isLastAdmin;
+        const isOwner = member.role === "owner";
+        const isCoOwner = member.role === "co_owner" || member.role === "admin";
+        const disabled = !canManage || onlineLeagueAdminSaving || isOwner;
         return `
           <div class="league-admin-row">
             <div>
               <strong>${escapeHtml(member.displayName)}</strong>
-              <span>${isAdmin ? "管理者" : "メンバー"}</span>
+              <span>${escapeHtml(clubRoleLabel(member.role))}</span>
             </div>
             <button
               class="ghost-button"
               type="button"
               data-league-admin-toggle="${escapeAttr(member.userId)}"
-              data-make-admin="${isAdmin ? "false" : "true"}"
+              data-make-admin="${isCoOwner ? "false" : "true"}"
               ${disabled ? "disabled" : ""}
-            >${isAdmin ? "管理者を解除" : "管理者にする"}</button>
+            >${isCoOwner ? "Co-Ownerを解除" : "Co-Ownerにする"}</button>
           </div>`;
       }).join("")}
     </div>
-    <p class="auth-message" role="status">${escapeHtml(onlineLeagueAdminMessage || (canManage ? "複数人を管理者にできます。" : "管理者だけが権限を変更できます。"))}</p>
+    <p class="auth-message" role="status">${escapeHtml(onlineLeagueAdminMessage || (canManage ? "CLUB OwnerだけがCo-Ownerを管理できます。" : "Co-Owner管理はCLUB Ownerだけが行えます。"))}</p>
   `;
   els.leagueAdminManager.querySelectorAll("[data-league-admin-toggle]").forEach((button) => {
     button.addEventListener("click", () => changeLeagueAdminRole(button));
@@ -3252,12 +3480,12 @@ function renderLeagueAdminManager() {
 }
 
 async function changeLeagueAdminRole(button) {
-  if (!isCurrentUserAdmin() || onlineLeagueAdminSaving) return;
+  if (!isClubOwner() || onlineLeagueAdminSaving) return;
   const userId = String(button.dataset.leagueAdminToggle || "");
   const makeAdmin = button.dataset.makeAdmin === "true";
   const member = onlineLeagueMembers.find((row) => row.userId === userId);
   if (!member || !onlineLeagueId) return;
-  const actionLabel = makeAdmin ? "管理者に変更" : "管理者を解除";
+  const actionLabel = makeAdmin ? "Co-Ownerに変更" : "Co-Ownerを解除";
   if (!window.confirm(`${member.displayName}さんを${actionLabel}しますか？`)) return;
 
   onlineLeagueAdminSaving = true;
@@ -6258,6 +6486,11 @@ els.navLinks.forEach((link) => {
 });
 
 document.addEventListener("click", (event) => {
+  const clubButton = event.target.closest("[data-club-action]");
+  if (clubButton) {
+    handleClubPathwayAction(clubButton);
+    return;
+  }
   const deleteButton = event.target.closest("[data-event-delete]");
   if (deleteButton) {
     const eventId = deleteButton.dataset.eventId;
