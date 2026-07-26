@@ -141,6 +141,22 @@
     }, `${phase}_${action}`);
   }
 
+  async function manageLeagueAdmin({ leagueId, userId, makeAdmin } = {}) {
+    const normalizedLeagueId = String(leagueId || "").trim();
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedLeagueId || !normalizedUserId || typeof makeAdmin !== "boolean") {
+      throw new Error("管理者変更payloadを確認してください。");
+    }
+    const { supabase } = await laterPhaseContext();
+    const { data, error } = await supabase.rpc("manage_league_admin", {
+      p_league_id: normalizedLeagueId,
+      p_user_id: normalizedUserId,
+      p_make_admin: makeAdmin,
+    });
+    if (error) throw koshienSaveError("league_admin", error, "管理者権限を変更できませんでした。");
+    return data;
+  }
+
   async function loadPhase2DraftState(eventId) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("フェーズ2ドラフトのevent_idが必要です。");
@@ -246,6 +262,48 @@
       .eq("league_id", leagueId);
     if (playersError) throw playersError;
     return window.YosoKoshienResults.buildScoreRows({ eventId, players: players || [], scoreRows });
+  }
+
+  async function cancelKoshienMatchResult({
+    eventId,
+    roundKey,
+    matchNo,
+    resultsPayload,
+    scoreRows = [],
+  } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedRoundKey = String(roundKey || "").trim();
+    const normalizedMatchNo = Number(matchNo);
+    if (!normalizedEventId || !normalizedRoundKey || !Number.isInteger(normalizedMatchNo) || normalizedMatchNo < 1
+      || !resultsPayload || typeof resultsPayload !== "object" || !Array.isArray(scoreRows)) {
+      throw new Error("試合結果取消payloadを確認してください。");
+    }
+    const { supabase } = await laterPhaseContext();
+    const league = await ensureLeagueMembership();
+    if (!league?.id) throw new Error("参加リーグを確認できませんでした。");
+    const persistedScoreRows = await buildKoshienScoreRows({
+      supabase,
+      eventId: normalizedEventId,
+      leagueId: league.id,
+      scoreRows,
+    });
+    const { data, error } = await supabase.rpc("cancel_koshien_match_result", {
+      p_event_id: normalizedEventId,
+      p_round_key: normalizedRoundKey,
+      p_match_no: normalizedMatchNo,
+      p_results_payload: resultsPayload,
+      p_score_rows: persistedScoreRows,
+    });
+    if (error) throw koshienSaveError("result_cancel", error, "試合結果を取り消せませんでした。");
+    return data;
+  }
+
+  async function reopenKoshienResults(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("結果確定取消のevent_idが必要です。");
+    return laterPhaseRpc("reopen_koshien_results", {
+      p_event_id: normalizedEventId,
+    }, "result_reopen");
   }
 
   async function saveKoshienResultTransaction({ supabase, league, event, teamRows, scoreRows }) {
@@ -587,6 +645,7 @@
         rules: {
           approvalPolicy: event.approvalPolicy || state.approvalPolicy,
           config: event.config || {},
+          resultFlow: event.resultFlow || {},
           localEventId: event.id,
         },
         created_by: user.id,
@@ -778,6 +837,7 @@
     },
     league: {
       ensureMembership: ensureLeagueMembership,
+      manageAdmin: manageLeagueAdmin,
     },
     koshien: {
       saveSnapshot: saveKoshienSnapshot,
@@ -790,6 +850,8 @@
       savePhase3Prediction,
       prepareLaterPhase,
       setLaterPhaseStatus,
+      cancelKoshienMatchResult,
+      reopenKoshienResults,
     },
     local: {
       loadState: loadLocalState,
