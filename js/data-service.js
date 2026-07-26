@@ -31,7 +31,10 @@
   }
 
   function koshienSaveError(stage, error, fallbackMessage) {
-    const message = error?.message || fallbackMessage || "Supabaseへの保存に失敗しました。";
+    const rawMessage = String(error?.message || "");
+    const message = /exactly four submitted players are required/i.test(rawMessage)
+      ? "予想を提出済みの参加者が4人必要です"
+      : rawMessage || fallbackMessage || "Supabaseへの保存に失敗しました。";
     const wrapped = new Error(message, error instanceof Error ? { cause: error } : undefined);
     wrapped.name = "KoshienSaveError";
     wrapped.stage = stage;

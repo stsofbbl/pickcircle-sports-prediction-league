@@ -1150,6 +1150,62 @@ input[type="number"],
   margin-top: 10px;
 }
 
+.tournament-card .rule-guide-panel {
+  position: relative;
+  z-index: 1;
+}
+
+.club-pathway-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.club-pathway-panel h3,
+.club-pathway-panel p {
+  margin: 0;
+}
+
+.club-pathway-panel p {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.club-pathway-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.club-pathway-actions span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+@media (max-width: 560px) {
+  .club-pathway-panel {
+    display: grid;
+  }
+
+  .club-pathway-actions {
+    justify-content: flex-start;
+  }
+}
+
 .rule-guide-grid {
   display: grid;
   width: min(720px, 100%);

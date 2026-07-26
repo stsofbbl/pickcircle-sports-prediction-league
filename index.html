@@ -87,11 +87,11 @@
       </header>
 
       <main class="app-pages">
-        <section class="app-page home-page" id="home" data-page="home" aria-label="ホーム">
-          <section class="dashboard-panel" aria-label="ホームダッシュボード">
+        <section class="app-page home-page" id="home" data-page="home" aria-label="マイページ">
+          <section class="dashboard-panel" aria-label="マイページダッシュボード">
             <div class="section-heading">
               <div>
-                <h2>ホーム</h2>
+                <h2>マイページ</h2>
                 <p id="homeClubLine">参加中のクラブと受付中の大会を確認します。</p>
               </div>
               <span class="status-pill">ダッシュボード</span>
@@ -115,6 +115,17 @@
             </div>
 
             <div class="home-readiness" id="homeReadinessPanel"></div>
+
+            <section class="club-pathway-panel" aria-label="クラブの作成と参加">
+              <div>
+                <h3>クラブ</h3>
+                <p>クラブの作成・参加機能を準備しています。</p>
+              </div>
+              <div class="club-pathway-actions" aria-label="クラブ機能は準備中">
+                <span>クラブを作る</span>
+                <span>クラブに参加する</span>
+              </div>
+            </section>
 
             <div class="section-heading compact-heading">
               <div>
@@ -209,7 +220,6 @@
               </div>
             </div>
 
-            <div id="eventRuleGuide"></div>
             <div class="event-form" id="eventForm"></div>
           </section>
         </section>
@@ -385,6 +395,15 @@
                 <div class="settings-section-head">
                   <h3>クラブ設定</h3>
                 </div>
+                <div class="club-pathway-panel" aria-label="クラブの作成と参加">
+                  <div>
+                    <p>クラブの作成・参加機能を準備しています。</p>
+                  </div>
+                  <div class="club-pathway-actions" aria-label="クラブ機能は準備中">
+                    <span>クラブを作る</span>
+                    <span>クラブに参加する</span>
+                  </div>
+                </div>
                 <label class="field">
                   <span>クラブ名</span>
                   <input id="leagueName" type="text" autocomplete="off" />
@@ -506,7 +525,7 @@
       <nav class="bottom-nav" aria-label="画面ナビゲーション">
         <a href="#home" data-nav-page="home">
           <span class="nav-icon" aria-hidden="true">⌂</span>
-          <span>ホーム</span>
+          <span>マイページ</span>
         </a>
         <a href="#prediction" data-nav-page="prediction">
           <span class="nav-icon" aria-hidden="true">◇</span>

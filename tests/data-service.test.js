@@ -198,6 +198,22 @@ test("transactional result failure rejects without falling back to separate tabl
   assert.equal(supabase.calls.some((call) => ["matches", "scores", "results"].includes(call.table)), false);
 });
 
+test("the four-submitted-player RPC error is localized before reaching the UI", async () => {
+  const service = loadDataService({
+    rpc: async () => ({ data: null, error: { message: "exactly four submitted players are required" } }),
+  });
+
+  await assert.rejects(
+    service.koshien.prepareLaterPhase({
+      eventId: "event-id",
+      phase: "best16",
+      opensAt: "2026-08-16T00:00:00.000Z",
+      deadlineAt: "2026-08-17T00:00:00.000Z",
+    }),
+    (error) => error?.stage === "best16_prepare" && error?.message === "予想を提出済みの参加者が4人必要です",
+  );
+});
+
 test("score payload preparation failure stops before the result transaction", async () => {
   const supabase = createSupabaseMock({ playersError: { code: "42501", message: "players RLS denied" } });
   const service = loadDataService(supabase.client);
