@@ -414,6 +414,18 @@
                 </div>
                 <div class="connection-settings-grid">
                   <label class="field">
+                    <span>リーグID</span>
+                    <input id="dataConnectionLeagueId" type="text" placeholder="例: g-unit-koshien-2026" />
+                  </label>
+                  <label class="field">
+                    <span>最終同期日時</span>
+                    <input id="dataConnectionLastSync" type="text" disabled />
+                  </label>
+                </div>
+                <details class="connection-advanced-settings">
+                  <summary>詳細設定</summary>
+                  <div class="connection-settings-grid">
+                  <label class="field">
                     <span>保存モード</span>
                     <select id="dataConnectionMode">
                       <option value="local">この端末のみ</option>
@@ -429,15 +441,8 @@
                     <span id="dataConnectionSpreadsheetIdLabel">スプレッドシートID</span>
                     <input id="dataConnectionSpreadsheetId" type="text" placeholder="スプレッドシートID" />
                   </label>
-                  <label class="field">
-                    <span>リーグID</span>
-                    <input id="dataConnectionLeagueId" type="text" placeholder="例: g-unit-koshien-2026" />
-                  </label>
-                  <label class="field">
-                    <span>最終同期</span>
-                    <input id="dataConnectionLastSync" type="text" disabled />
-                  </label>
                 </div>
+                </details>
                 <p class="field-note" id="dataConnectionNote">Google Apps ScriptをWebアプリとして公開し、そのURLとスプレッドシートIDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。</p>
                 <div class="account-action-row">
                   <button class="primary-button" id="dataConnectionSaveButton" type="button">接続設定を保存</button>

@@ -276,6 +276,21 @@ body.auth-locked .app-shell {
   gap: 8px;
 }
 
+.connection-advanced-settings {
+  margin-top: 12px;
+}
+
+.connection-advanced-settings summary {
+  cursor: pointer;
+  color: var(--soap-pink);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.connection-advanced-settings .connection-settings-grid {
+  margin-top: 12px;
+}
+
 .topbar,
 .match-strip,
 .league-panel,
