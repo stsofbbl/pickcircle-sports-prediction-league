@@ -2317,7 +2317,6 @@ function render() {
   updatePresetSummary();
   renderTournamentCreateOptions();
   renderEvent();
-  renderEventRuleGuide();
   renderScores();
   renderDashboard();
   renderActiveTournaments();
@@ -2345,7 +2344,7 @@ function renderDashboard() {
   if (els.homeMonthScore) els.homeMonthScore.textContent = formatScore(myScore);
   if (els.homeTotalScore) els.homeTotalScore.textContent = formatScore(myScore);
   if (els.approvalRuleText) els.approvalRuleText.textContent = `結果確定には${approvalRequired}人の承認が必要`;
-  renderHomeReadinessPanel({ participant, myScore, missingTournamentCount, openEvents });
+  renderHomeReadinessPanel({ participant, missingTournamentCount, openEvents });
   renderApprovalPolicy();
 
   if (!els.homeTournamentCards) return;
@@ -2363,13 +2362,9 @@ function renderDashboard() {
     : emptyTournamentMarkup("受付中の大会はありません");
 }
 
-function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount, openEvents }) {
+function renderHomeReadinessPanel({ participant, missingTournamentCount, openEvents }) {
   if (!els.homeReadinessPanel) return;
   const activeEvent = openEvents[0] || state.event;
-  const connection = normalizeConnectionSettings(state.connection);
-  const hasSheetsTarget = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
-  const storageLabel = connection.mode === "sheets" ? "Google Sheets" : "この端末";
-  const syncLabel = hasSheetsTarget ? "接続情報保存済み" : connection.mode === "sheets" ? "接続情報待ち" : "Google Sheets準備中";
   els.homeReadinessPanel.innerHTML = `
     <article class="readiness-card primary-readiness">
       <div>
@@ -2379,30 +2374,7 @@ function renderHomeReadinessPanel({ participant, myScore, missingTournamentCount
       </div>
       <a class="primary-link" href="${missingTournamentCount > 0 ? "#prediction" : "#ranking"}">${missingTournamentCount > 0 ? "YOSOへ" : "ランキングへ"}</a>
     </article>
-    <div class="readiness-grid">
-      <article class="readiness-card">
-        <span>保存先</span>
-        <strong>${escapeHtml(storageLabel)}</strong>
-        <small>${escapeHtml(syncLabel)}</small>
-      </article>
-      <article class="readiness-card">
-        <span>公開URL</span>
-        <strong>GitHub Pages</strong>
-        <small>スマホ確認OK</small>
-      </article>
-      <article class="readiness-card">
-        <span>自分のpt</span>
-        <strong>${formatScore(myScore)}</strong>
-        <small>確定済みフェーズを反映</small>
-      </article>
-    </div>
-    ${koshienRuleGuideMarkup({ event: activeEvent, compact: true })}
   `;
-}
-
-function renderEventRuleGuide() {
-  if (!els.eventRuleGuide) return;
-  els.eventRuleGuide.innerHTML = koshienRuleGuideMarkup({ event: state.event });
 }
 
 const koshienRuleGuideSheets = [
@@ -2413,12 +2385,12 @@ const koshienRuleGuideSheets = [
   { id: "summary", label: "サマリー", src: "./assets/koshien-rule-guides/summary.jpg", alt: "ルールシミュレーション結果サマリー" },
 ];
 
-function koshienRuleGuideMarkup({ event = state.event, compact = false } = {}) {
+function koshienRuleGuideMarkup({ event = state.event, compact = false, summaryLabel = "ルールガイド" } = {}) {
   if (baseTemplateId(event?.templateId) !== "koshien") return "";
   return `
     <details class="rule-guide-panel ${compact ? "is-compact" : ""}">
       <summary>
-        <span>ルールガイド</span>
+        <span>${escapeHtml(summaryLabel)}</span>
         <strong>${escapeHtml(event?.name || "YOSO 夏の甲子園2026")}</strong>
       </summary>
       <div class="rule-guide-grid">
@@ -2867,6 +2839,7 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
           `
           : `<a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>`}
       </div>
+      ${koshienRuleGuideMarkup({ event, compact: true, summaryLabel: "ルールを見る" })}
     </article>
   `;
 }
@@ -2914,6 +2887,7 @@ function resultWaitCardMarkup(event) {
         <a class="ghost-link ${finalized ? "is-disabled" : ""}" href="#active" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
         <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
       </div>
+      ${koshienRuleGuideMarkup({ event, compact: true, summaryLabel: "ルールを見る" })}
     </article>
   `;
 }
