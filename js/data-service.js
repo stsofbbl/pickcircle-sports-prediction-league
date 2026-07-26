@@ -25,6 +25,15 @@
     return profile?.display_name || user?.user_metadata?.display_name || user?.email?.split("@")[0] || "YOSO member";
   }
 
+  function clubRoleFromMembership(membership) {
+    const role = String(membership?.role || "member");
+    return role === "admin" ? "co_owner" : role;
+  }
+
+  function isClubAdminRole(role) {
+    return ["owner", "co_owner", "admin"].includes(String(role || ""));
+  }
+
   function isMissingRelationError(error) {
     return ["42P01", "PGRST205"].includes(error?.code)
       || /relation .* does not exist|could not find the table .* in the schema cache/i.test(error?.message || "");
@@ -343,12 +352,14 @@
 
   function toAppUser(user, membership, profile) {
     if (!user) return null;
+    const clubRole = clubRoleFromMembership(membership);
     return {
       id: user.id,
       username: user.email || user.id,
       displayName: displayNameFromUser(user, profile),
       email: user.email || "",
-      role: membership?.role === "admin" ? "admin" : "member",
+      role: isClubAdminRole(clubRole) ? "admin" : "member",
+      clubRole,
       provider: "supabase",
       rememberDefault: true,
       idleTimeoutMinutes: 0,
@@ -375,11 +386,11 @@
   async function getCurrentMembership(userId) {
     const supabase = await supabaseClient();
     const current = config();
-    if (!supabase || !userId || !current.inviteCode) return null;
+    if (!supabase || !userId) return null;
     const { data: leagues, error: leagueError } = await supabase
       .from("leagues")
       .select("id")
-      .eq("invite_code", current.inviteCode)
+      .eq(current.activeLeagueId ? "id" : "invite_code", current.activeLeagueId || current.inviteCode)
       .limit(1);
     if (leagueError || !leagues?.length) return null;
     const { data, error } = await supabase
@@ -443,7 +454,6 @@
       password,
     });
     if (error) throw error;
-    await ensureLeagueMembership({ createIfMissing: true });
     const [membership, profile] = await Promise.all([
       getCurrentMembership(data.user?.id),
       getProfile(data.user?.id),
@@ -497,25 +507,55 @@
       const existingLeague = existingLeagues[0];
       const membership = await getCurrentMembership(user.id);
       if (membership) return existingLeague;
-
-      const joined = await supabase.rpc("join_league_by_invite", { p_invite_code: current.inviteCode });
-      if (joined.error) throw joined.error;
-      return joined.data || existingLeague;
     }
+    return null;
+  }
 
-    const rpcName = createIfMissing ? "create_league_with_admin" : "join_league_by_invite";
-    const args = createIfMissing
-      ? { p_name: current.leagueName || "YOSO League", p_invite_code: current.inviteCode }
-      : { p_invite_code: current.inviteCode };
-    const { data, error } = await supabase.rpc(rpcName, args);
-    if (error && createIfMissing && /already exists/i.test(error.message || "")) {
-      const fallback = await supabase.rpc("join_league_by_invite", { p_invite_code: current.inviteCode });
-      if (fallback.error) throw fallback.error;
-      return fallback.data;
-    }
-    if (error && !createIfMissing) return null;
+  async function clubRpc(name, args = {}) {
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc(name, args);
     if (error) throw error;
     return data;
+  }
+
+  async function createClub({ name } = {}) {
+    const rows = await clubRpc("create_club", { p_name: String(name || "").trim() });
+    return Array.isArray(rows) ? rows[0] || null : rows;
+  }
+
+  async function searchClubs({ query } = {}) {
+    return (await clubRpc("search_clubs", { p_query: String(query || "").trim() })) || [];
+  }
+
+  async function lookupClubInvite({ inviteCode } = {}) {
+    const rows = await clubRpc("lookup_club_invite", { p_invite_code: String(inviteCode || "").trim() });
+    return Array.isArray(rows) ? rows[0] || null : rows;
+  }
+
+  async function requestClubJoin({ leagueId } = {}) {
+    const rows = await clubRpc("request_club_join", { p_league_id: String(leagueId || "").trim() });
+    return Array.isArray(rows) ? rows[0] || null : rows;
+  }
+
+  async function listMyClubJoinRequests() {
+    return (await clubRpc("list_my_club_join_requests")) || [];
+  }
+
+  async function listMyClubs() {
+    return (await clubRpc("list_my_clubs")) || [];
+  }
+
+  async function listPendingClubJoinRequests({ leagueId } = {}) {
+    return (await clubRpc("list_pending_club_join_requests", { p_league_id: String(leagueId || "").trim() })) || [];
+  }
+
+  async function reviewClubJoinRequest({ requestId, approve } = {}) {
+    const rows = await clubRpc("review_club_join_request", {
+      p_request_id: String(requestId || "").trim(),
+      p_approve: Boolean(approve),
+    });
+    return Array.isArray(rows) ? rows[0] || null : rows;
   }
 
   async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows, savePrediction }) {
@@ -841,6 +881,14 @@
     league: {
       ensureMembership: ensureLeagueMembership,
       manageAdmin: manageLeagueAdmin,
+      createClub,
+      searchClubs,
+      lookupClubInvite,
+      requestJoin: requestClubJoin,
+      listMyJoinRequests: listMyClubJoinRequests,
+      listMyClubs,
+      listPendingJoinRequests: listPendingClubJoinRequests,
+      reviewJoinRequest: reviewClubJoinRequest,
     },
     koshien: {
       saveSnapshot: saveKoshienSnapshot,
