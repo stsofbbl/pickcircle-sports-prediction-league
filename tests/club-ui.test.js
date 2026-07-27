@@ -41,6 +41,10 @@ test("club entry paths are visible on both the my page and settings with functio
   assert.match(app, /data-club-action="search"/);
   assert.match(app, /data-club-action="lookup-invite"/);
   assert.match(app, /data-club-action="review"/);
+  assert.match(app, /data-club-action="rename"/);
+  assert.match(app, /data-club-action="delete"/);
+  assert.match(app, /data-league-member-remove/);
+  assert.match(app, /function isClubAdmin\(\)/);
   assert.match(app, /CLUB Owner/);
   assert.match(app, /Co-Owner/);
   assert.match(css, /@media \(max-width: 560px\)[\s\S]*\.club-pathway-panel/);
