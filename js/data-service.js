@@ -492,6 +492,37 @@
     await supabase.auth.signOut();
   }
 
+  async function deleteAccount({ password } = {}) {
+    const confirmedPassword = String(password || "");
+    if (confirmedPassword.length < 6) throw new Error("現在のパスワードを入力してください。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.functions.invoke("delete-account", {
+      body: { password: confirmedPassword },
+    });
+    if (error) {
+      let details = {};
+      try {
+        details = await error.context?.json?.() || {};
+      } catch {
+        details = {};
+      }
+      const message = details.message
+        || (details.error === "password_confirmation_failed" ? "現在のパスワードが違います。" : "")
+        || error.message
+        || "アカウントを削除できませんでした。";
+      const failure = new Error(message);
+      failure.code = details.error || error.code || "";
+      throw failure;
+    }
+    if (!data?.deleted) {
+      const failure = new Error(data?.message || "アカウントを削除できませんでした。");
+      failure.code = data?.error || "";
+      throw failure;
+    }
+    return data;
+  }
+
   async function ensureLeagueMembership({ createIfMissing = false } = {}) {
     const supabase = await supabaseClient();
     const current = config();
@@ -841,8 +872,9 @@
         .maybeSingle(),
       supabase
         .from("league_members")
-        .select("user_id, role, profiles(display_name)")
-        .eq("league_id", league.id),
+        .select("user_id, role, membership_status, profiles(display_name)")
+        .eq("league_id", league.id)
+        .eq("membership_status", "active"),
     ]);
     if (teamsError) throw teamsError;
     if (resultsError) throw resultsError;
@@ -899,6 +931,7 @@
       updatePassword,
       onAuthStateChange,
       signOut,
+      deleteAccount,
     },
     league: {
       ensureMembership: ensureLeagueMembership,

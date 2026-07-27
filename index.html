@@ -378,6 +378,18 @@
                     <button class="ghost-button" id="accountPasswordButton" type="button">パスワード変更</button>
                     <button class="ghost-button" id="settingsLogoutButton" type="button">ログアウト</button>
                   </div>
+                  <div class="account-delete-panel">
+                    <div>
+                      <span>アカウント削除</span>
+                      <strong>認証とクラブ所属を削除します</strong>
+                      <small>過去のYOSO・得点・ランキングは、退会済みメンバーとして匿名で残ります。Ownerは先にクラブを削除してください。</small>
+                    </div>
+                    <label class="field compact-field">
+                      <span>現在のパスワード</span>
+                      <input id="accountDeletePassword" type="password" autocomplete="current-password" />
+                    </label>
+                    <button class="ghost-button danger-action" id="accountDeleteButton" type="button">アカウントを削除</button>
+                  </div>
                   <p class="auth-message" id="accountMessage" role="status"></p>
                 </div>
               </section>
