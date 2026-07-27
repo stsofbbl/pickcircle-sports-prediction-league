@@ -558,13 +558,35 @@
     return Array.isArray(rows) ? rows[0] || null : rows;
   }
 
+  async function renameClub({ leagueId, name } = {}) {
+    const rows = await clubRpc("rename_club", {
+      p_league_id: String(leagueId || "").trim(),
+      p_name: String(name || "").trim(),
+    });
+    return Array.isArray(rows) ? rows[0] || null : rows;
+  }
+
+  async function deleteClub({ leagueId, confirmationName } = {}) {
+    return clubRpc("delete_club", {
+      p_league_id: String(leagueId || "").trim(),
+      p_confirm_name: String(confirmationName || "").trim(),
+    });
+  }
+
+  async function removeClubMember({ leagueId, userId } = {}) {
+    return clubRpc("remove_club_member", {
+      p_league_id: String(leagueId || "").trim(),
+      p_user_id: String(userId || "").trim(),
+    });
+  }
+
   async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows, savePrediction }) {
     const displayName = participantName || displayNameFromUser(user, profile);
     const playerPayload = {
       league_id: league.id,
       profile_id: user.id,
       display_name: displayName,
-      is_admin: membership?.role === "admin",
+      is_admin: isClubAdminRole(clubRoleFromMembership(membership)),
     };
     const { data: player, error: playerError } = await supabase
       .from("players")
@@ -576,7 +598,7 @@
     const eventId = String(event.id);
     let teamRows = [];
     const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
-    if (membership?.role === "admin" && teams.length) {
+    if (isClubAdminRole(clubRoleFromMembership(membership)) && teams.length) {
       const rows = teams.map((name, index) => {
         const meta = koshienTeamMeta(event, name, index);
         return {
@@ -657,7 +679,7 @@
     if (!league?.id) return { skipped: true, reason: "league is not ready" };
     const membership = await getCurrentMembership(user.id);
     const profile = await getProfile(user.id);
-    const isAdmin = membership?.role === "admin";
+    const isAdmin = isClubAdminRole(clubRoleFromMembership(membership));
     const savePrediction = event.status === "open"
       && (!event.deadline || Date.now() < Date.parse(event.deadline));
     const hasStructuredResultData = isAdmin && (
@@ -889,6 +911,9 @@
       listMyClubs,
       listPendingJoinRequests: listPendingClubJoinRequests,
       reviewJoinRequest: reviewClubJoinRequest,
+      renameClub,
+      deleteClub,
+      removeMember: removeClubMember,
     },
     koshien: {
       saveSnapshot: saveKoshienSnapshot,
