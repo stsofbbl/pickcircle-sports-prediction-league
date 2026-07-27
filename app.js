@@ -219,6 +219,8 @@ const els = {
   accountNewPassword: document.querySelector("#accountNewPassword"),
   accountSaveButton: document.querySelector("#accountSaveButton"),
   accountPasswordButton: document.querySelector("#accountPasswordButton"),
+  accountDeletePassword: document.querySelector("#accountDeletePassword"),
+  accountDeleteButton: document.querySelector("#accountDeleteButton"),
   settingsLogoutButton: document.querySelector("#settingsLogoutButton"),
   accountMessage: document.querySelector("#accountMessage"),
   dataConnectionMode: document.querySelector("#dataConnectionMode"),
@@ -1367,6 +1369,45 @@ async function handlePasswordChange() {
   if (els.accountCurrentPassword) els.accountCurrentPassword.value = "";
   if (els.accountNewPassword) els.accountNewPassword.value = "";
   setAccountMessage("パスワードを変更しました。");
+}
+
+async function handleAccountDelete() {
+  if (!isSupabaseAuthEnabled() || !currentAuthUser() || !window.YosoDataService?.auth?.deleteAccount) {
+    setAccountMessage("アカウント削除にはオンラインログインが必要です。");
+    return;
+  }
+  const password = els.accountDeletePassword?.value || "";
+  if (password.length < AUTH_MIN_PASSWORD_LENGTH) {
+    setAccountMessage("現在のパスワードを入力してください。");
+    return;
+  }
+  const confirmed = window.confirm("アカウントを削除します。認証とクラブ所属は削除され、過去のYOSO・得点・ランキングは匿名で残ります。元に戻せません。続けますか？");
+  if (!confirmed) return;
+
+  if (els.accountDeleteButton) els.accountDeleteButton.disabled = true;
+  setAccountMessage("アカウントを削除しています…");
+  try {
+    await window.YosoDataService.auth.deleteAccount({ password });
+    try {
+      await window.YosoDataService.auth.signOut();
+    } catch {
+      // Auth user deletion can make the remote sign-out request fail. The local
+      // auth state is cleared below regardless.
+    }
+    if (els.accountDeletePassword) els.accountDeletePassword.value = "";
+    applyOnlineAuthUser(null);
+    saveAuthSession(null);
+    lastKoshienOnlineLoadUserId = "";
+    renderAuthState();
+    render();
+    setAuthMessage("アカウントを削除しました。過去の成績は匿名で保存されています。");
+  } catch (error) {
+    setAccountMessage(error?.code === "owned_club_exists"
+      ? "Ownerのクラブを先に削除してください。"
+      : (error?.message || "アカウントを削除できませんでした。"));
+  } finally {
+    if (els.accountDeleteButton) els.accountDeleteButton.disabled = false;
+  }
 }
 
 function setAccountMessage(message) {
@@ -3426,6 +3467,10 @@ function renderArchive() {
 function renderTournamentManageList() {
   if (!els.tournamentManageList) return;
   const events = state.events || [];
+  const onlineClubMode = isSupabaseAuthEnabled() && Boolean(currentAuthUser());
+  const canManage = !onlineClubMode || isClubAdmin();
+  if (els.settingsNewEventButton) els.settingsNewEventButton.disabled = !canManage;
+  if (els.newEventButton) els.newEventButton.disabled = !canManage;
   els.tournamentManageList.innerHTML = events.length
     ? events.map((event) => {
       const isActive = event.id === state.activeEventId;
@@ -3438,10 +3483,12 @@ function renderTournamentManageList() {
           </div>
           <div class="tournament-manage-actions">
             <button type="button" data-event-manage="select" data-event-id="${escapeAttr(event.id)}">選択</button>
-            <button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
-            <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
-            <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>
-            <button type="button" class="danger-action" data-event-delete data-event-id="${escapeAttr(event.id)}">削除</button>
+            ${canManage ? `
+              <button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
+              <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
+              <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>
+              <button type="button" class="danger-action" data-event-delete data-event-id="${escapeAttr(event.id)}">削除</button>
+            ` : ""}
           </div>
         </article>
       `;
@@ -3458,18 +3505,27 @@ function statusLabel(status) {
 
 function renderParticipants() {
   if (!els.participantList) return;
+  const onlineClubMode = isSupabaseAuthEnabled() && Boolean(currentAuthUser());
+  if (els.participantName) els.participantName.disabled = onlineClubMode;
+  if (els.addParticipantButton) els.addParticipantButton.disabled = onlineClubMode;
   els.participantList.innerHTML = "";
   state.participants.forEach((name) => {
     const chip = document.createElement("span");
     chip.className = "chip";
-    chip.innerHTML = `<span>${escapeHtml(name)}</span><button type="button" aria-label="${escapeHtml(name)}を削除">×</button>`;
-    chip.querySelector("button").addEventListener("click", () => {
+    chip.innerHTML = `<span>${escapeHtml(name)}</span>${onlineClubMode ? "" : `<button type="button" aria-label="${escapeHtml(name)}を削除">×</button>`}`;
+    chip.querySelector("button")?.addEventListener("click", () => {
       state.participants = state.participants.filter((item) => item !== name);
       (state.events || []).forEach((event) => delete event.predictions?.[name]);
       render();
     });
     els.participantList.append(chip);
   });
+  if (onlineClubMode) {
+    const helper = document.createElement("p");
+    helper.className = "helper-text";
+    helper.textContent = "クラブ参加者の追加・削除は加入申請とメンバー管理を使います。";
+    els.participantList.append(helper);
+  }
 }
 
 function renderLeagueAdminManager() {
@@ -6466,6 +6522,7 @@ els.leagueName?.addEventListener("input", () => {
 });
 
 els.addParticipantButton?.addEventListener("click", () => {
+  if (isSupabaseAuthEnabled() && currentAuthUser()) return;
   const name = els.participantName.value.trim();
   if (!name || state.participants.includes(name)) return;
   state.participants.push(name);
@@ -6482,12 +6539,14 @@ els.participantName?.addEventListener("keydown", (event) => {
 });
 
 els.newEventButton?.addEventListener("click", () => {
+  if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
   const event = createTournamentFromSettings({ fallbackName: templates[state.activeTemplate]?.eventName });
   addAndSelectEvent(event);
   render();
 });
 
 els.settingsNewEventButton?.addEventListener("click", () => {
+  if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
   const event = createTournamentFromSettings();
   addAndSelectEvent(event);
   render();
@@ -6555,6 +6614,7 @@ document.addEventListener("click", (event) => {
   }
   const deleteButton = event.target.closest("[data-event-delete]");
   if (deleteButton) {
+    if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
     const eventId = deleteButton.dataset.eventId;
     const target = (state.events || []).find((candidate) => candidate.id === eventId);
     if (!target) return;
@@ -6570,6 +6630,7 @@ document.addEventListener("click", (event) => {
   }
   const statusButton = event.target.closest("[data-event-status]");
   if (statusButton) {
+    if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
     const item = (state.events || []).find((candidate) => candidate.id === statusButton.dataset.eventId);
     if (!item) return;
     item.status = statusButton.dataset.eventStatus;
@@ -6629,6 +6690,7 @@ els.logoutButton?.addEventListener("click", logoutAuthUser);
 els.settingsLogoutButton?.addEventListener("click", logoutAuthUser);
 els.accountSaveButton?.addEventListener("click", handleAccountSave);
 els.accountPasswordButton?.addEventListener("click", handlePasswordChange);
+els.accountDeleteButton?.addEventListener("click", handleAccountDelete);
 els.dataConnectionSaveButton?.addEventListener("click", handleConnectionSave);
 els.dataConnectionMode?.addEventListener("change", handleConnectionModeChange);
 els.dataConnectionTestButton?.addEventListener("click", handleConnectionTest);

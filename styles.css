@@ -276,6 +276,27 @@ body.auth-locked .app-shell {
   gap: 8px;
 }
 
+.account-delete-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.7fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(255, 110, 110, 0.28);
+  border-radius: 16px;
+  background: rgba(120, 20, 20, 0.08);
+}
+
+.account-delete-panel > div {
+  display: grid;
+  gap: 4px;
+}
+
+.account-delete-panel small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .connection-advanced-settings {
   margin-top: 12px;
 }
@@ -1887,6 +1908,7 @@ dialog::backdrop {
   .koshien-phase2-pick-form,
   .account-settings-grid,
   .account-password-grid,
+  .account-delete-panel,
   .connection-settings-grid,
   .market-row,
   .draft-row,
