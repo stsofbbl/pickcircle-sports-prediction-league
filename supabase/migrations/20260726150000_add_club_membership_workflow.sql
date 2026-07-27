@@ -30,6 +30,20 @@ alter table public.league_members
 -- legacy role value is being replaced by the owner/co-owner model.
 drop trigger if exists protect_last_league_admin on public.league_members;
 
+-- Audit values are constrained to legacy roles, so drop those constraints before
+-- converting historical admin entries.
+alter table public.league_admin_audit
+  drop constraint if exists league_admin_audit_previous_role_check,
+  drop constraint if exists league_admin_audit_new_role_check;
+
+update public.league_admin_audit
+set previous_role = 'co_owner'
+where previous_role = 'admin';
+
+update public.league_admin_audit
+set new_role = 'co_owner'
+where new_role = 'admin';
+
 update public.league_members lm
 set role = 'owner'
 from public.leagues l
@@ -120,6 +134,29 @@ as $$
   );
 $$;
 
+-- Direct table access follows the same owner/co-owner/member model as the RPCs.
+drop policy if exists leagues_update_admin on public.leagues;
+create policy leagues_update_owner on public.leagues
+for update to authenticated
+using (public.is_league_owner(id))
+with check (
+  public.is_league_owner(id)
+  and created_by = (select auth.uid())
+);
+
+drop policy if exists leagues_delete_owner on public.leagues;
+create policy leagues_delete_owner on public.leagues
+for delete to authenticated
+using (public.is_league_owner(id));
+
+drop policy if exists league_members_delete_admin on public.league_members;
+create policy league_members_delete_admin on public.league_members
+for delete to authenticated
+using (
+  (public.is_league_owner(league_id) and role <> 'owner')
+  or (public.is_league_admin(league_id) and role = 'member')
+);
+
 drop policy if exists profiles_select_members on public.profiles;
 create policy profiles_select_members on public.profiles
 for select to authenticated
@@ -141,23 +178,8 @@ create policy league_members_select_same_league on public.league_members
 for select to authenticated
 using (public.is_league_member(league_id));
 
+-- Membership creation is only permitted through the owner-checked RPCs.
 drop policy if exists league_members_insert_admin_or_creator on public.league_members;
-create policy league_members_insert_admin_or_creator on public.league_members
-for insert to authenticated
-with check (
-  public.is_league_admin(league_id)
-  or (
-    user_id = (select auth.uid())
-    and role = 'owner'
-    and membership_status = 'active'
-    and exists (
-      select 1
-      from public.leagues l
-      where l.id = league_id
-        and l.created_by = (select auth.uid())
-    )
-  )
-);
 
 drop policy if exists league_join_requests_requester_select on public.league_join_requests;
 create policy league_join_requests_requester_select on public.league_join_requests
@@ -349,19 +371,142 @@ create or replace function public.list_my_clubs()
 returns table (
   league_id uuid,
   league_name text,
-  membership_role text
+  membership_role text,
+  invite_code text
 )
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select l.id, l.name, lm.role
+  select l.id,
+         l.name,
+         lm.role,
+         case when lm.role in ('owner', 'co_owner') then l.invite_code else null end
   from public.league_members lm
   join public.leagues l on l.id = lm.league_id
   where lm.user_id = (select auth.uid())
     and lm.membership_status = 'active'
   order by l.name;
+$$;
+
+create or replace function public.rename_club(
+  p_league_id uuid,
+  p_name text
+)
+returns table (
+  league_id uuid,
+  league_name text,
+  invite_code text,
+  membership_role text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_name text := btrim(coalesce(p_name, ''));
+begin
+  if auth.uid() is null then
+    raise exception 'login required' using errcode = '42501';
+  end if;
+  if not public.is_league_owner(p_league_id) then
+    raise exception 'club owner permission is required' using errcode = '42501';
+  end if;
+  if char_length(v_name) < 1 or char_length(v_name) > 80 then
+    raise exception 'club name must be between 1 and 80 characters' using errcode = '22023';
+  end if;
+
+  return query
+  update public.leagues l
+  set name = v_name
+  where l.id = p_league_id
+    and l.created_by = auth.uid()
+  returning l.id, l.name, l.invite_code, 'owner'::text;
+end;
+$$;
+
+create or replace function public.delete_club(
+  p_league_id uuid,
+  p_confirm_name text
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_name text;
+begin
+  if auth.uid() is null then
+    raise exception 'login required' using errcode = '42501';
+  end if;
+  if not public.is_league_owner(p_league_id) then
+    raise exception 'club owner permission is required' using errcode = '42501';
+  end if;
+
+  select l.name into v_name
+  from public.leagues l
+  where l.id = p_league_id
+    and l.created_by = auth.uid()
+  for update;
+
+  if v_name is null or btrim(coalesce(p_confirm_name, '')) <> v_name then
+    raise exception 'club name confirmation does not match' using errcode = '22023';
+  end if;
+
+  delete from public.leagues
+  where id = p_league_id;
+end;
+$$;
+
+create or replace function public.remove_club_member(
+  p_league_id uuid,
+  p_user_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_target_role text;
+begin
+  if auth.uid() is null then
+    raise exception 'login required' using errcode = '42501';
+  end if;
+  if not public.is_league_admin(p_league_id) then
+    raise exception 'club admin permission is required' using errcode = '42501';
+  end if;
+
+  select lm.role
+  into v_target_role
+  from public.league_members lm
+  where lm.league_id = p_league_id
+    and lm.user_id = p_user_id
+    and lm.membership_status = 'active'
+  for update;
+
+  if v_target_role is null then
+    raise exception 'active club member not found' using errcode = 'P0002';
+  end if;
+  if v_target_role = 'owner' then
+    raise exception 'club owner cannot be removed' using errcode = '42501';
+  end if;
+  if not public.is_league_owner(p_league_id) and v_target_role <> 'member' then
+    raise exception 'co-owner can remove members only' using errcode = '42501';
+  end if;
+
+  delete from public.league_members
+  where league_id = p_league_id
+    and user_id = p_user_id;
+
+  return jsonb_build_object(
+    'league_id', p_league_id,
+    'user_id', p_user_id,
+    'removed', true
+  );
+end;
 $$;
 
 create or replace function public.list_pending_club_join_requests(p_league_id uuid)
@@ -458,18 +603,6 @@ begin
 end;
 $$;
 
-update public.league_admin_audit
-set previous_role = 'co_owner'
-where previous_role = 'admin';
-
-update public.league_admin_audit
-set new_role = 'co_owner'
-where new_role = 'admin';
-
-alter table public.league_admin_audit
-  drop constraint if exists league_admin_audit_previous_role_check,
-  drop constraint if exists league_admin_audit_new_role_check;
-
 alter table public.league_admin_audit
   add constraint league_admin_audit_previous_role_check
   check (previous_role in ('owner', 'co_owner', 'member')),
@@ -527,6 +660,12 @@ begin
   where league_id = p_league_id
     and user_id = p_user_id;
 
+  update public.players
+  set is_admin = (v_new_role = 'co_owner'),
+      updated_at = now()
+  where league_id = p_league_id
+    and profile_id = p_user_id;
+
   insert into public.league_admin_audit (
     league_id,
     target_user_id,
@@ -566,6 +705,9 @@ revoke all on function public.list_my_club_join_requests() from public, anon;
 revoke all on function public.list_my_clubs() from public, anon;
 revoke all on function public.list_pending_club_join_requests(uuid) from public, anon;
 revoke all on function public.review_club_join_request(uuid, boolean) from public, anon;
+revoke all on function public.rename_club(uuid, text) from public, anon;
+revoke all on function public.delete_club(uuid, text) from public, anon;
+revoke all on function public.remove_club_member(uuid, uuid) from public, anon;
 revoke all on function public.manage_league_admin(uuid, uuid, boolean) from public, anon;
 revoke all on function public.join_league_by_invite(text) from public, anon;
 
@@ -577,6 +719,9 @@ grant execute on function public.list_my_club_join_requests() to authenticated;
 grant execute on function public.list_my_clubs() to authenticated;
 grant execute on function public.list_pending_club_join_requests(uuid) to authenticated;
 grant execute on function public.review_club_join_request(uuid, boolean) to authenticated;
+grant execute on function public.rename_club(uuid, text) to authenticated;
+grant execute on function public.delete_club(uuid, text) to authenticated;
+grant execute on function public.remove_club_member(uuid, uuid) to authenticated;
 grant execute on function public.manage_league_admin(uuid, uuid, boolean) to authenticated;
 
 notify pgrst, 'reload schema';
