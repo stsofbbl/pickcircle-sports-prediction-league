@@ -17,6 +17,10 @@ const migration = [
 ].join("\n");
 const edgeFunctionPath = path.join(root, "supabase", "functions", "delete-account", "index.ts");
 const edgeFunction = fs.existsSync(edgeFunctionPath) ? fs.readFileSync(edgeFunctionPath, "utf8") : "";
+const triggerPrivilegeMigration = fs.readFileSync(
+  path.join(root, "supabase", "migrations", "20260727151000_revoke_profile_trigger_execution.sql"),
+  "utf8",
+);
 const serviceSource = fs.readFileSync(path.join(root, "js", "data-service.js"), "utf8");
 const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
@@ -78,6 +82,13 @@ test("account deletion endpoint verifies the caller and password before hard del
   assert.match(edgeFunction, /confirmedUser\.id !== user\.id/i);
   assert.match(edgeFunction, /auth\.admin\.deleteUser\(user\.id/i);
   assert.doesNotMatch(edgeFunction, /console\.(log|error)\([^)]*password/i);
+});
+
+test("the Auth profile trigger cannot be called as a public RPC", () => {
+  assert.match(
+    triggerPrivilegeMigration,
+    /revoke all on function public\.handle_new_user\(\) from public, anon, authenticated/i,
+  );
 });
 
 test("data service exposes password-confirmed account deletion through the Edge Function", async () => {
