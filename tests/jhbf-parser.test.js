@@ -89,3 +89,25 @@ test("parses summer representative teams without requiring completed results", a
   ]);
   assert.deepEqual(result.warnings, []);
 });
+
+test("deduplicates identical representative rows by district and school", async () => {
+  const api = await parser();
+  const result = api.parseJhbfRepresentativeTeamsHtml(`
+    <table>
+      <tr><th>地方大会</th><th>代表校</th></tr>
+      <tr><td>北北海道</td><td>白樺学園</td></tr>
+      <tr><td>北北海道</td><td>白樺学園</td></tr>
+      <tr><td>南北海道</td><td>札幌日大</td></tr>
+    </table>
+  `, {
+    sourceUrl: "https://www.jhbf.or.jp/sensyuken/2026/team/",
+    competitionType: "summer",
+    year: 2026,
+  });
+
+  assert.deepEqual(result.rows.map((row) => [row.districtName, row.schoolName]), [
+    ["北北海道", "白樺学園"],
+    ["南北海道", "札幌日大"],
+  ]);
+  assert.deepEqual(result.warnings, ["duplicate_representative_row:北北海道:白樺学園"]);
+});

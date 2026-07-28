@@ -1639,7 +1639,10 @@ async function loadKoshienOnlineState({ force = false } = {}) {
   setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
   pendingKoshienLoadPromise = (async () => {
     try {
-      const snapshot = await window.YosoDataService.koshien.loadSnapshot();
+      const selectedEventId = baseTemplateId(state.event?.templateId) === "koshien"
+        ? String(state.activeEventId || state.event?.id || "")
+        : "";
+      const snapshot = await window.YosoDataService.koshien.loadSnapshot({ eventId: selectedEventId });
       if (snapshot?.ok) {
         applyKoshienOnlineSnapshot(snapshot);
         lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
@@ -6606,7 +6609,7 @@ els.navLinks.forEach((link) => {
   });
 });
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const clubButton = event.target.closest("[data-club-action]");
   if (clubButton) {
     handleClubPathwayAction(clubButton);
@@ -6623,6 +6626,17 @@ document.addEventListener("click", (event) => {
       return;
     }
     if (!confirm(`「${target.name}」を削除しますか？`)) return;
+    if (isSupabaseAuthEnabled() && currentAuthUser() && baseTemplateId(target.templateId) === "koshien") {
+      try {
+        await window.YosoDataService?.koshien?.deleteEvent?.({
+          eventId,
+          confirmationName: target.name,
+        });
+      } catch (error) {
+        alert(error?.message || "オンラインの大会を削除できませんでした。");
+        return;
+      }
+    }
     state.events = state.events.filter((candidate) => candidate.id !== eventId);
     if (state.activeEventId === eventId) setActiveEvent(state.events[0]?.id);
     render();

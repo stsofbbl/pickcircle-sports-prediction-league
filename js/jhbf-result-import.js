@@ -181,14 +181,22 @@
     return byDistrict;
   }
 
-  function buildRepresentativePreview(sourceRows = [], currentTeams = [], teamMeta = {}) {
+  function buildRepresentativePreview(sourceRows = [], currentTeams = [], teamMeta = {}, warnings = []) {
     const districtCounts = new Map();
     const schoolCounts = new Map();
     const byDistrict = new Map();
+    const stableKeys = new Set();
+    const duplicateStableRows = [];
     sourceRows.forEach((row) => {
       const districtName = String(row.districtName || "").trim();
       const schoolName = String(row.schoolName || "").trim();
       if (!districtName) return;
+      const stableKey = `${normalizeSchoolName(districtName)}:${normalizeSchoolName(schoolName)}`;
+      if (stableKeys.has(stableKey)) {
+        duplicateStableRows.push(`${districtName}:${schoolName}`);
+        return;
+      }
+      stableKeys.add(stableKey);
       districtCounts.set(districtName, (districtCounts.get(districtName) || 0) + 1);
       if (schoolName) schoolCounts.set(normalizeSchoolName(schoolName), (schoolCounts.get(normalizeSchoolName(schoolName)) || 0) + 1);
       if (!byDistrict.has(districtName)) byDistrict.set(districtName, { ...row, districtName, schoolName });
@@ -210,14 +218,27 @@
     const duplicateDistricts = [...districtCounts].filter(([, count]) => count > 1).map(([district]) => district);
     const duplicateSchools = [...schoolCounts].filter(([, count]) => count > 1).map(([school]) => school);
     const completeCount = rows.filter((row) => row.schoolName).length;
+    (Array.isArray(warnings) ? warnings : [])
+      .filter((warning) => String(warning).startsWith("duplicate_representative_row:"))
+      .forEach((warning) => duplicateStableRows.push(String(warning).slice("duplicate_representative_row:".length)));
     const valid = rows.length === 49
       && completeCount === 49
       && !missingDistricts.length
       && !emptyDistricts.length
       && !duplicateDistricts.length
-      && !duplicateSchools.length;
+      && !duplicateSchools.length
+      && !duplicateStableRows.length;
 
-    return { rows, valid, completeCount, missingDistricts, emptyDistricts, duplicateDistricts, duplicateSchools };
+    return {
+      rows,
+      valid,
+      completeCount,
+      missingDistricts,
+      emptyDistricts,
+      duplicateDistricts,
+      duplicateSchools,
+      duplicateStableRows: [...new Set(duplicateStableRows)],
+    };
   }
 
   function escapeHtml(value) {
@@ -353,6 +374,7 @@
       preview.emptyDistricts.length ? `未決定: ${preview.emptyDistricts.join("、")}` : "",
       preview.duplicateDistricts.length ? `地区重複: ${preview.duplicateDistricts.join("、")}` : "",
       preview.duplicateSchools.length ? `学校名重複: ${preview.duplicateSchools.join("、")}` : "",
+      preview.duplicateStableRows.length ? `取得行重複: ${preview.duplicateStableRows.join("、")}` : "",
     ].filter(Boolean);
     return `
       <div class="history-list">
@@ -376,7 +398,12 @@
     const readyCount = view.rows.filter((row) => row.status === "ready").length;
     const disabled = !canEditResults || view.loading || view.applying ? "disabled" : "";
     const currentTeams = typeof getTeams === "function" ? getTeams() : state.event?.config?.teams || [];
-    const representativePreview = buildRepresentativePreview(view.representativeRows, currentTeams, state.event?.config?.teamMeta || {});
+    const representativePreview = buildRepresentativePreview(
+      view.representativeRows,
+      currentTeams,
+      state.event?.config?.teamMeta || {},
+      view.representativeWarnings,
+    );
     const representativesDisabled = !canEditResults || view.loading || view.applying ? "disabled" : "";
     const applyRepresentativesDisabled = representativesDisabled || !representativePreview.valid ? "disabled" : "";
     return `
@@ -492,7 +519,12 @@
       const response = await fetchRepresentatives({ eventId: view.eventId, competitionType: "summer", year });
       view.representativeRows = Array.isArray(response.rows) ? response.rows : [];
       view.representativeWarnings = Array.isArray(response.warnings) ? response.warnings : [];
-      const preview = buildRepresentativePreview(view.representativeRows, getTeams(), state.event?.config?.teamMeta || {});
+      const preview = buildRepresentativePreview(
+        view.representativeRows,
+        getTeams(),
+        state.event?.config?.teamMeta || {},
+        view.representativeWarnings,
+      );
       view.representativeMessage = `${preview.completeCount}校を取得しました。49校が揃った場合だけ反映できます。`;
       view.representativeMessageKind = preview.valid ? "success" : "pending";
     } catch (error) {
@@ -529,7 +561,12 @@
     const config = sourceConfig();
     const currentTeams = getTeams();
     const currentMeta = state.event?.config?.teamMeta || {};
-    const preview = buildRepresentativePreview(view.representativeRows, currentTeams, currentMeta);
+    const preview = buildRepresentativePreview(
+      view.representativeRows,
+      currentTeams,
+      currentMeta,
+      view.representativeWarnings,
+    );
     if (!preview.valid) {
       view.representativeMessage = "49代表校が揃っていないため反映できません。";
       view.representativeMessageKind = "error";
@@ -538,12 +575,25 @@
     }
     const confirmed = window.confirm("現在の49代表校候補を高野連公式表記で上書きします。よろしいですか？");
     if (!confirmed) return;
+    const eventId = String(state.event?.id || "");
+    if (!eventId || eventId !== view.eventId) {
+      view.representativeMessage = "選択中の大会が変わりました。代表校を再取得してください。";
+      view.representativeMessageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
     const beforeConfig = JSON.parse(JSON.stringify(state.event.config || {}));
     view.applying = true;
     view.representativeMessage = "49代表校を保存しています…";
     view.representativeMessageKind = "pending";
     renderActiveEventManager();
     try {
+      const saved = await window.YosoDataService?.koshien?.replaceRepresentatives?.({
+        eventId,
+        year: config.year,
+        rows: preview.rows,
+      });
+      if (Number(saved?.count) !== 49) throw new Error("Supabaseへ49代表校を保存できませんでした。");
       const nextTeams = preview.rows.map((row) => row.schoolName);
       state.event.config.teams = nextTeams;
       state.event.config.teamMeta = representativeTeamMeta(preview.rows, currentTeams, currentMeta, config.year);
@@ -551,8 +601,6 @@
       normalizeKoshienEvent(state.event);
       saveLocalStateOnly();
       renderScoresOnly();
-      const saveResult = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
-      if (saveResult?.skipped || saveResult?.partial) throw new Error("Supabaseへの代表校保存が完了しませんでした。");
       view.representativeMessage = "49代表校を反映し、オンラインへ保存しました。";
       view.representativeMessageKind = "success";
     } catch (error) {

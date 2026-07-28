@@ -6,12 +6,18 @@ const vm = require("node:vm");
 
 const DATA_SERVICE_PATH = path.join(__dirname, "..", "js", "data-service.js");
 
-function createSupabaseMock({ rpcError = null, teamError = null, playersError = null } = {}) {
+function createSupabaseMock({ rpcError = null, teamError = null, playersError = null, missingEventId = "" } = {}) {
   const calls = [];
   const queries = [];
   const teamRows = [
     { id: "team-a-id", name: "Team A", odds: 4, sqrt_odds: 2 },
     { id: "team-b-id", name: "Team B", odds: 9, sqrt_odds: 3 },
+    { id: "team-c-id", name: "Team C", odds: 1, sqrt_odds: 1 },
+    { id: "team-d-id", name: "Team D", odds: 1, sqrt_odds: 1 },
+    { id: "team-e-id", name: "Team E", odds: 1, sqrt_odds: 1 },
+    { id: "team-f-id", name: "Team F", odds: 1, sqrt_odds: 1 },
+    { id: "team-g-id", name: "Team G", odds: 1, sqrt_odds: 1 },
+    { id: "team-h-id", name: "Team H", odds: 1, sqrt_odds: 1 },
   ];
 
   class Query {
@@ -104,6 +110,21 @@ function createSupabaseMock({ rpcError = null, teamError = null, playersError = 
             prediction_deadline: "2099-08-31T15:00:00.000Z",
             rules: {},
           }],
+          error: null,
+        };
+      }
+      if (this.table === "events" && this.operation === "select" && this.filters.id) {
+        if (this.filters.id === missingEventId) return { data: null, error: null };
+        return {
+          data: {
+            id: this.filters.id,
+            league_id: "league-id",
+            name: "選択中の夏の甲子園",
+            preset_type: "koshien",
+            status: "open",
+            prediction_deadline: "2099-08-31T15:00:00.000Z",
+            rules: {},
+          },
           error: null,
         };
       }
@@ -277,8 +298,10 @@ test("phase 1 autosave never writes later-phase tables directly", async () => {
   const event = completedEvent();
   event.status = "open";
   event.deadline = "2099-08-31T15:00:00.000Z";
+  event.config.teams = ["Team A", "Team B", "Team C", "Team D", "Team E", "Team F", "Team G", "Team H"];
+  event.config.teamMeta = Object.fromEntries(event.config.teams.map((name) => [name, { startRound: 1, odds: 1 }]));
   event.predictions.Admin = {
-    teams: ["Team A", "Team B"],
+    teams: ["Team A", "Team B", "Team C", "Team D", "Team E", "Team F", "Team G", "Team H"],
     captain: "Team A",
     revengePick: "Team A",
     zombiePick: "Team B",
@@ -297,7 +320,8 @@ test("phase 1 autosave never writes later-phase tables directly", async () => {
   assert.equal(writtenTables.includes("revenge_picks"), false);
   assert.equal(writtenTables.includes("zombie_predictions"), false);
   assert.equal(writtenTables.includes("final_score_predictions"), false);
-  assert.equal(writtenTables.includes("phase1_picks"), true);
+  assert.equal(supabase.calls.some((call) => call.name === "save_koshien_phase1_prediction"), true);
+  assert.equal(supabase.calls.some((call) => call.table === "predictions"), false);
 });
 
 test("resultWait result save does not rewrite prediction tables after the deadline", async () => {
@@ -355,4 +379,47 @@ test("loadSnapshot returns all league members while predictions remain private b
   ]);
   const predictionQuery = supabase.queries.find((call) => call.table === "predictions" && call.operation === "select");
   assert.equal(predictionQuery?.filters?.user_id, "user-id");
+});
+
+test("loadSnapshot uses the currently selected event id", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot({ eventId: "selected-event-id" });
+
+  assert.equal(snapshot.event.id, "selected-event-id");
+  const eventQuery = supabase.queries.find((call) => call.table === "events" && call.operation === "select");
+  assert.equal(eventQuery?.filters?.id, "selected-event-id");
+});
+
+test("loadSnapshot falls back to the league event when the local selected id is stale", async () => {
+  const supabase = createSupabaseMock({ missingEventId: "stale-local-event-id" });
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot({ eventId: "stale-local-event-id" });
+
+  assert.equal(snapshot.event.id, "event-id");
+  assert.equal(supabase.queries.some((call) => call.table === "events" && call.filters.id === "stale-local-event-id"), true);
+  assert.equal(supabase.queries.some((call) => call.table === "events" && !call.filters.id), true);
+});
+
+test("representative replacement uses one event-scoped RPC", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const rows = [{ districtName: "北北海道", schoolName: "白樺学園" }];
+
+  await service.koshien.replaceRepresentatives({ eventId: "event-id", rows, year: 2026 });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(supabase.calls.find((call) => call.name === "replace_koshien_representatives"))),
+    {
+      operation: "rpc",
+      name: "replace_koshien_representatives",
+      args: {
+        p_event_id: "event-id",
+        p_rows: [{ district_name: "北北海道", school_name: "白樺学園" }],
+        p_source_year: 2026,
+      },
+    },
+  );
 });

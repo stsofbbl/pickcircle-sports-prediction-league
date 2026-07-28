@@ -165,6 +165,16 @@ export function parseJhbfRepresentativeTeamsHtml(html, options = {}) {
 
   const rows = [];
   const warnings = [];
+  const stableKeys = new Set();
+  const appendRow = (row) => {
+    const stableKey = `${normalizeSchoolName(row.districtName)}:${normalizeSchoolName(row.schoolName)}`;
+    if (stableKeys.has(stableKey)) {
+      warnings.push(`duplicate_representative_row:${row.districtName}:${row.schoolName}`);
+      return;
+    }
+    stableKeys.add(stableKey);
+    rows.push(row);
+  };
   const htmlRows = [...String(html || "").matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
   htmlRows.forEach((rowMatch) => {
     const cells = [...rowMatch[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)]
@@ -173,7 +183,7 @@ export function parseJhbfRepresentativeTeamsHtml(html, options = {}) {
     const districtName = cells[0];
     const schoolName = cells[1];
     if (!districtName || districtName === "地方大会" || /^-+$/.test(districtName)) return;
-    rows.push({
+    appendRow({
       source: "jhbf",
       sourceUrl,
       fetchedAt,
@@ -194,7 +204,7 @@ export function parseJhbfRepresentativeTeamsHtml(html, options = {}) {
     const schoolName = parts[1];
     if (!districtName || districtName === "地方大会" || /^-+$/.test(districtName)) return;
     if (districtName.includes("大会情報") || districtName.includes("出場校")) return;
-    rows.push({
+    appendRow({
       source: "jhbf",
       sourceUrl,
       fetchedAt,
