@@ -250,6 +250,27 @@
     };
   }
 
+  function koshienRepresentativeMetadata(name, meta, fallbackSource) {
+    const district = String(meta?.district || "").trim();
+    const stablePart = (value) => String(value || "")
+      .trim()
+      .toLocaleLowerCase("ja-JP")
+      .replace(/[\s　]+/gu, "");
+    const districtKey = stablePart(district);
+    const schoolKey = stablePart(name);
+    return {
+      source: meta?.source || fallbackSource,
+      district: district || null,
+      source_year: meta?.sourceYear || null,
+      ...(districtKey && schoolKey
+        ? {
+          district_key: districtKey,
+          representative_key: `${districtKey}:${schoolKey}`,
+        }
+        : {}),
+    };
+  }
+
   function fixedArray(value, count) {
     const rows = Array.isArray(value) ? value.slice(0, count) : [];
     while (rows.length < count) rows.push("");
@@ -611,6 +632,43 @@
     });
   }
 
+  async function replaceKoshienRepresentatives({ eventId, rows, year } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
+      district_name: String(row?.districtName || "").trim(),
+      school_name: String(row?.schoolName || "").trim(),
+    }));
+    if (!normalizedEventId) throw new Error("代表校を反映するevent_idが必要です。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc("replace_koshien_representatives", {
+      p_event_id: normalizedEventId,
+      p_rows: normalizedRows,
+      p_source_year: Number.isInteger(Number(year)) ? Number(year) : null,
+    });
+    if (error) throw koshienSaveError("teams", error, "49代表校を保存できませんでした。");
+    return data;
+  }
+
+  async function deleteKoshienEvent({ eventId, confirmationName } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedName = String(confirmationName || "").trim();
+    if (!normalizedEventId || !normalizedName) throw new Error("削除対象の大会を確認できませんでした。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase
+      .from("events")
+      .delete()
+      .eq("id", normalizedEventId)
+      .eq("name", normalizedName)
+      .select("id");
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length !== 1 || String(data[0].id) !== normalizedEventId) {
+      throw new Error("対象大会だけを削除できませんでした。");
+    }
+    return { ok: true, eventId: normalizedEventId };
+  }
+
   async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows, savePrediction }) {
     const displayName = participantName || displayNameFromUser(user, profile);
     const playerPayload = {
@@ -641,9 +699,7 @@
           start_round: meta.startRound,
           odds: meta.odds,
           metadata: {
-            source: meta.source || "yoso-koshien",
-            district: meta.district || null,
-            source_year: meta.sourceYear || null,
+            ...koshienRepresentativeMetadata(name, meta, "yoso-koshien"),
             sqrt_odds_snapshot: meta.sqrtOdds,
           },
         };
@@ -664,38 +720,27 @@
     }
 
     const teamByName = new Map(teamRows.map((team) => [team.name, team]));
-    if (!savePrediction) return { player, teamRows };
+    if (!savePrediction) return { player, teamRows, predictionSaved: false };
 
     const prediction = event.predictions?.[participantName];
-    if (!prediction || !player?.id) return { player, teamRows };
+    if (!prediction || !player?.id) return { player, teamRows, predictionSaved: false };
 
     const phase1Picks = fixedArray(prediction.teams, Number(event.config?.pickCount) || 8)
       .map((name, index) => ({ name, index }))
       .filter((pick) => pick.name && teamByName.has(pick.name));
-    const { error: phase1DeleteError } = await supabase
-      .from("phase1_picks")
-      .delete()
-      .eq("event_id", eventId)
-      .eq("player_id", player.id);
-    if (phase1DeleteError) throw phase1DeleteError;
-    if (phase1Picks.length) {
-      const rows = phase1Picks.map((pick) => {
-        const team = teamByName.get(pick.name);
-        return {
-          event_id: eventId,
-          player_id: player.id,
-          team_id: team.id,
-          pick_order: pick.index + 1,
-          captain: prediction.captain === pick.name,
-          odds_snapshot: Number(team.odds) || null,
-          sqrt_odds_snapshot: Number(team.sqrt_odds) || null,
-        };
-      });
-      const { error } = await supabase.from("phase1_picks").insert(rows);
-      if (error) throw error;
-    }
+    const pickCount = Number(event.config?.pickCount) || 8;
+    if (phase1Picks.length !== pickCount) return { player, teamRows, predictionSaved: false };
+    const captain = teamByName.get(prediction.captain);
+    if (!captain) throw new Error("キャプテンは選択した8校から選んでください。");
+    const { error: phase1Error } = await supabase.rpc("save_koshien_phase1_prediction", {
+      p_event_id: eventId,
+      p_team_ids: phase1Picks.map((pick) => teamByName.get(pick.name).id),
+      p_captain_team_id: captain.id,
+      p_payload: prediction,
+    });
+    if (phase1Error) throw phase1Error;
 
-    return { player, teamRows };
+    return { player, teamRows, predictionSaved: true };
   }
 
   async function saveKoshienSnapshot({ state, event, participantName, scoreRows = [] }) {
@@ -751,29 +796,21 @@
 
       const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
       if (teams.length) {
-        const teamRows = teams.map((name, index) => ({
-          event_id: eventId,
-          name,
-          seed: index + 1,
-          metadata: { source: "localStorage" },
-        }));
+        const teamRows = teams.map((name, index) => {
+          const meta = koshienTeamMeta(event, name, index);
+          return {
+            event_id: eventId,
+            name,
+            seed: index + 1,
+            metadata: koshienRepresentativeMetadata(name, meta, "localStorage"),
+          };
+        });
         const { error: teamsError } = await supabase.from("event_teams").upsert(teamRows, { onConflict: "event_id,name" });
         if (teamsError) throw teamsError;
       }
 
     } else if (!existingEvent) {
       return { skipped: true, reason: "admin must create the Koshien event before members can save predictions" };
-    }
-
-    const myPrediction = event.predictions?.[participantName];
-    if (savePrediction && myPrediction) {
-      const { error: predictionError } = await supabase.from("predictions").upsert({
-        event_id: eventId,
-        user_id: user.id,
-        payload: myPrediction,
-        submitted_at: new Date().toISOString(),
-      }, { onConflict: "event_id,user_id" });
-      if (predictionError) throw predictionError;
     }
 
     let structuredSaved = false;
@@ -832,7 +869,7 @@
     return Date.now() >= Date.parse(event.prediction_deadline);
   }
 
-  async function loadKoshienSnapshot() {
+  async function loadKoshienSnapshot({ eventId } = {}) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
 
     const supabase = await supabaseClient();
@@ -844,13 +881,22 @@
     const membership = await getCurrentMembership(user.id);
     const profile = await getProfile(user.id);
 
-    const { data: events, error: eventError } = await supabase
+    const selectedEventId = String(eventId || "").trim();
+    const eventQuery = () => supabase
       .from("events")
       .select("id, league_id, name, preset_type, status, prediction_deadline, rules, created_by, updated_at")
       .eq("league_id", league.id)
-      .eq("preset_type", "koshien")
-      .order("updated_at", { ascending: false })
-      .limit(1);
+      .eq("preset_type", "koshien");
+    let eventResponse = selectedEventId
+      ? await eventQuery().eq("id", selectedEventId).maybeSingle()
+      : await eventQuery().order("updated_at", { ascending: false }).limit(1);
+    if (selectedEventId && !eventResponse.error && !eventResponse.data) {
+      eventResponse = await eventQuery().order("updated_at", { ascending: false }).limit(1);
+    }
+    const events = Array.isArray(eventResponse.data)
+      ? eventResponse.data
+      : (eventResponse.data ? [eventResponse.data] : []);
+    const eventError = eventResponse.error;
     if (eventError) throw eventError;
     const event = events?.[0];
     if (!event) return { skipped: true, reason: "koshien event is not found", league, membership };
@@ -951,6 +997,8 @@
     koshien: {
       saveSnapshot: saveKoshienSnapshot,
       loadSnapshot: loadKoshienSnapshot,
+      replaceRepresentatives: replaceKoshienRepresentatives,
+      deleteEvent: deleteKoshienEvent,
       loadPhase2DraftState,
       savePhase2DraftPick,
       loadLaterPhaseState,
