@@ -6,7 +6,13 @@ const vm = require("node:vm");
 
 const DATA_SERVICE_PATH = path.join(__dirname, "..", "js", "data-service.js");
 
-function createSupabaseMock({ rpcError = null, teamError = null, playersError = null, missingEventId = "" } = {}) {
+function createSupabaseMock({
+  rpcError = null,
+  teamError = null,
+  playersError = null,
+  missingEventId = "",
+  existingEventTeams = null,
+} = {}) {
   const calls = [];
   const queries = [];
   const teamRows = [
@@ -99,6 +105,16 @@ function createSupabaseMock({ rpcError = null, teamError = null, playersError = 
         };
       }
       if (this.table === "profiles") return { data: { display_name: "Admin" }, error: null };
+      if (this.table === "event_teams" && this.operation === "select") {
+        return {
+          data: existingEventTeams || teamRows.map((team, index) => ({
+            name: team.name,
+            seed: index + 1,
+            metadata: {},
+          })),
+          error: null,
+        };
+      }
       if (this.table === "events" && this.operation === "select" && this.expectsList) {
         return {
           data: [{
@@ -322,6 +338,35 @@ test("phase 1 autosave never writes later-phase tables directly", async () => {
   assert.equal(writtenTables.includes("final_score_predictions"), false);
   assert.equal(supabase.calls.some((call) => call.name === "save_koshien_phase1_prediction"), true);
   assert.equal(supabase.calls.some((call) => call.table === "predictions"), false);
+});
+
+test("existing Koshien autosave cannot re-add stale schools outside the stored roster", async () => {
+  const currentRoster = [
+    { name: "Team A", seed: 1, metadata: { district: "A" } },
+    { name: "Team B", seed: 2, metadata: { district: "B" } },
+  ];
+  const supabase = createSupabaseMock({ existingEventTeams: currentRoster });
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.config.teams = ["Old Placeholder", "Team A", "Team B"];
+  event.config.teamMeta["Old Placeholder"] = { startRound: 2, odds: 1 };
+  event.results = { matches: [], finishes: {} };
+
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  const eventWrite = supabase.calls.find((call) => call.table === "events" && call.operation === "upsert");
+  const eventTeamWrite = supabase.calls.find((call) => call.table === "event_teams" && call.operation === "upsert");
+  const structuredTeamWrite = supabase.calls.find((call) => call.table === "teams" && call.operation === "upsert");
+  assert.deepEqual(Array.from(eventWrite.payload.rules.config.teams), ["Team A", "Team B"]);
+  assert.deepEqual(Array.from(eventTeamWrite.payload, (row) => row.name), ["Team A", "Team B"]);
+  assert.deepEqual(Array.from(structuredTeamWrite.payload, (row) => row.name), ["Team A", "Team B"]);
 });
 
 test("resultWait result save does not rewrite prediction tables after the deadline", async () => {

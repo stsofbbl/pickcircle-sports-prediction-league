@@ -743,6 +743,44 @@
     return { player, teamRows, predictionSaved: true };
   }
 
+  async function koshienEventWithStoredRoster({ supabase, event, existingEvent }) {
+    if (!existingEvent) return event;
+    const { data: storedTeams, error } = await supabase
+      .from("event_teams")
+      .select("name, seed, metadata")
+      .eq("event_id", String(event.id))
+      .order("seed", { ascending: true });
+    if (error) throw error;
+    if (!Array.isArray(storedTeams) || !storedTeams.length) return event;
+
+    const localTeamMeta = event.config?.teamMeta || {};
+    const teamMeta = Object.fromEntries(storedTeams.map((row, index) => {
+      const name = String(row.name || "");
+      const current = localTeamMeta[name] || {};
+      const stored = row.metadata || {};
+      const odds = Number(current.odds) > 0 ? Number(current.odds) : 1;
+      return [name, {
+        startRound: Number(current.startRound) === 2 || index < 15 ? 2 : 1,
+        odds,
+        sqrtOdds: Math.round(Math.sqrt(odds) * 10000) / 10000,
+        ...(current.district || stored.district ? { district: current.district || stored.district } : {}),
+        ...(current.source || stored.source ? { source: current.source || stored.source } : {}),
+        ...(Number.isInteger(Number(current.sourceYear ?? stored.source_year))
+          ? { sourceYear: Number(current.sourceYear ?? stored.source_year) }
+          : {}),
+      }];
+    }));
+
+    return {
+      ...event,
+      config: {
+        ...(event.config || {}),
+        teams: storedTeams.map((row) => String(row.name || "")).filter(Boolean),
+        teamMeta,
+      },
+    };
+  }
+
   async function saveKoshienSnapshot({ state, event, participantName, scoreRows = [] }) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
     if (!event || event.templateId !== "koshien") return { skipped: true, reason: "event is not koshien" };
@@ -774,30 +812,31 @@
       .eq("id", eventId)
       .maybeSingle();
     if (existingEventError) throw existingEventError;
+    const eventForSave = await koshienEventWithStoredRoster({ supabase, event, existingEvent });
 
     if (isAdmin) {
       const eventPayload = {
         id: eventId,
         league_id: league.id,
-        name: event.name,
+        name: eventForSave.name,
         preset_type: "koshien",
-        status: event.status || "open",
+        status: eventForSave.status || "open",
         prediction_deadline: deadline,
         rules: {
-          approvalPolicy: event.approvalPolicy || state.approvalPolicy,
-          config: event.config || {},
-          resultFlow: event.resultFlow || {},
-          localEventId: event.id,
+          approvalPolicy: eventForSave.approvalPolicy || state.approvalPolicy,
+          config: eventForSave.config || {},
+          resultFlow: eventForSave.resultFlow || {},
+          localEventId: eventForSave.id,
         },
         created_by: user.id,
       };
       const { error: eventError } = await supabase.from("events").upsert(eventPayload);
       if (eventError) throw eventError;
 
-      const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
+      const teams = Array.isArray(eventForSave.config?.teams) ? eventForSave.config.teams : [];
       if (teams.length) {
         const teamRows = teams.map((name, index) => {
-          const meta = koshienTeamMeta(event, name, index);
+          const meta = koshienTeamMeta(eventForSave, name, index);
           return {
             event_id: eventId,
             name,
@@ -817,7 +856,17 @@
     let structuredContext = null;
     const warnings = [];
     try {
-      structuredContext = await saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows, savePrediction });
+      structuredContext = await saveKoshienStructuredTables({
+        supabase,
+        user,
+        league,
+        membership,
+        event: eventForSave,
+        participantName,
+        profile,
+        scoreRows,
+        savePrediction,
+      });
       structuredSaved = true;
     } catch (error) {
       const stagedError = error?.stage ? error : koshienSaveError("structured", error, "structured tablesの保存に失敗しました。");
@@ -835,16 +884,16 @@
       await saveKoshienResultTransaction({
         supabase,
         league,
-        event,
+        event: eventForSave,
         teamRows: structuredContext?.teamRows || [],
         scoreRows,
       });
       rawResultsSaved = true;
       scoresSaved = true;
-    } else if (isAdmin && event.results) {
+    } else if (isAdmin && eventForSave.results) {
       const { error: resultsError } = await supabase.from("results").upsert({
         event_id: eventId,
-        payload: event.results,
+        payload: eventForSave.results,
         updated_by: user.id,
       }, { onConflict: "event_id" });
       if (resultsError) throw koshienSaveError("results", resultsError, "resultsスナップショットの保存に失敗しました。");
