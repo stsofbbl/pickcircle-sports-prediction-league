@@ -40,6 +40,10 @@ test("normalizes unicode and whitespace but does not guess names", () => {
   assert.equal(api.normalizeSchoolName("Ａ Ｂ"), "AB");
 });
 
+test("representative key uses the same non-NFKC normalization as the database", () => {
+  assert.equal(api.representativeKeyFor(" 北 北海道 ", "Ａ Ｂ高校"), "北北海道:ａｂ高校");
+});
+
 test("resolves exact names and saved aliases, including reversed team order", () => {
   const [preview] = api.buildImportPreview([row()], context);
   assert.equal(preview.status, "ready");

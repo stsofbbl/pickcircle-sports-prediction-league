@@ -339,6 +339,10 @@ let koshienLaterPhaseLoading = false;
 let koshienLaterPhaseSaving = false;
 let koshienLaterPhaseMessage = "";
 let koshienLaterPhaseMessageKind = "";
+let koshienStartRoundDraft = { eventId: "", rounds: {} };
+let koshienStartRoundsSaving = false;
+let koshienStartRoundsMessage = "";
+let koshienStartRoundsMessageKind = "";
 
 function loadAuthUsers() {
   try {
@@ -1972,6 +1976,22 @@ function applyKoshienOnlineSnapshot(snapshot) {
   ]);
   const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
   const rules = eventRow.rules || {};
+  const storedTeamMeta = rules.config?.teamMeta || {};
+  const loadedTeamMeta = Object.fromEntries((snapshot.teams || []).map((team, index) => {
+    const name = String(team.name || "");
+    const current = storedTeamMeta[name] || {};
+    const metadata = team.metadata || {};
+    const startRound = normalizeKoshienStartRound(current.startRound ?? metadata.startRound, index);
+    return [name, {
+      ...current,
+      startRound,
+      ...(metadata.district && !current.district ? { district: metadata.district } : {}),
+      ...(metadata.source && !current.source ? { source: metadata.source } : {}),
+      ...(metadata.representative_key && !current.representativeKey
+        ? { representativeKey: metadata.representative_key }
+        : {}),
+    }];
+  }));
   const onlineEvent = normalizeEvent({
     ...createEvent("koshien", participants, { id: eventRow.id, name: eventRow.name }),
     id: eventRow.id,
@@ -1985,6 +2005,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
       ...createConfig("koshien"),
       ...(rules.config || {}),
       teams: teams.length ? teams : (rules.config?.teams || createConfig("koshien").teams),
+      teamMeta: teams.length ? loadedTeamMeta : (rules.config?.teamMeta || createConfig("koshien").teamMeta),
     },
     predictions: Object.fromEntries(participants.map((name) => [name, createPrediction("koshien")])),
     results: snapshot.results?.payload || createResults("koshien"),
@@ -2009,6 +2030,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
   state.event = onlineEvent;
   state.activeEventId = onlineEvent.id;
   state.activeTemplate = "koshien";
+  resetKoshienStartRoundDraft();
   state.connection = normalizeConnectionSettings({
     ...state.connection,
     leagueId: snapshot.league?.invite_code || state.connection?.leagueId,
@@ -2138,6 +2160,7 @@ function createConfig(templateId) {
     sqrtOddsCap: template.sqrtOddsCap || templates.koshien.sqrtOddsCap,
     revengeMode: template.revengeMode || templates.koshien.revengeMode,
     zombieEnabled: template.zombieEnabled ?? templates.koshien.zombieEnabled,
+    startRoundsConfirmed: false,
     oddsBook: {},
   };
   if (base === "fightCard") return { markets: structuredClone(template.markets || templates.fightCard.markets), oddsBook: {} };
@@ -2204,6 +2227,8 @@ function normalizeKoshienEvent(event) {
   event.config.phase2DraftCount = Number(event.config.phase2DraftCount) || template.phase2DraftCount || 4;
   event.config.activePhase = ["phase1", "phase2", "phase3"].includes(event.config.activePhase) ? event.config.activePhase : "phase1";
   event.config.teamMeta = normalizeKoshienTeamMeta(event.config.teams, event.config.teamMeta);
+  event.config.startRoundsConfirmed = event.config.startRoundsConfirmed === true;
+  if (!event.config.startRoundsConfirmed) delete event.config.startRoundsConfirmedAt;
   event.config.stagePoints = { ...templates.koshien.stagePoints };
   event.config.phase2Points = { ...templates.koshien.phase2Points, ...(event.config.phase2Points || {}) };
   event.config.captainMultiplier = Number(event.config.captainMultiplier) || templates.koshien.captainMultiplier;
@@ -2239,15 +2264,28 @@ function normalizeKoshienPrediction(event, name) {
 function defaultKoshienTeamMeta(teams) {
   return Object.fromEntries((teams || []).map((name, index) => {
     const odds = 1;
-    return [name, { startRound: index < 15 ? 2 : 1, odds, sqrtOdds: Math.sqrt(odds) }];
+    const district = String(name || "").endsWith("代表")
+      ? String(name).slice(0, -"代表".length)
+      : "";
+    return [name, {
+      startRound: index < 15 ? 2 : 1,
+      odds,
+      sqrtOdds: Math.sqrt(odds),
+      ...(district ? { district } : {}),
+    }];
   }));
+}
+
+function normalizeKoshienStartRound(value, index) {
+  const round = Number(value);
+  return round === 1 || round === 2 ? round : (index < 15 ? 2 : 1);
 }
 
 function normalizeKoshienTeamMeta(teams, meta = {}) {
   return Object.fromEntries((teams || []).map((name, index) => {
     const current = meta?.[name] || {};
     const odds = Number(current.odds) > 0 ? Number(current.odds) : 1;
-    const startRound = Number(current.startRound) === 2 || index < 15 ? 2 : 1;
+    const startRound = normalizeKoshienStartRound(current.startRound, index);
     const next = {
       startRound,
       odds,
@@ -2255,6 +2293,7 @@ function normalizeKoshienTeamMeta(teams, meta = {}) {
     };
     if (current.district) next.district = String(current.district);
     if (current.source) next.source = String(current.source);
+    if (current.representativeKey) next.representativeKey = String(current.representativeKey);
     if (Number.isInteger(Number(current.sourceYear))) next.sourceYear = Number(current.sourceYear);
     return [name, next];
   }));
@@ -2819,7 +2858,7 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
     <details class="manager-details">
       <summary>49代表校を編集</summary>
       ${editableTeamsBlock("49代表校", teams)}
-      ${koshienTeamMetaEditor(teams)}
+      ${koshienTeamMetaEditor(teams, canEditSettings)}
     </details>
   `;
 }
@@ -2904,15 +2943,162 @@ function koshienMatchRow(match, teams, disabledResults) {
   `;
 }
 
-function koshienTeamMetaEditor(teams) {
+function ensureKoshienStartRoundDraft(teams) {
+  const eventId = String(state.event?.id || "");
+  const draftTeams = Object.keys(koshienStartRoundDraft.rounds || {});
+  if (
+    koshienStartRoundDraft.eventId !== eventId
+    || draftTeams.length !== teams.length
+    || teams.some((team) => !Object.hasOwn(koshienStartRoundDraft.rounds || {}, team))
+  ) {
+    koshienStartRoundDraft = {
+      eventId,
+      rounds: Object.fromEntries(teams.map((team, index) => [
+        team,
+        normalizeKoshienStartRound(state.event.config.teamMeta?.[team]?.startRound, index),
+      ])),
+    };
+    koshienStartRoundsMessage = "";
+    koshienStartRoundsMessageKind = "";
+  }
+  return koshienStartRoundDraft.rounds;
+}
+
+function resetKoshienStartRoundDraft() {
+  koshienStartRoundDraft = { eventId: "", rounds: {} };
+  koshienStartRoundsMessage = "";
+  koshienStartRoundsMessageKind = "";
+}
+
+function koshienStartRoundCounts(teams, rounds) {
+  return teams.reduce((counts, team) => {
+    const round = Number(rounds?.[team]) === 2 ? 2 : 1;
+    counts[round] += 1;
+    return counts;
+  }, { 1: 0, 2: 0 });
+}
+
+function koshienRepresentativeKey(team) {
+  const meta = state.event.config.teamMeta?.[team] || {};
+  if (meta.representativeKey) return String(meta.representativeKey);
+  const stable = (value) => String(value || "")
+    .trim()
+    .toLocaleLowerCase("ja-JP")
+    .replace(/[\s　]+/gu, "");
+  const district = stable(meta.district);
+  const school = stable(team);
+  return district && school ? `${district}:${school}` : "";
+}
+
+async function saveKoshienStartRounds() {
+  if (koshienStartRoundsSaving) return;
+  const teams = getTeams();
+  const rounds = ensureKoshienStartRoundDraft(teams);
+  const counts = koshienStartRoundCounts(teams, rounds);
+  const rows = teams.map((team) => ({
+    representativeKey: koshienRepresentativeKey(team),
+    startRound: Number(rounds[team]) === 2 ? 2 : 1,
+  }));
+  if (teams.length !== 49 || counts[1] !== 34 || counts[2] !== 15) {
+    koshienStartRoundsMessage = "1回戦34校・2回戦15校になるように設定してください。";
+    koshienStartRoundsMessageKind = "error";
+    renderActiveEventManager();
+    return;
+  }
+  if (rows.some((row) => !row.representativeKey)) {
+    koshienStartRoundsMessage = "正式代表校キーを確認できない高校があります。代表校を再読込してください。";
+    koshienStartRoundsMessageKind = "error";
+    renderActiveEventManager();
+    return;
+  }
+
+  koshienStartRoundsSaving = true;
+  koshienStartRoundsMessage = "49校の開始ラウンドを保存しています…";
+  koshienStartRoundsMessageKind = "pending";
+  renderActiveEventManager();
+  try {
+    const saved = await window.YosoDataService?.koshien?.updateStartRounds?.({
+      eventId: state.event.id,
+      rows,
+    });
+    if (Number(saved?.count) !== 49 || saved?.startRoundsConfirmed !== true) {
+      throw new Error("49校の開始ラウンドを確定できませんでした。");
+    }
+    teams.forEach((team) => {
+      state.event.config.teamMeta[team].startRound = Number(rounds[team]) === 2 ? 2 : 1;
+      state.event.config.teamMeta[team].representativeKey = koshienRepresentativeKey(team);
+    });
+    state.event.config.startRoundsConfirmed = true;
+    state.event.config.startRoundsConfirmedAt = new Date().toISOString();
+    syncActiveEvent();
+    saveLocalStateOnly();
+    renderEvent();
+    renderScoresOnly();
+    const invalidPredictionCount = Number(saved?.invalidPredictionCount) || 0;
+    koshienStartRoundsMessage = invalidPredictionCount > 0
+      ? `正式な開始ラウンドを反映しました。既存予想${invalidPredictionCount}件は保持され、次回保存時に最大3校ルールが適用されます。`
+      : "正式な開始ラウンドを49校へ反映しました。";
+    koshienStartRoundsMessageKind = "success";
+  } catch (error) {
+    koshienStartRoundsMessage = error?.message || "開始ラウンドを保存できませんでした。";
+    koshienStartRoundsMessageKind = "error";
+  } finally {
+    koshienStartRoundsSaving = false;
+    renderActiveEventManager();
+  }
+}
+
+async function saveKoshienOdds(team) {
+  const meta = state.event.config.teamMeta?.[team] || {};
+  const representativeKey = koshienRepresentativeKey(team);
+  if (!representativeKey) {
+    koshienStartRoundsMessage = `${team}の正式代表校キーを確認できません。代表校を再読込してください。`;
+    koshienStartRoundsMessageKind = "error";
+    renderActiveEventManager();
+    return;
+  }
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
+  if (!currentAuthUser()) {
+    koshienStartRoundsMessage = "オッズのオンライン保存にはログインが必要です。";
+    koshienStartRoundsMessageKind = "error";
+    renderActiveEventManager();
+    return;
+  }
+  try {
+    await window.YosoDataService?.koshien?.updateOdds?.({
+      eventId: state.event.id,
+      rows: [{
+        representativeKey,
+        odds: Number(meta.odds) > 0 ? Number(meta.odds) : 1,
+      }],
+    });
+    koshienStartRoundsMessage = `${team}のオッズを保存しました。`;
+    koshienStartRoundsMessageKind = "success";
+  } catch (error) {
+    koshienStartRoundsMessage = error?.message || `${team}のオッズを保存できませんでした。`;
+    koshienStartRoundsMessageKind = "error";
+  }
+  renderActiveEventManager();
+}
+
+function koshienTeamMetaEditor(teams, canEditSettings) {
   normalizeKoshienEvent(state.event);
+  const rounds = ensureKoshienStartRoundDraft(teams);
+  const counts = koshienStartRoundCounts(teams, rounds);
+  const confirmed = state.event.config.startRoundsConfirmed === true;
+  const distributionReady = teams.length === 49 && counts[1] === 34 && counts[2] === 15;
   return `
     <div class="entry-block koshien-results">
       <div class="block-head">
         <div>
           <h3>開始ラウンド・倍率</h3>
-          <p class="helper-text">49校それぞれの開始ラウンド、オッズ、平方根オッズをSupabaseへ保存できる形で管理します。</p>
+          <p class="helper-text">抽選後、49校すべてを確認して一括確定します。確定前の34校・15校は仮データです。</p>
         </div>
+        <span class="status-label ${confirmed ? "open" : "pending"}">${confirmed ? "正式データ反映済み" : "開始ラウンド未確定"}</span>
+      </div>
+      <div class="active-manager-note ${distributionReady ? "" : "is-disabled"}">
+        <strong>1回戦 ${counts[1]}校 / 2回戦 ${counts[2]}校</strong>
+        <span>${confirmed ? "この正式データを予想候補と最大3校の制限判定に使用しています。" : "現在の割り当ては仮データです。組み合わせ抽選後に更新してください。"}</span>
       </div>
       <div class="koshien-result-list">
         ${teams.map((team) => {
@@ -2920,8 +3106,8 @@ function koshienTeamMetaEditor(teams) {
           return `
             <div class="draft-row koshien-result-row">
               <span class="pill">${escapeHtml(team)}</span>
-              <select data-koshien-team-start="${escapeAttr(team)}">
-                ${optionList(["1", "2"], String(meta.startRound || 1))}
+              <select data-koshien-team-start="${escapeAttr(team)}" ${canEditSettings && !koshienStartRoundsSaving ? "" : "disabled"}>
+                ${optionList(["1", "2"], String(rounds[team] || 1))}
               </select>
               <input data-koshien-team-odds="${escapeAttr(team)}" type="number" min="1" step="0.1" value="${escapeAttr(meta.odds)}">
               <span class="sub-label">平方根 ${formatScore(meta.sqrtOdds || 1)}</span>
@@ -2929,6 +3115,15 @@ function koshienTeamMetaEditor(teams) {
           `;
         }).join("")}
       </div>
+      <div class="create-submit-row">
+        <button class="primary-button" type="button" data-koshien-start-rounds-save
+          ${canEditSettings && distributionReady && !koshienStartRoundsSaving ? "" : "disabled"}>
+          ${koshienStartRoundsSaving ? "保存中…" : "49校の開始ラウンドを一括確定"}
+        </button>
+      </div>
+      ${koshienStartRoundsMessage
+        ? `<p class="auth-message is-${escapeHtml(koshienStartRoundsMessageKind || "pending")}" role="status">${escapeHtml(koshienStartRoundsMessage)}</p>`
+        : ""}
     </div>
   `;
 }
@@ -3019,15 +3214,19 @@ function bindActiveEventManagerInputs() {
     input.addEventListener("change", updateFinalScoreResult);
   });
   root.querySelectorAll("[data-koshien-team-start]").forEach((input) => {
-    input.disabled = !canEditSettings;
+    input.disabled = !canEditSettings || koshienStartRoundsSaving;
     input.addEventListener("change", () => {
       if (!canEditSettings) return;
-      state.event.config.teamMeta ||= normalizeKoshienTeamMeta(getTeams(), state.event.config.teamMeta);
       const team = input.dataset.koshienTeamStart;
-      state.event.config.teamMeta[team] ||= { startRound: 1, odds: 1, sqrtOdds: 1 };
-      state.event.config.teamMeta[team].startRound = Number(input.value) === 2 ? 2 : 1;
-      renderScoresOnly();
+      ensureKoshienStartRoundDraft(getTeams())[team] = Number(input.value) === 2 ? 2 : 1;
+      koshienStartRoundsMessage = "";
+      koshienStartRoundsMessageKind = "";
+      renderActiveEventManager();
     });
+  });
+  root.querySelector("[data-koshien-start-rounds-save]")?.addEventListener("click", () => {
+    if (!canEditSettings) return;
+    saveKoshienStartRounds();
   });
   root.querySelectorAll("[data-koshien-team-odds]").forEach((input) => {
     input.disabled = !canEditSettings;
@@ -3041,11 +3240,13 @@ function bindActiveEventManagerInputs() {
         odds,
         sqrtOdds: Math.round(Math.sqrt(odds) * 1000) / 1000,
       };
-      persist();
+      syncActiveEvent();
+      saveLocalStateOnly();
     });
     input.addEventListener("change", () => {
       if (!canEditSettings) return;
       renderScoresOnly();
+      saveKoshienOdds(input.dataset.koshienTeamOdds);
     });
   });
   root.querySelectorAll("[data-koshien-match-team]").forEach((input) => {
@@ -4106,7 +4307,7 @@ function setKoshienMatchMessage(text, type = "success") {
 }
 
 function koshienStructuredSaveErrorMessage(error) {
-  const stageLabels = { matches: "試合", scores: "得点", results: "結果データ", result_transaction: "試合・得点・結果データ", structured: "構造化テーブル", teams: "高校", players: "参加者" };
+  const stageLabels = { matches: "試合", scores: "得点", results: "結果データ", result_transaction: "試合・得点・結果データ", structured: "構造化テーブル", teams: "高校", start_rounds: "開始ラウンド", odds: "オッズ", players: "参加者" };
   const stage = stageLabels[error?.stage] || "Supabase";
   return `${stage}保存に失敗しました。再保存しても重複しないため、設定・マイグレーション・参加者対応を確認して再試行してください。`;
 }
@@ -4144,7 +4345,9 @@ function participantKoshienBlock(name, teams) {
         <h3>${escapeHtml(name)} のYOSO</h3>
         <span data-koshien-pick-count="${escapeAttr(name)}">${koshienPickCountLabel(picks)}</span>
       </div>
-      <p class="wc-phase-intro">8校を選び、その中からキャプテンを1校選びます。1回戦スタート校は最低5校、2回戦スタート校は最大3校までです。</p>
+      <p class="wc-phase-intro">${koshienStartRoundsConfirmed()
+        ? "8校を選び、その中からキャプテンを1校選びます。1回戦スタート校は最低5校、2回戦スタート校は最大3校までです。"
+        : "開始ラウンドは組み合わせ抽選前の仮データです。現在は仮の2回戦スタート校を最大3校として判定し、抽選後に正式データへ切り替わります。"}</p>
       <div class="prediction-grid koshien-pick-grid">
         ${picks.map((pick, index) => `
           <label class="field">
@@ -4172,6 +4375,11 @@ function koshienPickOptionsForSlot(teams, picks, index) {
 
 function koshienPickCountLabel(picks) {
   const pickedTeams = [...new Set(picks.filter(Boolean))];
+  if (!koshienStartRoundsConfirmed()) {
+    const firstRoundCount = pickedTeams.filter((team) => koshienStartRound(team) !== 2).length;
+    const secondRoundCount = pickedTeams.filter((team) => koshienStartRound(team) === 2).length;
+    return `${pickedTeams.length} / ${picks.length}（仮: 1回戦 ${firstRoundCount} / 2回戦 ${secondRoundCount}・未確定）`;
+  }
   const firstRoundCount = pickedTeams.filter((team) => koshienStartRound(team) !== 2).length;
   const secondRoundCount = pickedTeams.filter((team) => koshienStartRound(team) === 2).length;
   return `${pickedTeams.length} / ${picks.length}（1回戦 ${firstRoundCount} / 2回戦 ${secondRoundCount}）`;
@@ -4183,6 +4391,15 @@ function koshienGroupedOptionList(teams, selected) {
   const group = (label, values) => values.length
     ? `<optgroup label="${escapeAttr(label)}">${values.map((team) => option(team, koshienTeamOptionLabel(team))).join("")}</optgroup>`
     : "";
+  if (!koshienStartRoundsConfirmed()) {
+    const provisionalFirstRoundTeams = teams.filter((team) => koshienStartRound(team) !== 2);
+    const provisionalSecondRoundTeams = teams.filter((team) => koshienStartRound(team) === 2);
+    return [
+      option("", "未選択"),
+      group("仮・1回戦スタート校（未確定）", provisionalFirstRoundTeams),
+      group("仮・2回戦スタート校（未確定）", provisionalSecondRoundTeams),
+    ].join("");
+  }
   const firstRoundTeams = teams.filter((team) => koshienStartRound(team) !== 2);
   const secondRoundTeams = teams.filter((team) => koshienStartRound(team) === 2);
   return [
@@ -4194,6 +4411,7 @@ function koshienGroupedOptionList(teams, selected) {
 
 function koshienTeamOptionLabel(team) {
   if (!team) return "";
+  if (!koshienStartRoundsConfirmed()) return `${team}（仮・${koshienStartRound(team)}回戦スタート／未確定）`;
   return `${team}（${koshienStartRound(team)}回戦スタート）`;
 }
 
@@ -6202,6 +6420,10 @@ function koshienFinishRank(finish) {
 
 function koshienStartRound(team) {
   return Number(state.event.config.teamMeta?.[team]?.startRound) === 2 ? 2 : 1;
+}
+
+function koshienStartRoundsConfirmed() {
+  return state.event?.config?.startRoundsConfirmed === true;
 }
 
 function koshienPhase1Validation(prediction) {

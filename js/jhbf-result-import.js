@@ -545,7 +545,11 @@
       const previousName = currentByDistrict.get(row.districtName) || "";
       const previous = currentMeta?.[row.schoolName] || currentMeta?.[previousName] || {};
       const odds = Number(previous.odds) > 0 ? Number(previous.odds) : 1;
-      const startRound = Number(previous.startRound) === 2 || index < 15 ? 2 : 1;
+      const previousRound = Number(previous.startRound);
+      const startRound = previousRound === 1 || previousRound === 2
+        ? previousRound
+        : (index < 15 ? 2 : 1);
+      const representativeKey = representativeKeyFor(row.districtName, row.schoolName);
       return [row.schoolName, {
         startRound,
         odds,
@@ -553,8 +557,17 @@
         district: row.districtName,
         source: "jhbf",
         sourceYear: year,
+        representativeKey,
       }];
     }));
+  }
+
+  function representativeKeyFor(districtName, schoolName) {
+    const stablePart = (value) => String(value || "")
+      .trim()
+      .toLocaleLowerCase("ja-JP")
+      .replace(/[\s　]+/gu, "");
+    return `${stablePart(districtName)}:${stablePart(schoolName)}`;
   }
 
   async function handleApplyRepresentatives() {
@@ -597,7 +610,10 @@
       const nextTeams = preview.rows.map((row) => row.schoolName);
       state.event.config.teams = nextTeams;
       state.event.config.teamMeta = representativeTeamMeta(preview.rows, currentTeams, currentMeta, config.year);
+      state.event.config.startRoundsConfirmed = false;
+      delete state.event.config.startRoundsConfirmedAt;
       state.event.config.externalResults = { competitionType: "summer", year: config.year };
+      globalThis.resetKoshienStartRoundDraft?.();
       normalizeKoshienEvent(state.event);
       saveLocalStateOnly();
       renderScoresOnly();
@@ -832,6 +848,7 @@
     buildCanonicalPayload,
     buildImportPreview,
     buildRepresentativePreview,
+    representativeKeyFor,
     sameCompletedMatch,
     installBrowser,
   });

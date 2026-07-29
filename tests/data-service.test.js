@@ -12,19 +12,23 @@ function createSupabaseMock({
   playersError = null,
   missingEventId = "",
   existingEventTeams = null,
+  existingEventRules = {},
+  structuredTeamRows = null,
 } = {}) {
   const calls = [];
   const queries = [];
-  const teamRows = [
-    { id: "team-a-id", name: "Team A", odds: 4, sqrt_odds: 2 },
-    { id: "team-b-id", name: "Team B", odds: 9, sqrt_odds: 3 },
-    { id: "team-c-id", name: "Team C", odds: 1, sqrt_odds: 1 },
-    { id: "team-d-id", name: "Team D", odds: 1, sqrt_odds: 1 },
-    { id: "team-e-id", name: "Team E", odds: 1, sqrt_odds: 1 },
-    { id: "team-f-id", name: "Team F", odds: 1, sqrt_odds: 1 },
-    { id: "team-g-id", name: "Team G", odds: 1, sqrt_odds: 1 },
-    { id: "team-h-id", name: "Team H", odds: 1, sqrt_odds: 1 },
+  const baseTeamNames = [
+    "Team A", "Team B", "Team C", "Team D",
+    "Team E", "Team F", "Team G", "Team H",
+    ...Array.from({ length: 41 }, (_, index) => `School ${index + 9}`),
   ];
+  const teamRows = structuredTeamRows || baseTeamNames.map((name, index) => ({
+    id: index < 8 ? `team-${String.fromCharCode(97 + index)}-id` : `school-${index + 1}-id`,
+    name,
+    odds: index === 0 ? 4 : (index === 1 ? 9 : 1),
+    sqrt_odds: index === 0 ? 2 : (index === 1 ? 3 : 1),
+    metadata: { representative_key: `district-${index + 1}:school-${index + 1}` },
+  }));
 
   class Query {
     constructor(table) {
@@ -59,6 +63,13 @@ function createSupabaseMock({
       this.payload = payload;
       this.options = options;
       calls.push({ table: this.table, operation: this.operation, payload, options });
+      return this;
+    }
+
+    update(payload) {
+      this.operation = "update";
+      this.payload = payload;
+      calls.push({ table: this.table, operation: this.operation, payload });
       return this;
     }
 
@@ -110,7 +121,10 @@ function createSupabaseMock({
           data: existingEventTeams || teamRows.map((team, index) => ({
             name: team.name,
             seed: index + 1,
-            metadata: {},
+            metadata: {
+              representative_key: team.metadata?.representative_key,
+              startRound: index < 15 ? 2 : 1,
+            },
           })),
           error: null,
         };
@@ -124,7 +138,7 @@ function createSupabaseMock({
             preset_type: "koshien",
             status: "open",
             prediction_deadline: "2099-08-31T15:00:00.000Z",
-            rules: {},
+            rules: existingEventRules,
           }],
           error: null,
         };
@@ -139,7 +153,7 @@ function createSupabaseMock({
             preset_type: "koshien",
             status: "open",
             prediction_deadline: "2099-08-31T15:00:00.000Z",
-            rules: {},
+            rules: existingEventRules,
           },
           error: null,
         };
@@ -212,6 +226,39 @@ function completedEvent() {
       finishes: { "Team B": "initial_loss" },
     },
   };
+}
+
+function completeRoster(count = 49) {
+  const eventTeams = Array.from({ length: count }, (_, index) => ({
+    name: `School ${index + 1}`,
+    seed: index + 1,
+    metadata: {
+      representative_key: `district-${index + 1}:school-${index + 1}`,
+      startRound: index < 15 ? 2 : 1,
+    },
+  }));
+  const structuredTeams = eventTeams.map((row, index) => ({
+    id: `school-${index + 1}-id`,
+    name: row.name,
+    odds: 1,
+    sqrt_odds: 1,
+    metadata: { representative_key: row.metadata.representative_key },
+  }));
+  return { eventTeams, structuredTeams };
+}
+
+function withDefault49Roster(event) {
+  const teams = Array.from({ length: 49 }, (_, index) => `District ${index + 1}代表`);
+  event.config.teams = teams;
+  event.config.teamMeta = Object.fromEntries(teams.map((name, index) => [
+    name,
+    {
+      district: `District ${index + 1}`,
+      startRound: index < 15 ? 2 : 1,
+      odds: 1,
+    },
+  ]));
+  return event;
 }
 
 test("transactional result failure rejects without falling back to separate table writes", async () => {
@@ -340,18 +387,16 @@ test("phase 1 autosave never writes later-phase tables directly", async () => {
   assert.equal(supabase.calls.some((call) => call.table === "predictions"), false);
 });
 
-test("existing Koshien autosave cannot re-add stale schools outside the stored roster", async () => {
-  const currentRoster = [
-    { name: "Team A", seed: 1, metadata: { district: "A" } },
-    { name: "Team B", seed: 2, metadata: { district: "B" } },
-  ];
-  const supabase = createSupabaseMock({ existingEventTeams: currentRoster });
+test("existing Koshien autosave never rewrites the roster or draw-owned rules", async () => {
+  const { eventTeams, structuredTeams } = completeRoster();
+  const supabase = createSupabaseMock({
+    existingEventTeams: eventTeams,
+    structuredTeamRows: structuredTeams,
+  });
   const service = loadDataService(supabase.client);
-  const event = completedEvent();
+  const event = withDefault49Roster(completedEvent());
   event.status = "open";
   event.deadline = "2099-08-31T15:00:00.000Z";
-  event.config.teams = ["Old Placeholder", "Team A", "Team B"];
-  event.config.teamMeta["Old Placeholder"] = { startRound: 2, odds: 1 };
   event.results = { matches: [], finishes: {} };
 
   await service.koshien.saveSnapshot({
@@ -361,12 +406,145 @@ test("existing Koshien autosave cannot re-add stale schools outside the stored r
     scoreRows: [],
   });
 
-  const eventWrite = supabase.calls.find((call) => call.table === "events" && call.operation === "upsert");
+  const eventWrite = supabase.calls.find((call) => call.table === "events" && call.operation === "update");
   const eventTeamWrite = supabase.calls.find((call) => call.table === "event_teams" && call.operation === "upsert");
   const structuredTeamWrite = supabase.calls.find((call) => call.table === "teams" && call.operation === "upsert");
-  assert.deepEqual(Array.from(eventWrite.payload.rules.config.teams), ["Team A", "Team B"]);
-  assert.deepEqual(Array.from(eventTeamWrite.payload, (row) => row.name), ["Team A", "Team B"]);
-  assert.deepEqual(Array.from(structuredTeamWrite.payload, (row) => row.name), ["Team A", "Team B"]);
+  assert.equal(Object.hasOwn(eventWrite.payload, "rules"), false);
+  assert.equal(eventTeamWrite, undefined);
+  assert.equal(structuredTeamWrite, undefined);
+  assert.equal(supabase.calls.some((call) => call.name === "replace_koshien_representatives"), false);
+});
+
+test("new Koshien roster initialization uses the atomic representative RPC", async () => {
+  const supabase = createSupabaseMock({ missingEventId: "event-id" });
+  const service = loadDataService(supabase.client);
+  const event = withDefault49Roster(completedEvent());
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.results = { matches: [], finishes: {} };
+
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  assert.equal(supabase.calls.some((call) => call.name === "replace_koshien_representatives"), true);
+  assert.equal(supabase.calls.some((call) => call.table === "event_teams" && call.operation === "upsert"), false);
+  assert.equal(supabase.calls.some((call) => call.table === "teams" && call.operation === "upsert"), false);
+});
+
+test("a 49-row display roster with an incomplete structured roster is atomically repaired", async () => {
+  const { eventTeams, structuredTeams } = completeRoster();
+  const supabase = createSupabaseMock({
+    existingEventTeams: eventTeams,
+    structuredTeamRows: structuredTeams.slice(0, 48),
+  });
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.config.teams = eventTeams.map((row) => row.name);
+  event.config.teamMeta = Object.fromEntries(eventTeams.map((row) => [
+    row.name,
+    {
+      district: `district-${row.seed}`,
+      representativeKey: row.metadata.representative_key,
+      startRound: row.metadata.startRound,
+      odds: 1,
+    },
+  ]));
+  event.results = { matches: [], finishes: {} };
+
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  assert.equal(supabase.calls.some((call) => call.name === "replace_koshien_representatives"), true);
+});
+
+test("an incomplete display roster is repaired from the saved 49-school rules snapshot", async () => {
+  const { eventTeams, structuredTeams } = completeRoster();
+  const savedTeams = eventTeams.map((row) => row.name);
+  const savedTeamMeta = Object.fromEntries(eventTeams.map((row) => [
+    row.name,
+    {
+      district: `district-${row.seed}`,
+      representativeKey: row.metadata.representative_key,
+      startRound: row.metadata.startRound,
+      odds: 1,
+    },
+  ]));
+  const supabase = createSupabaseMock({
+    existingEventTeams: eventTeams.slice(0, 48),
+    structuredTeamRows: structuredTeams,
+    existingEventRules: { config: { teams: savedTeams, teamMeta: savedTeamMeta } },
+  });
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.config.teams = eventTeams.slice(0, 48).map((row) => row.name);
+  event.config.teamMeta = Object.fromEntries(eventTeams.slice(0, 48).map((row) => [
+    row.name,
+    savedTeamMeta[row.name],
+  ]));
+  event.results = { matches: [], finishes: {} };
+
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  const repairCall = supabase.calls.find((call) => call.name === "replace_koshien_representatives");
+  assert.equal(repairCall.args.p_rows.length, 49);
+});
+
+test("existing Koshien autosave preserves confirmed DB start rounds", async () => {
+  const { eventTeams, structuredTeams } = completeRoster();
+  const supabase = createSupabaseMock({
+    existingEventTeams: eventTeams,
+    structuredTeamRows: structuredTeams,
+    existingEventRules: {
+      config: {
+        startRoundsConfirmed: true,
+        startRoundsConfirmedAt: "2026-07-29T09:00:00.000Z",
+        teamMeta: Object.fromEntries(eventTeams.map((row) => [
+          row.name,
+          {
+            startRound: row.metadata.startRound,
+            representativeKey: row.metadata.representative_key,
+          },
+        ])),
+      },
+    },
+  });
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.config.teamMeta["Team A"].startRound = 2;
+  event.config.teamMeta["Team B"].startRound = 1;
+  event.results = { matches: [], finishes: {} };
+
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  const eventWrite = supabase.calls.find((call) => call.table === "events" && call.operation === "update");
+  const structuredTeamWrite = supabase.calls.find((call) => call.table === "teams" && call.operation === "upsert");
+  assert.equal(Object.hasOwn(eventWrite.payload, "rules"), false);
+  assert.equal(structuredTeamWrite, undefined);
+  assert.equal(supabase.calls.some((call) => call.name === "replace_koshien_representatives"), false);
 });
 
 test("resultWait result save does not rewrite prediction tables after the deadline", async () => {
@@ -392,7 +570,7 @@ test("prediction-only fallback reports partial when structured tables are missin
     teamError: { code: "PGRST205", message: "Could not find the table 'teams' in the schema cache" },
   });
   const service = loadDataService(supabase.client);
-  const event = completedEvent();
+  const event = withDefault49Roster(completedEvent());
   event.status = "open";
   event.results = { matches: [], finishes: {} };
   event.predictions.Admin = { teams: ["Team A"], captain: "Team A" };
@@ -464,6 +642,55 @@ test("representative replacement uses one event-scoped RPC", async () => {
         p_event_id: "event-id",
         p_rows: [{ district_name: "北北海道", school_name: "白樺学園" }],
         p_source_year: 2026,
+      },
+    },
+  );
+});
+
+test("start rounds are confirmed through one event-scoped 49-school RPC", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const rows = Array.from({ length: 49 }, (_, index) => ({
+    representativeKey: `district-${index + 1}:school-${index + 1}`,
+    startRound: index < 15 ? 2 : 1,
+  }));
+
+  await service.koshien.updateStartRounds({ eventId: "event-id", rows });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(supabase.calls.find((call) => call.name === "confirm_koshien_start_rounds"))),
+    {
+      operation: "rpc",
+      name: "confirm_koshien_start_rounds",
+      args: {
+        p_event_id: "event-id",
+        p_rows: rows.map((row) => ({
+          representative_key: row.representativeKey,
+          start_round: row.startRound,
+        })),
+      },
+    },
+  );
+});
+
+test("one edited school's odds use the event-scoped RPC without resending stale peers", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const rows = [{ representativeKey: "district-1:school-1", odds: 2.5 }];
+
+  await service.koshien.updateOdds({ eventId: "event-id", rows });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(supabase.calls.find((call) => call.name === "update_koshien_odds"))),
+    {
+      operation: "rpc",
+      name: "update_koshien_odds",
+      args: {
+        p_event_id: "event-id",
+        p_rows: rows.map((row) => ({
+          representative_key: row.representativeKey,
+          odds: row.odds,
+        })),
       },
     },
   );

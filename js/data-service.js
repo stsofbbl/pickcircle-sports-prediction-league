@@ -236,10 +236,15 @@
     return promise;
   }
 
+  function normalizedKoshienStartRound(value, index) {
+    const round = Number(value);
+    return round === 1 || round === 2 ? round : (index < 15 ? 2 : 1);
+  }
+
   function koshienTeamMeta(event, name, index) {
     const meta = event?.config?.teamMeta?.[name] || {};
     const odds = Number(meta.odds) > 0 ? Number(meta.odds) : 1;
-    const startRound = Number(meta.startRound) === 2 || index < 15 ? 2 : 1;
+    const startRound = normalizedKoshienStartRound(meta.startRound, index);
     return {
       startRound,
       odds,
@@ -247,6 +252,7 @@
       district: meta.district || "",
       source: meta.source || "",
       sourceYear: Number.isInteger(Number(meta.sourceYear)) ? Number(meta.sourceYear) : null,
+      representativeKey: String(meta.representativeKey || "").trim(),
     };
   }
 
@@ -258,14 +264,17 @@
       .replace(/[\s　]+/gu, "");
     const districtKey = stablePart(district);
     const schoolKey = stablePart(name);
+    const representativeKey = String(meta?.representativeKey || "").trim()
+      || (districtKey && schoolKey ? `${districtKey}:${schoolKey}` : "");
     return {
       source: meta?.source || fallbackSource,
       district: district || null,
       source_year: meta?.sourceYear || null,
-      ...(districtKey && schoolKey
+      startRound: normalizedKoshienStartRound(meta?.startRound, 49),
+      ...(representativeKey
         ? {
           district_key: districtKey,
-          representative_key: `${districtKey}:${schoolKey}`,
+          representative_key: representativeKey,
         }
         : {}),
     };
@@ -650,6 +659,42 @@
     return data;
   }
 
+  async function updateKoshienStartRounds({ eventId, rows } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
+      representative_key: String(row?.representativeKey || "").trim(),
+      start_round: Number(row?.startRound),
+    }));
+    if (!normalizedEventId) throw new Error("開始ラウンドを反映するevent_idが必要です。");
+    if (normalizedRows.length !== 49) throw new Error("49校すべての開始ラウンドを選択してください。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc("confirm_koshien_start_rounds", {
+      p_event_id: normalizedEventId,
+      p_rows: normalizedRows,
+    });
+    if (error) throw koshienSaveError("start_rounds", error, "開始ラウンドを確定できませんでした。");
+    return data;
+  }
+
+  async function updateKoshienOdds({ eventId, rows } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
+      representative_key: String(row?.representativeKey || "").trim(),
+      odds: Number(row?.odds),
+    }));
+    if (!normalizedEventId) throw new Error("オッズを反映するevent_idが必要です。");
+    if (!normalizedRows.length || normalizedRows.length > 49) throw new Error("更新する高校のオッズを確認してください。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc("update_koshien_odds", {
+      p_event_id: normalizedEventId,
+      p_rows: normalizedRows,
+    });
+    if (error) throw koshienSaveError("odds", error, "オッズを保存できませんでした。");
+    return data;
+  }
+
   async function deleteKoshienEvent({ eventId, confirmationName } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     const normalizedName = String(confirmationName || "").trim();
@@ -669,7 +714,17 @@
     return { ok: true, eventId: normalizedEventId };
   }
 
-  async function saveKoshienStructuredTables({ supabase, user, league, membership, event, participantName, profile, scoreRows, savePrediction }) {
+  async function saveKoshienStructuredTables({
+    supabase,
+    user,
+    league,
+    membership,
+    event,
+    participantName,
+    profile,
+    scoreRows,
+    savePrediction,
+  }) {
     const displayName = participantName || displayNameFromUser(user, profile);
     const playerPayload = {
       league_id: league.id,
@@ -685,39 +740,12 @@
     if (playerError) throw playerError;
 
     const eventId = String(event.id);
-    let teamRows = [];
-    const teams = Array.isArray(event.config?.teams) ? event.config.teams : [];
-    if (isClubAdminRole(clubRoleFromMembership(membership)) && teams.length) {
-      const rows = teams.map((name, index) => {
-        const meta = koshienTeamMeta(event, name, index);
-        return {
-          event_id: eventId,
-          name,
-          team_id: `koshien-2026-${index + 1}`,
-          school_name: name,
-          seed: index + 1,
-          start_round: meta.startRound,
-          odds: meta.odds,
-          metadata: {
-            ...koshienRepresentativeMetadata(name, meta, "yoso-koshien"),
-            sqrt_odds_snapshot: meta.sqrtOdds,
-          },
-        };
-      });
-      const { data, error } = await supabase
-        .from("teams")
-        .upsert(rows, { onConflict: "event_id,name" })
-        .select("id, name, odds, sqrt_odds");
-      if (error) throw error;
-      teamRows = data || [];
-    } else {
-      const { data, error } = await supabase
-        .from("teams")
-        .select("id, name, odds, sqrt_odds")
-        .eq("event_id", eventId);
-      if (error) throw error;
-      teamRows = data || [];
-    }
+    const { data, error } = await supabase
+      .from("teams")
+      .select("id, name, odds, sqrt_odds")
+      .eq("event_id", eventId);
+    if (error) throw error;
+    const teamRows = data || [];
 
     const teamByName = new Map(teamRows.map((team) => [team.name, team]));
     if (!savePrediction) return { player, teamRows, predictionSaved: false };
@@ -744,27 +772,80 @@
   }
 
   async function koshienEventWithStoredRoster({ supabase, event, existingEvent }) {
-    if (!existingEvent) return event;
-    const { data: storedTeams, error } = await supabase
-      .from("event_teams")
-      .select("name, seed, metadata")
-      .eq("event_id", String(event.id))
-      .order("seed", { ascending: true });
-    if (error) throw error;
-    if (!Array.isArray(storedTeams) || !storedTeams.length) return event;
+    if (!existingEvent) return { event, rosterComplete: false };
+    const storedConfig = existingEvent.rules?.config || {};
+    const [
+      { data: storedTeams, error: eventTeamsError },
+      { data: structuredTeams, error: structuredTeamsError },
+    ] = await Promise.all([
+      supabase
+        .from("event_teams")
+        .select("name, seed, metadata")
+        .eq("event_id", String(event.id))
+        .order("seed", { ascending: true }),
+      supabase
+        .from("teams")
+        .select("name, metadata")
+        .eq("event_id", String(event.id)),
+    ]);
+    if (eventTeamsError) throw eventTeamsError;
+    if (structuredTeamsError) {
+      if (isMissingRelationError(structuredTeamsError)) return { event, rosterComplete: false };
+      throw structuredTeamsError;
+    }
+    const eventTeamKeys = new Set((storedTeams || []).map((row) => String(row.metadata?.representative_key || "")).filter(Boolean));
+    const structuredTeamKeys = new Set((structuredTeams || []).map((row) => String(row.metadata?.representative_key || "")).filter(Boolean));
+    const rosterComplete = Array.isArray(storedTeams)
+      && Array.isArray(structuredTeams)
+      && storedTeams.length === 49
+      && structuredTeams.length === 49
+      && eventTeamKeys.size === 49
+      && structuredTeamKeys.size === 49
+      && [...eventTeamKeys].every((key) => structuredTeamKeys.has(key));
+    if (!rosterComplete) {
+      const recoveryTeams = Array.isArray(storedConfig.teams) && storedConfig.teams.length === 49
+        ? storedConfig.teams.map((name) => String(name || "")).filter(Boolean)
+        : (Array.isArray(event.config?.teams) && event.config.teams.length === 49
+          ? event.config.teams
+          : []);
+      return {
+        rosterComplete: false,
+        event: {
+          ...event,
+          config: {
+            ...(event.config || {}),
+            ...(recoveryTeams.length === 49 ? { teams: recoveryTeams } : {}),
+            teamMeta: {
+              ...(event.config?.teamMeta || {}),
+              ...(storedConfig.teamMeta || {}),
+            },
+          },
+        },
+      };
+    }
 
+    const storedConfirmationKnown = typeof storedConfig.startRoundsConfirmed === "boolean";
+    const storedRoundsAreConfirmed = storedConfig.startRoundsConfirmed === true;
     const localTeamMeta = event.config?.teamMeta || {};
+    const storedTeamMeta = storedConfig.teamMeta || {};
     const teamMeta = Object.fromEntries(storedTeams.map((row, index) => {
       const name = String(row.name || "");
       const current = localTeamMeta[name] || {};
       const stored = row.metadata || {};
+      const confirmed = storedTeamMeta[name] || {};
       const odds = Number(current.odds) > 0 ? Number(current.odds) : 1;
+      const roundSource = storedConfirmationKnown
+        ? (confirmed.startRound ?? stored.startRound)
+        : (current.startRound ?? stored.startRound);
       return [name, {
-        startRound: Number(current.startRound) === 2 || index < 15 ? 2 : 1,
+        startRound: normalizedKoshienStartRound(roundSource, index),
         odds,
         sqrtOdds: Math.round(Math.sqrt(odds) * 10000) / 10000,
         ...(current.district || stored.district ? { district: current.district || stored.district } : {}),
         ...(current.source || stored.source ? { source: current.source || stored.source } : {}),
+        ...(confirmed.representativeKey || stored.representative_key
+          ? { representativeKey: confirmed.representativeKey || stored.representative_key }
+          : {}),
         ...(Number.isInteger(Number(current.sourceYear ?? stored.source_year))
           ? { sourceYear: Number(current.sourceYear ?? stored.source_year) }
           : {}),
@@ -772,11 +853,20 @@
     }));
 
     return {
-      ...event,
-      config: {
-        ...(event.config || {}),
-        teams: storedTeams.map((row) => String(row.name || "")).filter(Boolean),
-        teamMeta,
+      rosterComplete: true,
+      event: {
+        ...event,
+        config: {
+          ...(event.config || {}),
+          teams: storedTeams.map((row) => String(row.name || "")).filter(Boolean),
+          teamMeta,
+          startRoundsConfirmed: storedConfirmationKnown
+            ? storedRoundsAreConfirmed
+            : event.config?.startRoundsConfirmed === true,
+          ...(storedRoundsAreConfirmed && storedConfig.startRoundsConfirmedAt
+            ? { startRoundsConfirmedAt: storedConfig.startRoundsConfirmedAt }
+            : {}),
+        },
       },
     };
   }
@@ -808,44 +898,58 @@
     const eventId = String(event.id);
     const { data: existingEvent, error: existingEventError } = await supabase
       .from("events")
-      .select("id")
+      .select("id, rules")
       .eq("id", eventId)
       .maybeSingle();
     if (existingEventError) throw existingEventError;
-    const eventForSave = await koshienEventWithStoredRoster({ supabase, event, existingEvent });
+    const {
+      event: eventForSave,
+      rosterComplete,
+    } = await koshienEventWithStoredRoster({ supabase, event, existingEvent });
 
     if (isAdmin) {
-      const eventPayload = {
-        id: eventId,
-        league_id: league.id,
+      const eventSettings = {
         name: eventForSave.name,
-        preset_type: "koshien",
         status: eventForSave.status || "open",
         prediction_deadline: deadline,
-        rules: {
-          approvalPolicy: eventForSave.approvalPolicy || state.approvalPolicy,
-          config: eventForSave.config || {},
-          resultFlow: eventForSave.resultFlow || {},
-          localEventId: eventForSave.id,
-        },
-        created_by: user.id,
       };
-      const { error: eventError } = await supabase.from("events").upsert(eventPayload);
+      let eventError;
+      if (existingEvent) {
+        ({ error: eventError } = await supabase
+          .from("events")
+          .update(eventSettings)
+          .eq("id", eventId));
+      } else {
+        const eventPayload = {
+          id: eventId,
+          league_id: league.id,
+          ...eventSettings,
+          preset_type: "koshien",
+          rules: {
+            approvalPolicy: eventForSave.approvalPolicy || state.approvalPolicy,
+            config: eventForSave.config || {},
+            resultFlow: eventForSave.resultFlow || {},
+            localEventId: eventForSave.id,
+          },
+          created_by: user.id,
+        };
+        ({ error: eventError } = await supabase.from("events").upsert(eventPayload));
+      }
       if (eventError) throw eventError;
 
       const teams = Array.isArray(eventForSave.config?.teams) ? eventForSave.config.teams : [];
-      if (teams.length) {
-        const teamRows = teams.map((name, index) => {
-          const meta = koshienTeamMeta(eventForSave, name, index);
-          return {
-            event_id: eventId,
-            name,
-            seed: index + 1,
-            metadata: koshienRepresentativeMetadata(name, meta, "localStorage"),
-          };
+      if (!rosterComplete) {
+        if (teams.length !== 49) {
+          throw new Error("代表校49校の保存済みデータを復元できません。公式代表校を再読込してください。");
+        }
+        await replaceKoshienRepresentatives({
+          eventId,
+          year: eventForSave.config?.externalResults?.year,
+          rows: teams.map((name) => ({
+            districtName: eventForSave.config?.teamMeta?.[name]?.district || "",
+            schoolName: name,
+          })),
         });
-        const { error: teamsError } = await supabase.from("event_teams").upsert(teamRows, { onConflict: "event_id,name" });
-        if (teamsError) throw teamsError;
       }
 
     } else if (!existingEvent) {
@@ -1047,6 +1151,8 @@
       saveSnapshot: saveKoshienSnapshot,
       loadSnapshot: loadKoshienSnapshot,
       replaceRepresentatives: replaceKoshienRepresentatives,
+      updateStartRounds: updateKoshienStartRounds,
+      updateOdds: updateKoshienOdds,
       deleteEvent: deleteKoshienEvent,
       loadPhase2DraftState,
       savePhase2DraftPick,
