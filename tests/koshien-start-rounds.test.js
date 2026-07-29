@@ -53,7 +53,7 @@ test("provisional predictions remain writable and existing picks never block con
   assert.match(migration, /select count\(\*\) into v_invalid_prediction_count[\s\S]*?invalid_predictions/);
 });
 
-test("odds updates are isolated from roster and start-round fields", () => {
+test("odds updates remain isolated from roster and start-round fields", () => {
   assert.match(migration, /create or replace function public\.update_koshien_odds/);
   assert.match(migration, /jsonb_array_length\(p_rows\) not between 1 and 49/);
   assert.match(migration, /update public\.teams t[\s\S]*?set odds = x\.odds/);

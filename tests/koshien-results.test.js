@@ -102,36 +102,54 @@ test("phase-one scoring applies the 1.2 captain multiplier", () => {
     picks: ["Team A"],
     captain: "Team A",
     finishes: { "Team A": "first_win_then_loss" },
-    teamMeta: { "Team A": { odds: 4, sqrtOdds: 2 } },
+    teamMeta: { "Team A": { gameMultiplier: 2 } },
     stagePoints: { first_win_then_loss: 1 },
     captainMultiplier: 1.2,
-    sqrtOddsCap: 50,
+    gameMultiplierCap: 50,
   });
 
   assert.equal(result.total, 2.4);
   assert.equal(result.rows[0].multiplier, 1.2);
 });
 
-test("phase-one scoring caps square-root odds at 50", () => {
+test("phase-one scoring caps the saved game multiplier at 50", () => {
   const result = koshien.calculatePhase1Breakdown({
     picks: ["Team A"],
     captain: "",
     finishes: { "Team A": "best16" },
-    teamMeta: { "Team A": { odds: 10000, sqrtOdds: 100 } },
+    teamMeta: { "Team A": { gameMultiplier: 100 } },
     stagePoints: { best16: 1.5 },
     captainMultiplier: 1.2,
-    sqrtOddsCap: 50,
+    gameMultiplierCap: 50,
   });
 
   assert.equal(result.total, 75);
-  assert.equal(result.rows[0].sqrtOdds, 50);
+  assert.equal(result.rows[0].gameMultiplier, 50);
+});
+
+test("phase-one scoring uses the saved game multiplier instead of recalculating external odds", () => {
+  const result = koshien.calculatePhase1Breakdown({
+    picks: ["Team A", "Team B"],
+    captain: "Team A",
+    finishes: { "Team A": "best8", "Team B": "best16" },
+    teamMeta: {
+      "Team A": { odds: 10000, sqrtOdds: 100, gameMultiplier: 2.5 },
+      "Team B": { odds: 9, sqrtOdds: 3 },
+    },
+    stagePoints: { best8: 2, best16: 1.5 },
+    captainMultiplier: 1.2,
+  });
+
+  assert.equal(result.total, 6);
+  assert.equal(result.rows[0].gameMultiplier, 2.5);
+  assert.equal(result.rows[1].gameMultiplier, 0);
 });
 
 test("an unfinished team stays unfinished in the score breakdown", () => {
   const result = koshien.calculatePhase1Breakdown({
     picks: ["Team A"],
     finishes: {},
-    teamMeta: { "Team A": { odds: 4, sqrtOdds: 2 } },
+    teamMeta: { "Team A": { gameMultiplier: 2 } },
     stagePoints: koshien.OFFICIAL_PHASE1_POINTS,
   });
 

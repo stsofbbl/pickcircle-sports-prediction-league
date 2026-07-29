@@ -106,6 +106,7 @@ create table if not exists public.teams (
   start_round integer not null default 1 check (start_round in (1, 2)),
   odds numeric(8, 2) not null default 1 check (odds > 0),
   sqrt_odds numeric(10, 4) generated always as (sqrt(odds)) stored,
+  game_multiplier numeric(10, 4) check (game_multiplier is null or (game_multiplier > 0 and game_multiplier <= 50)),
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),

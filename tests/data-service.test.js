@@ -695,3 +695,44 @@ test("one edited school's odds use the event-scoped RPC without resending stale 
     },
   );
 });
+
+test("all 49 saved game multipliers use one event-scoped RPC and preserve unset values", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const rows = Array.from({ length: 49 }, (_, index) => ({
+    representativeKey: `district-${index + 1}:school-${index + 1}`,
+    gameMultiplier: index === 48 ? null : (index + 1) / 10,
+  }));
+
+  await service.koshien.updateGameMultipliers({ eventId: "event-id", rows });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(supabase.calls.find((call) => call.name === "update_koshien_game_multipliers"))),
+    {
+      operation: "rpc",
+      name: "update_koshien_game_multipliers",
+      args: {
+        p_event_id: "event-id",
+        p_rows: rows.map((row) => ({
+          representative_key: row.representativeKey,
+          game_multiplier: row.gameMultiplier,
+        })),
+      },
+    },
+  );
+});
+
+test("game multiplier save rejects values outside the greater-than-zero through 50 range", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const rows = Array.from({ length: 49 }, (_, index) => ({
+    representativeKey: `district-${index + 1}:school-${index + 1}`,
+    gameMultiplier: 1,
+  }));
+
+  rows[0].gameMultiplier = 0;
+  await assert.rejects(service.koshien.updateGameMultipliers({ eventId: "event-id", rows }), /0より大きく50以下/);
+  rows[0].gameMultiplier = 50.1;
+  await assert.rejects(service.koshien.updateGameMultipliers({ eventId: "event-id", rows }), /0より大きく50以下/);
+  assert.equal(supabase.calls.some((call) => call.name === "update_koshien_game_multipliers"), false);
+});

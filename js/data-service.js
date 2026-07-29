@@ -245,10 +245,14 @@
     const meta = event?.config?.teamMeta?.[name] || {};
     const odds = Number(meta.odds) > 0 ? Number(meta.odds) : 1;
     const startRound = normalizedKoshienStartRound(meta.startRound, index);
+    const gameMultiplier = Number(meta.gameMultiplier) > 0 && Number(meta.gameMultiplier) <= 50
+      ? Number(meta.gameMultiplier)
+      : null;
     return {
       startRound,
       odds,
       sqrtOdds: Math.round(Math.sqrt(odds) * 10000) / 10000,
+      gameMultiplier,
       district: meta.district || "",
       source: meta.source || "",
       sourceYear: Number.isInteger(Number(meta.sourceYear)) ? Number(meta.sourceYear) : null,
@@ -695,6 +699,31 @@
     return data;
   }
 
+  async function updateKoshienGameMultipliers({ eventId, rows } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => {
+      const value = row?.gameMultiplier;
+      return {
+        representative_key: String(row?.representativeKey || "").trim(),
+        game_multiplier: value === null || value === "" || value === undefined ? null : Number(value),
+      };
+    });
+    if (!normalizedEventId) throw new Error("倍率を反映するevent_idが必要です。");
+    if (normalizedRows.length !== 49) throw new Error("49校すべての倍率を確認してください。");
+    if (normalizedRows.some((row) => !row.representative_key
+      || (row.game_multiplier !== null && (!(row.game_multiplier > 0) || row.game_multiplier > 50)))) {
+      throw new Error("倍率は0より大きく50以下で入力してください。");
+    }
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc("update_koshien_game_multipliers", {
+      p_event_id: normalizedEventId,
+      p_rows: normalizedRows,
+    });
+    if (error) throw koshienSaveError("multipliers", error, "倍率を保存できませんでした。");
+    return data;
+  }
+
   async function deleteKoshienEvent({ eventId, confirmationName } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     const normalizedName = String(confirmationName || "").trim();
@@ -834,6 +863,10 @@
       const stored = row.metadata || {};
       const confirmed = storedTeamMeta[name] || {};
       const odds = Number(current.odds) > 0 ? Number(current.odds) : 1;
+      const gameMultiplierSource = confirmed.gameMultiplier ?? stored.gameMultiplier ?? current.gameMultiplier;
+      const gameMultiplier = Number(gameMultiplierSource) > 0 && Number(gameMultiplierSource) <= 50
+        ? Number(gameMultiplierSource)
+        : null;
       const roundSource = storedConfirmationKnown
         ? (confirmed.startRound ?? stored.startRound)
         : (current.startRound ?? stored.startRound);
@@ -841,6 +874,7 @@
         startRound: normalizedKoshienStartRound(roundSource, index),
         odds,
         sqrtOdds: Math.round(Math.sqrt(odds) * 10000) / 10000,
+        gameMultiplier,
         ...(current.district || stored.district ? { district: current.district || stored.district } : {}),
         ...(current.source || stored.source ? { source: current.source || stored.source } : {}),
         ...(confirmed.representativeKey || stored.representative_key
@@ -1153,6 +1187,7 @@
       replaceRepresentatives: replaceKoshienRepresentatives,
       updateStartRounds: updateKoshienStartRounds,
       updateOdds: updateKoshienOdds,
+      updateGameMultipliers: updateKoshienGameMultipliers,
       deleteEvent: deleteKoshienEvent,
       loadPhase2DraftState,
       savePhase2DraftPick,

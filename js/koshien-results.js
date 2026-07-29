@@ -131,18 +131,19 @@
     teamMeta = {},
     stagePoints = {},
     captainMultiplier = 1.2,
-    sqrtOddsCap = 50,
+    gameMultiplierCap = 50,
   }) {
     const uniquePicks = [...new Set(picks.filter(Boolean))];
     const rows = uniquePicks.map((team) => {
       const finish = normalizeFinish(finishes[team]);
       const stagePoint = Number(stagePoints[finish]) || 0;
       const meta = teamMeta[team] || {};
-      const odds = Number(meta.odds) > 0 ? Number(meta.odds) : 1;
-      const rawSqrtOdds = Number(meta.sqrtOdds) > 0 ? Number(meta.sqrtOdds) : Math.sqrt(odds);
-      const sqrtOdds = Math.min(rawSqrtOdds, Number(sqrtOddsCap) || 50);
+      const savedMultiplier = Number(meta.gameMultiplier);
+      const gameMultiplier = savedMultiplier > 0
+        ? Math.min(savedMultiplier, Number(gameMultiplierCap) || 50)
+        : 0;
       const multiplier = captain === team ? Number(captainMultiplier) || 1.2 : 1;
-      return { team, finish, stagePoint, sqrtOdds, multiplier, score: stagePoint * sqrtOdds * multiplier };
+      return { team, finish, stagePoint, gameMultiplier, multiplier, score: stagePoint * gameMultiplier * multiplier };
     });
     return { total: rows.reduce((total, row) => total + row.score, 0), rows };
   }
