@@ -7,6 +7,7 @@ const migrationPath = path.join(__dirname, "..", "supabase", "migrations", "2026
 const rosterMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722193000_scope_best16_to_submitted_roster.sql");
 const lifecycleMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722200000_harden_koshien_later_phase_lifecycle.sql");
 const triggerPermissionMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722202000_revoke_koshien_trigger_execution.sql");
+const progressMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260730043742_improve_koshien_later_phase_progress_ui.sql");
 
 test("later-phase migration provides server-owned round snapshots and authenticated RPC writes", () => {
   const sql = fs.readFileSync(migrationPath, "utf8");
@@ -71,4 +72,52 @@ test("later phases have explicit prepare open lock scheduling and result correct
 test("the internal result protection trigger cannot be called as a public RPC", () => {
   const sql = fs.readFileSync(triggerPermissionMigrationPath, "utf8");
   assert.match(sql, /revoke all on function public\.protect_koshien_opened_later_results\(\) from anon, authenticated, public/i);
+});
+
+test("later-phase progress migration keeps scheduling and state changes server-owned", () => {
+  const sql = fs.readFileSync(progressMigrationPath, "utf8");
+  assert.match(sql, /add column if not exists start_mode text/i);
+  assert.match(sql, /add column if not exists end_mode text/i);
+  assert.match(sql, /create or replace function public\.prepare_koshien_later_phase/i);
+  assert.match(sql, /create or replace function public\.update_koshien_later_phase_schedule/i);
+  assert.match(sql, /create or replace function public\.get_koshien_later_phase_admin_progress/i);
+  assert.match(sql, /public\.is_league_admin\(v_league_id\)/i);
+  assert.match(sql, /clock_timestamp\(\)/i);
+  assert.match(sql, /p_end_mode = 'automatic'/i);
+  assert.match(sql, /revoke all on function public\.update_koshien_later_phase_schedule[\s\S]*from anon, public/i);
+  assert.match(sql, /grant execute on function public\.update_koshien_later_phase_schedule[\s\S]*to authenticated/i);
+});
+
+test("open phase deadline changes support extension and shortening without changing picks", () => {
+  const sql = fs.readFileSync(progressMigrationPath, "utf8");
+  assert.match(sql, /v_round\.status = 'open'[\s\S]*p_opens_at is distinct from v_round\.opens_at/i);
+  assert.match(sql, /p_end_mode is distinct from v_round\.end_mode[\s\S]*only the deadline can be changed while reception is open/i);
+  assert.match(sql, /deadline_at = case when p_end_mode = 'manual' then 'infinity'::timestamptz else p_deadline_at end/i);
+  assert.doesNotMatch(sql, /delete from public\.(phase2_draft_picks|revenge_picks|zombie_predictions|final_score_predictions)/i);
+  assert.doesNotMatch(sql, /update public\.scores|update public\.matches/i);
+});
+
+test("automatic transitions and participant writes use server time while manual modes remain explicit", () => {
+  const sql = fs.readFileSync(progressMigrationPath, "utf8");
+  assert.match(sql, /start_mode = 'automatic'[\s\S]*opens_at <= clock_timestamp\(\)/i);
+  assert.match(sql, /end_mode = 'automatic'[\s\S]*deadline_at <= clock_timestamp\(\)/i);
+  assert.match(sql, /v_round\.end_mode = 'automatic' and clock_timestamp\(\) >= v_round\.deadline_at/i);
+  assert.match(sql, /set_config\('yoso\.phase2_rpc', 'manage_schedule', true\)/i);
+});
+
+test("phase 2 cannot close before all 16 draft picks are complete", () => {
+  const sql = fs.readFileSync(progressMigrationPath, "utf8");
+  assert.match(sql, /p_phase_key = 'best16' and not exists[\s\S]*d\.status in \('completed', 'locked'\)[\s\S]*formal phase 2 draft must be completed before lock/i);
+  assert.match(sql, /phase_key <> 'revenge'[\s\S]*d\.status in \('completed', 'locked'\)/i);
+});
+
+test("repeated prediction request IDs return without mutating saved rows", () => {
+  const sql = fs.readFileSync(progressMigrationPath, "utf8");
+  assert.match(sql, /create table if not exists public\.koshien_later_prediction_requests/i);
+  assert.match(sql, /primary key \(event_id, player_id, phase_key, request_id\)/i);
+  assert.match(sql, /alter table public\.koshien_later_prediction_requests enable row level security/i);
+  const idempotentReturns = sql.match(/if v_previous_payload is not null then[\s\S]*?return public\.get_koshien_later_phase_state\(p_event_id\);[\s\S]*?end if;/gi) || [];
+  assert.equal(idempotentReturns.length, 3);
+  assert.match(sql, /select h\.payload into v_previous_payload[\s\S]*if v_round\.status <> 'open'/i);
+  assert.match(sql, /revoke all on table public\.koshien_later_prediction_requests from anon, authenticated/i);
 });

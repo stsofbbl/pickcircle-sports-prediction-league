@@ -805,22 +805,135 @@ input[type="number"],
 
 .koshien-later-admin-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 14px;
 }
 
 .koshien-later-admin-card {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  align-content: start;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.035);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+    rgba(17, 12, 14, 0.72);
 }
 
 .koshien-later-admin-card > span,
 .koshien-later-admin-card > small {
   color: var(--muted, #aaa5ad);
+}
+
+.koshien-later-admin-card.is-open {
+  border-color: rgba(169, 231, 199, 0.34);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2);
+}
+
+.koshien-later-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.koshien-later-card-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.koshien-later-card-head strong {
+  font-size: 16px;
+}
+
+.koshien-later-card-head div > span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.koshien-later-card-facts {
+  display: grid;
+  gap: 8px;
+}
+
+.koshien-later-card-facts > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 4px 10px;
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: rgba(8, 7, 7, 0.28);
+}
+
+.koshien-later-card-facts span,
+.koshien-later-card-facts small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.koshien-later-card-facts small {
+  grid-column: 2;
+}
+
+.koshien-later-schedule-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+  padding-top: 2px;
+}
+
+.koshien-later-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.koshien-later-submissions {
+  display: grid;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(238, 232, 224, 0.1);
+}
+
+.koshien-later-submissions[hidden] {
+  display: none;
+}
+
+.koshien-later-submission-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: rgba(8, 7, 7, 0.26);
+}
+
+.koshien-later-submission-row span,
+.koshien-later-submission-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.koshien-later-submission-row small {
+  grid-column: 1 / -1;
+}
+
+.koshien-later-revenge-summary {
+  display: grid;
+  gap: 7px;
+  margin-top: 4px;
+}
+
+.koshien-later-reception-message {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(240, 168, 190, 0.18);
+  border-radius: 11px;
+  color: var(--muted);
+  background: rgba(240, 168, 190, 0.06);
+  font-size: 12px;
 }
 
 .koshien-phase2-slot {

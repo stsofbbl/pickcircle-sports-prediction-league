@@ -85,7 +85,14 @@
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("後半フェーズのevent_idが必要です。");
     await laterPhaseRpc("refresh_koshien_phase_schedule", { p_event_id: normalizedEventId }, "later_phase_schedule");
-    return laterPhaseRpc("get_koshien_later_phase_state", { p_event_id: normalizedEventId }, "later_phase_load");
+    const state = await laterPhaseRpc("get_koshien_later_phase_state", { p_event_id: normalizedEventId }, "later_phase_load");
+    if (!state?.is_admin) return state;
+    const adminProgress = await laterPhaseRpc(
+      "get_koshien_later_phase_admin_progress",
+      { p_event_id: normalizedEventId },
+      "later_phase_admin_progress",
+    );
+    return { ...state, admin_progress: adminProgress };
   }
 
   async function saveRevengePick(payload = {}) {
@@ -127,19 +134,38 @@
     }, "phase3_prediction");
   }
 
-  async function prepareLaterPhase({ eventId, phase, opensAt, deadlineAt } = {}) {
-    const rpcNames = {
-      best16: "prepare_koshien_best16_phases",
-      zombie: "prepare_koshien_zombie_phase",
-      phase3: "prepare_koshien_phase3",
-    };
+  async function prepareLaterPhase({
+    eventId, phase, opensAt, deadlineAt, startMode = "automatic", endMode = "automatic",
+  } = {}) {
     const normalizedEventId = String(eventId || "").trim();
-    if (!normalizedEventId || !rpcNames[phase] || !opensAt || !deadlineAt) throw new Error("後半フェーズ準備payloadを確認してください。");
-    return laterPhaseRpc(rpcNames[phase], {
+    if (!normalizedEventId || !["best16", "zombie", "phase3"].includes(phase)
+      || !opensAt || !deadlineAt || !["manual", "automatic"].includes(startMode)
+      || !["manual", "automatic"].includes(endMode)) throw new Error("後半フェーズ準備payloadを確認してください。");
+    return laterPhaseRpc("prepare_koshien_later_phase", {
       p_event_id: normalizedEventId,
+      p_phase_key: phase,
       p_opens_at: opensAt,
       p_deadline_at: deadlineAt,
+      p_start_mode: startMode,
+      p_end_mode: endMode,
     }, `${phase}_prepare`);
+  }
+
+  async function updateLaterPhaseSchedule({
+    eventId, phase, opensAt, deadlineAt, startMode = "automatic", endMode = "automatic",
+  } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId || !["best16", "zombie", "phase3"].includes(phase)
+      || !opensAt || !deadlineAt || !["manual", "automatic"].includes(startMode)
+      || !["manual", "automatic"].includes(endMode)) throw new Error("後半フェーズ日程payloadを確認してください。");
+    return laterPhaseRpc("update_koshien_later_phase_schedule", {
+      p_event_id: normalizedEventId,
+      p_phase_key: phase,
+      p_opens_at: opensAt,
+      p_deadline_at: deadlineAt,
+      p_start_mode: startMode,
+      p_end_mode: endMode,
+    }, `${phase}_schedule`);
   }
 
   async function setLaterPhaseStatus({ eventId, phase, action } = {}) {
@@ -1196,6 +1222,7 @@
       saveZombiePrediction,
       savePhase3Prediction,
       prepareLaterPhase,
+      updateLaterPhaseSchedule,
       setLaterPhaseStatus,
       cancelKoshienMatchResult,
       reopenKoshienResults,

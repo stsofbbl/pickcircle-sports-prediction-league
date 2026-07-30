@@ -31,6 +31,33 @@ test("later phase reads use one participant-safe aggregate RPC", async () => {
   ]);
 });
 
+test("admin later phase reads include submission progress without exposing it to participants", async () => {
+  const calls = [];
+  const client = {
+    rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "get_koshien_later_phase_state") return { data: { event_id: "event-1", is_admin: true }, error: null };
+      return { data: { ok: true }, error: null };
+    },
+  };
+  const window = {
+    location: { href: "https://example.test/" },
+    YosoSupabase: {
+      config: () => ({ sync: { autoSaveKoshien: true } }),
+      hasConfig: () => true,
+      client: async () => client,
+      sessionUser: async () => ({ id: "user-1" }),
+    },
+  };
+  vm.runInNewContext(source, { console, window, localStorage: { getItem() {}, setItem() {} } });
+  await window.YosoDataService.koshien.loadLaterPhaseState("event-1");
+  assert.deepEqual(calls.map((call) => call.name), [
+    "refresh_koshien_phase_schedule",
+    "get_koshien_later_phase_state",
+    "get_koshien_later_phase_admin_progress",
+  ]);
+});
+
 test("admin can explicitly open and lock a prepared later phase", async () => {
   const { service, calls } = loadService();
   await service.koshien.setLaterPhaseStatus({ eventId: "event-1", phase: "best16", action: "open" });
@@ -63,13 +90,36 @@ test("revenge zombie and phase 3 saves send only server-owned IDs scores version
 
 test("admin preparation uses explicit event schedule without participant identities", async () => {
   const { service, calls } = loadService();
-  await service.koshien.prepareLaterPhase({ eventId: "event-1", phase: "best16", opensAt: "2026-07-22T10:00:00Z", deadlineAt: "2026-07-23T10:00:00Z" });
-  await service.koshien.prepareLaterPhase({ eventId: "event-1", phase: "zombie", opensAt: "2026-07-24T10:00:00Z", deadlineAt: "2026-07-25T10:00:00Z" });
-  await service.koshien.prepareLaterPhase({ eventId: "event-1", phase: "phase3", opensAt: "2026-07-26T10:00:00Z", deadlineAt: "2026-07-27T10:00:00Z" });
+  await service.koshien.prepareLaterPhase({ eventId: "event-1", phase: "best16", opensAt: "2026-07-22T10:00:00Z", deadlineAt: "2026-07-23T10:00:00Z", startMode: "manual", endMode: "automatic" });
+  await service.koshien.prepareLaterPhase({ eventId: "event-1", phase: "zombie", opensAt: "2026-07-24T10:00:00Z", deadlineAt: "2026-07-25T10:00:00Z", startMode: "automatic", endMode: "manual" });
+  await service.koshien.prepareLaterPhase({ eventId: "event-1", phase: "phase3", opensAt: "2026-07-26T10:00:00Z", deadlineAt: "2026-07-27T10:00:00Z", startMode: "automatic", endMode: "automatic" });
   assert.deepEqual(calls.map((call) => call.name), [
-    "prepare_koshien_best16_phases",
-    "prepare_koshien_zombie_phase",
-    "prepare_koshien_phase3",
+    "prepare_koshien_later_phase",
+    "prepare_koshien_later_phase",
+    "prepare_koshien_later_phase",
   ]);
   assert.equal(JSON.stringify(calls).includes("player"), false);
+});
+
+test("admin can extend or shorten a later phase deadline through one guarded RPC", async () => {
+  const { service, calls } = loadService();
+  await service.koshien.updateLaterPhaseSchedule({
+    eventId: "event-1",
+    phase: "phase3",
+    opensAt: "2026-07-26T10:00:00Z",
+    deadlineAt: "2026-07-27T08:00:00Z",
+    startMode: "automatic",
+    endMode: "automatic",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{
+    name: "update_koshien_later_phase_schedule",
+    args: {
+      p_event_id: "event-1",
+      p_phase_key: "phase3",
+      p_opens_at: "2026-07-26T10:00:00Z",
+      p_deadline_at: "2026-07-27T08:00:00Z",
+      p_start_mode: "automatic",
+      p_end_mode: "automatic",
+    },
+  }]);
 });
