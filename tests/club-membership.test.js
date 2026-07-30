@@ -108,3 +108,20 @@ test("club data service exposes request workflow RPCs and never auto-joins after
     "remove_club_member",
   ]);
 });
+
+test("club search rejects fewer than two characters before calling the API", async () => {
+  const calls = [];
+  const client = {
+    async rpc(name, args) {
+      calls.push({ name, args });
+      return { data: [], error: null };
+    },
+  };
+  const service = loadService(client);
+
+  await assert.rejects(
+    service.league.searchClubs({ query: "あ" }),
+    /クラブ名は2文字以上で入力してください。/,
+  );
+  assert.equal(calls.length, 0);
+});

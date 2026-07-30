@@ -1167,6 +1167,11 @@ input[type="number"],
 .koshien-match-list {
   display: grid;
   gap: 10px;
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 3px;
+  scrollbar-gutter: stable;
 }
 
 .koshien-match-round {
@@ -1191,13 +1196,105 @@ input[type="number"],
 
 .koshien-match-grid {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   margin-top: 10px;
 }
 
 .koshien-match-row {
-  grid-template-columns: 72px repeat(3, minmax(130px, 1fr)) repeat(2, minmax(82px, 0.5fr)) auto auto;
-  align-items: end;
+  width: 100%;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--ink);
+  text-align: left;
+}
+
+.koshien-match-row:not(:disabled) {
+  cursor: pointer;
+}
+
+.koshien-match-row:not(:disabled):hover {
+  border-color: rgba(245, 154, 194, 0.42);
+  background: rgba(245, 154, 194, 0.08);
+}
+
+.koshien-match-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.koshien-match-row-main strong {
+  font-size: 12px;
+}
+
+.koshien-match-row-main span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koshien-match-row-result {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.koshien-match-row-result.is-saved {
+  color: #88d18a;
+}
+
+.koshien-match-sheet {
+  width: min(640px, 100%);
+  max-width: none;
+  max-height: min(82vh, 720px);
+  margin: auto auto 0;
+  overflow-y: auto;
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  padding: 12px 18px calc(18px + env(safe-area-inset-bottom));
+}
+
+.koshien-match-sheet-handle {
+  width: 44px;
+  height: 4px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: rgba(238, 232, 224, 0.32);
+}
+
+.koshien-match-sheet-head,
+.koshien-match-sheet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.koshien-match-sheet-head h3 {
+  margin: 3px 0 0;
+}
+
+.koshien-match-sheet-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.koshien-match-sheet-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .koshien-match-message.is-success {
@@ -1379,6 +1476,37 @@ input[type="number"],
 }
 
 @media (max-width: 560px) {
+  .koshien-match-list {
+    max-height: 64vh;
+  }
+
+  .koshien-match-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .koshien-match-row-result {
+    align-self: flex-end;
+  }
+
+  .koshien-match-sheet {
+    width: 100%;
+  }
+
+  .koshien-match-sheet-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .koshien-match-sheet-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .koshien-match-sheet-actions button {
+    width: 100%;
+  }
+
   .club-pathway-panel {
     display: grid;
   }

@@ -616,7 +616,9 @@
   }
 
   async function searchClubs({ query } = {}) {
-    return (await clubRpc("search_clubs", { p_query: String(query || "").trim() })) || [];
+    const normalizedQuery = String(query || "").trim();
+    if (normalizedQuery.length < 2) throw new Error("クラブ名は2文字以上で入力してください。");
+    return (await clubRpc("search_clubs", { p_query: normalizedQuery })) || [];
   }
 
   async function lookupClubInvite({ inviteCode } = {}) {

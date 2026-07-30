@@ -320,6 +320,9 @@ let clubPathwayState = {
   busy: false,
   message: "",
   messageKind: "",
+  searchQuery: "",
+  renameName: null,
+  renameLeagueId: "",
   searchResults: [],
   inviteMatch: null,
   myClubs: [],
@@ -346,6 +349,11 @@ let koshienStartRoundsSaving = false;
 let koshienGameMultipliersSaving = false;
 let koshienStartRoundsMessage = "";
 let koshienStartRoundsMessageKind = "";
+let koshienMatchEditorState = {
+  matchId: "",
+  listScrollTop: 0,
+  openRounds: new Set(["R1"]),
+};
 
 function loadAuthUsers() {
   try {
@@ -2558,10 +2566,15 @@ function clubPathwayMarkup() {
   const clubSummary = activeClub
     ? `<div><h3>${escapeHtml(activeClub.league_name)}</h3><p>${escapeHtml(clubRoleLabel(currentRole))}として参加中です。</p>${["owner", "co_owner", "admin"].includes(currentRole) ? `<small class="club-invite-code">招待コード: ${escapeHtml(inviteCode)}</small>` : ""}</div>`
     : `<div><h3>クラブ</h3><p>現在はどのクラブにも所属していません。</p></div>`;
+  const renameValue = activeClub
+    && clubPathwayState.renameLeagueId === String(activeClub.league_id)
+    && clubPathwayState.renameName !== null
+    ? clubPathwayState.renameName
+    : activeClub?.league_name || "";
 
   const ownerActionsMarkup = activeClub && currentRole === "owner"
     ? `<div class="club-pathway-form club-owner-actions">
-        <label class="field compact-field"><span>クラブ名</span><input data-club-rename-name type="text" maxlength="80" value="${escapeAttr(activeClub.league_name)}" ${buttonDisabled} /></label>
+        <label class="field compact-field"><span>クラブ名</span><input data-club-rename-name type="text" maxlength="80" value="${escapeAttr(renameValue)}" ${buttonDisabled} /></label>
         <button class="ghost-button small-button" type="button" data-club-action="rename" ${buttonDisabled}>名前を変更</button>
         <button class="ghost-button small-button danger-action" type="button" data-club-action="delete" ${buttonDisabled}>クラブを削除</button>
       </div>`
@@ -2587,7 +2600,7 @@ function clubPathwayMarkup() {
       : "";
     modeMarkup = `
       <div class="club-pathway-form club-join-form">
-        <label class="field compact-field"><span>クラブ名で探す</span><input data-club-search-query type="search" autocomplete="off" placeholder="2文字以上" ${buttonDisabled} /></label>
+        <label class="field compact-field"><span>クラブ名で探す</span><input data-club-search-query type="search" autocomplete="off" placeholder="2文字以上" value="${escapeAttr(clubPathwayState.searchQuery)}" ${buttonDisabled} /></label>
         <button class="ghost-button" type="button" data-club-action="search" ${buttonDisabled}>検索</button>
         ${searchResults}
         <label class="field compact-field"><span>招待コード</span><input data-club-invite-code type="text" autocomplete="off" placeholder="招待コードを入力" ${buttonDisabled} /></label>
@@ -2628,6 +2641,8 @@ function saveActiveClub(club) {
   const leagueId = String(club?.league_id || "");
   if (!leagueId) return;
   state.leagueName = club.league_name || state.leagueName;
+  clubPathwayState.renameLeagueId = leagueId;
+  clubPathwayState.renameName = club.league_name || null;
   const nextConfig = {
     activeLeagueId: leagueId,
     leagueName: state.leagueName,
@@ -2688,8 +2703,29 @@ async function handleClubPathwayAction(button) {
   }
 
   const panel = button.closest(".club-pathway-panel");
-  const readValue = (selector) => panel?.querySelector(selector)?.value.trim() || "";
+  const submittedValues = {
+    "[data-club-create-name]": panel?.querySelector("[data-club-create-name]")?.value.trim() || "",
+    "[data-club-search-query]": panel?.querySelector("[data-club-search-query]")?.value.trim() || "",
+    "[data-club-invite-code]": panel?.querySelector("[data-club-invite-code]")?.value.trim() || "",
+    "[data-club-rename-name]": panel?.querySelector("[data-club-rename-name]")?.value.trim() || "",
+  };
+  const readValue = (selector) => submittedValues[selector] || "";
   const league = window.YosoDataService?.league;
+  if (action === "search") {
+    clubPathwayState.searchQuery = readValue("[data-club-search-query]");
+    if (clubPathwayState.searchQuery.length < 2) {
+      clubPathwayState.searchResults = [];
+      clubPathwayState.inviteMatch = null;
+      clubPathwayState.message = "クラブ名は2文字以上で入力してください。";
+      clubPathwayState.messageKind = "error";
+      renderClubPathways();
+      return;
+    }
+  }
+  if (action === "rename") {
+    clubPathwayState.renameLeagueId = String(activeClubRecord()?.league_id || "");
+    clubPathwayState.renameName = readValue("[data-club-rename-name]");
+  }
   clubPathwayState.busy = true;
   renderClubPathways();
   try {
@@ -2723,6 +2759,8 @@ async function handleClubPathwayAction(button) {
       });
       if (!club?.league_id) throw new Error("クラブ名を変更できませんでした。");
       saveActiveClub(club);
+      clubPathwayState.renameLeagueId = String(club.league_id);
+      clubPathwayState.renameName = club.league_name;
       clubPathwayState.message = "「" + club.league_name + "」に変更しました。";
     } else if (action === "delete") {
       const activeClub = activeClubRecord();
@@ -3100,45 +3138,72 @@ function koshienMatchResultEditor(teams, disabledResults) {
     ...round,
     matches: state.event.results.matches.filter((match) => match.round === round.id),
   }));
+  const editorMatch = koshienMatchById(koshienMatchEditorState.matchId);
   return `
     <div class="entry-block koshien-results">
       <div class="block-head">
         <div>
           <h3>試合結果入力</h3>
-          <p class="helper-text">管理者が試合カード、スコア、勝者を保存すると、勝者・敗者と到達ステージを再計算します。</p>
+          <p class="helper-text">試合をタップしてスコアを入力します。勝者は得点から自動判定されます。</p>
         </div>
       </div>
       ${message?.text ? `<p class="helper-text koshien-match-message ${message.type === "error" ? "is-error" : "is-success"}" data-koshien-match-message>${escapeHtml(message.text)}</p>` : `<p class="helper-text" data-koshien-match-message></p>`}
-      <div class="koshien-match-list">
-        ${matchGroups.map((round) => `
-          <details class="koshien-match-round" ${round.id === "R1" ? "open" : ""}>
-            <summary>${escapeHtml(round.label)} <span>${round.matches.filter((match) => match.status === "completed").length} / ${round.matches.length} 試合完了</span></summary>
+      <div class="koshien-match-list" data-koshien-match-list>
+        ${matchGroups.map((round) => {
+          const completedCount = round.matches.filter((match) => match.status === "completed").length;
+          return `
+          <details class="koshien-match-round" data-koshien-match-round="${round.id}" ${koshienMatchEditorState.openRounds.has(round.id) ? "open" : ""}>
+            <summary>${escapeHtml(round.label)} <span>${completedCount}/${round.matches.length}完了</span></summary>
             <div class="koshien-match-grid">
-              ${round.matches.map((match) => koshienMatchRow(match, teams, disabledResults)).join("")}
+              ${round.matches.map((match) => koshienMatchListRow(match, disabledResults)).join("")}
             </div>
           </details>
-        `).join("")}
+        `;}).join("")}
       </div>
+      ${editorMatch ? koshienMatchBottomSheet(editorMatch, teams, disabledResults, message) : ""}
     </div>
   `;
 }
 
-function koshienMatchRow(match, teams, disabledResults) {
-  const winnerOptions = ["", match.team_a_id, match.team_b_id].filter((team, index, list) => index === 0 || (team && list.indexOf(team) === index));
+function koshienMatchListRow(match, disabledResults) {
+  const completed = match.status === "completed";
+  const matchLabel = `${koshienRoundLabel(match.round)}-${match.match_no}`;
+  const matchup = `${match.team_a_id || "高校未定"} vs ${match.team_b_id || "高校未定"}`;
+  const result = completed ? `${match.score_a}-${match.score_b}（保存済）` : "未入力";
   return `
-    <div class="draft-row koshien-match-row" data-koshien-match-row="${escapeAttr(match.match_id)}">
-      <span class="pill">${escapeHtml(match.round)}-${escapeHtml(match.match_no)}</span>
-      <label class="field"><span>高校A</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:a" ${disabledResults}>${optionList(teams, match.team_a_id)}</select></label>
-      <label class="field"><span>高校B</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:b" ${disabledResults}>${optionList(teams, match.team_b_id)}</select></label>
-      <label class="field score-field"><span>高校Aの得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:a" type="number" min="0" step="1" value="${escapeAttr(match.score_a)}" ${disabledResults}></label>
-      <label class="field score-field"><span>高校Bの得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:b" type="number" min="0" step="1" value="${escapeAttr(match.score_b)}" ${disabledResults}></label>
-      <label class="field"><span>勝者</span><select data-koshien-match-winner="${escapeAttr(match.match_id)}" ${disabledResults}>${optionList(winnerOptions, match.winner_id)}</select></label>
-      <span class="status-label ${match.status === "completed" ? "open" : "pending"}">${match.status === "completed" ? "完了" : "未実施"}</span>
-      <button class="ghost-button" type="button" data-koshien-match-save="${escapeAttr(match.match_id)}" ${disabledResults}>結果保存</button>
-      ${match.status === "completed"
-        ? `<button class="ghost-button danger-action" type="button" data-koshien-match-cancel="${escapeAttr(match.match_id)}" ${disabledResults}>結果取消</button>`
-        : ""}
-    </div>
+    <button class="koshien-match-row" type="button" data-koshien-match-open="${escapeAttr(match.match_id)}" ${disabledResults}>
+      <span class="koshien-match-row-main">
+        <strong>${escapeHtml(matchLabel)}</strong>
+        <span>${escapeHtml(matchup)}</span>
+      </span>
+      <span class="koshien-match-row-result ${completed ? "is-saved" : ""}">${escapeHtml(result)}</span>
+    </button>
+  `;
+}
+
+function koshienMatchBottomSheet(match, teams, disabledResults, message) {
+  return `
+    <dialog class="koshien-match-sheet" data-koshien-match-sheet data-match-id="${escapeAttr(match.match_id)}">
+      <div class="koshien-match-sheet-handle" aria-hidden="true"></div>
+      <div class="koshien-match-sheet-head">
+        <div>
+          <span class="match-kicker">${escapeHtml(koshienRoundLabel(match.round))}</span>
+          <h3>${escapeHtml(koshienRoundLabel(match.round))}-${escapeHtml(match.match_no)} 結果編集</h3>
+        </div>
+        <button class="ghost-button small-button" type="button" data-koshien-match-close>閉じる</button>
+      </div>
+      <div class="koshien-match-sheet-fields">
+        <label class="field"><span>高校A</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:a" ${disabledResults}>${optionList(teams, match.team_a_id)}</select></label>
+        <label class="field"><span>高校B</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:b" ${disabledResults}>${optionList(teams, match.team_b_id)}</select></label>
+        <label class="field score-field"><span>高校A得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:a" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(match.score_a)}" ${disabledResults}></label>
+        <label class="field score-field"><span>高校B得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:b" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(match.score_b)}" ${disabledResults}></label>
+      </div>
+      <p class="helper-text koshien-match-message ${message?.type === "error" ? "is-error" : "is-success"}" data-koshien-sheet-message>${escapeHtml(message?.text || "")}</p>
+      <div class="koshien-match-sheet-actions">
+        ${match.status === "completed" ? `<button class="ghost-button danger-action" type="button" data-koshien-match-cancel="${escapeAttr(match.match_id)}" ${disabledResults}>結果取消</button>` : ""}
+        <button class="primary-button" type="button" data-koshien-match-save="${escapeAttr(match.match_id)}" ${disabledResults}>結果保存</button>
+      </div>
+    </dialog>
   `;
 }
 
@@ -3418,6 +3483,37 @@ function bindActiveEventManagerInputs() {
   const finalized = isResultFinalized(state.event);
   const canEditSettings = isCurrentUserAdmin() && !finalized;
   const canEditResults = isCurrentUserAdmin() && !finalized;
+  const matchList = root.querySelector("[data-koshien-match-list]");
+  if (matchList) {
+    matchList.scrollTop = koshienMatchEditorState.listScrollTop;
+    matchList.addEventListener("scroll", () => {
+      koshienMatchEditorState.listScrollTop = matchList.scrollTop;
+    }, { passive: true });
+  }
+  root.querySelectorAll("[data-koshien-match-round]").forEach((round) => {
+    round.addEventListener("toggle", () => {
+      if (round.open) koshienMatchEditorState.openRounds.add(round.dataset.koshienMatchRound);
+      else koshienMatchEditorState.openRounds.delete(round.dataset.koshienMatchRound);
+    });
+  });
+  root.querySelectorAll("[data-koshien-match-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!canEditResults) return;
+      koshienMatchEditorState.listScrollTop = matchList?.scrollTop || 0;
+      koshienMatchEditorState.matchId = button.dataset.koshienMatchOpen;
+      const match = koshienMatchById(koshienMatchEditorState.matchId);
+      if (match?.round) koshienMatchEditorState.openRounds.add(match.round);
+      renderActiveEventManager();
+    });
+  });
+  const matchSheet = root.querySelector("[data-koshien-match-sheet]");
+  if (matchSheet) {
+    matchSheet.querySelector("[data-koshien-match-close]")?.addEventListener("click", () => matchSheet.close());
+    matchSheet.addEventListener("close", () => {
+      koshienMatchEditorState.matchId = "";
+    });
+    if (!matchSheet.open) matchSheet.showModal();
+  }
 
   root.querySelectorAll("[data-koshien-later-prepare]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3570,11 +3666,10 @@ function bindActiveEventManagerInputs() {
       if (!match) return;
       if (side === "a") match.team_a_id = input.value;
       if (side === "b") match.team_b_id = input.value;
-      if (![match.team_a_id, match.team_b_id].includes(match.winner_id)) match.winner_id = "";
+      match.winner_id = window.YosoKoshienResults.inferMatchWinner(match);
       match.loser_id = "";
       match.status = "scheduled";
       applyKoshienMatchFinishes();
-      setKoshienMatchMessage("試合カードを変更しました。スコアと勝者を確認して結果保存してください。", "success");
       renderScoresOnly();
     });
   });
@@ -3588,29 +3683,34 @@ function bindActiveEventManagerInputs() {
       const value = input.value === "" ? "" : Number(input.value);
       if (side === "a") match.score_a = value;
       if (side === "b") match.score_b = value;
-    });
-  });
-  root.querySelectorAll("[data-koshien-match-winner]").forEach((input) => {
-    input.disabled = !canEditResults;
-    input.addEventListener("change", () => {
-      if (!canEditResults) return;
-      const match = koshienMatchById(input.dataset.koshienMatchWinner);
-      if (!match) return;
-      match.winner_id = input.value;
+      match.winner_id = window.YosoKoshienResults.inferMatchWinner(match);
     });
   });
   root.querySelectorAll("[data-koshien-match-save]").forEach((button) => {
     button.disabled = !canEditResults;
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (!canEditResults) return;
-      saveKoshienMatchResult(button.dataset.koshienMatchSave);
+      const matchId = button.dataset.koshienMatchSave;
+      koshienMatchEditorState.listScrollTop = matchList?.scrollTop || koshienMatchEditorState.listScrollTop;
+      const saved = await saveKoshienMatchResult(matchId);
+      if (!saved) {
+        koshienMatchEditorState.matchId = matchId;
+        renderActiveEventManager();
+        return;
+      }
+      const nextMatchId = window.YosoKoshienResults.nextUnenteredMatchId(state.event.results.matches, matchId);
+      koshienMatchEditorState.matchId = nextMatchId;
+      const nextMatch = koshienMatchById(nextMatchId);
+      if (nextMatch?.round) koshienMatchEditorState.openRounds.add(nextMatch.round);
+      renderActiveEventManager();
     });
   });
   root.querySelectorAll("[data-koshien-match-cancel]").forEach((button) => {
     button.disabled = !canEditResults;
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (!canEditResults) return;
-      cancelKoshienMatchResult(button.dataset.koshienMatchCancel);
+      await cancelKoshienMatchResult(button.dataset.koshienMatchCancel);
+      renderActiveEventManager();
     });
   });
   root.querySelectorAll("[data-result-submit]").forEach((button) => {
@@ -4060,21 +4160,21 @@ function renderLeagueAdminManager() {
       ${onlineLeagueMembers.map((member) => {
         const isOwner = member.role === "owner";
         const isCoOwner = member.role === "co_owner" || member.role === "admin";
-        const disabled = !canManage || onlineLeagueAdminSaving || isOwner;
-        const canRemove = !isOwner && (isClubOwner() || (isClubAdmin() && member.role === "member"));
+        const canToggleAdmin = !isOwner && canManage;
+        const canRemove = member.role === "member" && isClubAdmin();
         return `
           <div class="league-admin-row">
             <div>
               <strong>${escapeHtml(member.displayName)}</strong>
               <span>${escapeHtml(clubRoleLabel(member.role))}</span>
             </div>
-            <button
-              class="ghost-button"
-              type="button"
-              data-league-admin-toggle="${escapeAttr(member.userId)}"
-              data-make-admin="${isCoOwner ? "false" : "true"}"
-              ${disabled ? "disabled" : ""}
-            >${isCoOwner ? "Co-Ownerを解除" : "Co-Ownerにする"}</button>
+            ${canToggleAdmin ? `<button
+                class="ghost-button"
+                type="button"
+                data-league-admin-toggle="${escapeAttr(member.userId)}"
+                data-make-admin="${isCoOwner ? "false" : "true"}"
+                ${onlineLeagueAdminSaving ? "disabled" : ""}
+              >${isCoOwner ? "Co-Ownerを解除" : "Co-Ownerにする"}</button>` : ""}
               ${canRemove ? `<button class="ghost-button danger-action" type="button" data-league-member-remove="${escapeAttr(member.userId)}" ${onlineLeagueAdminSaving ? "disabled" : ""}>削除</button>` : ""}
           </div>`;
       }).join("")}
@@ -4414,7 +4514,7 @@ const koshienMatchRounds = [
   { id: "R3", label: "R3", count: 8 },
   { id: "QF", label: "QF", count: 4 },
   { id: "SF", label: "SF", count: 2 },
-  { id: "F", label: "F", count: 1 },
+  { id: "F", label: "FINAL", count: 1 },
 ];
 
 const koshienMatchRoundIds = new Set(koshienMatchRounds.map((round) => round.id));
@@ -4514,12 +4614,13 @@ function validateKoshienMatchResult(match) {
 
 async function saveKoshienMatchResult(matchId) {
   const match = koshienMatchById(matchId);
-  if (!match) return;
+  if (!match) return false;
+  match.winner_id = window.YosoKoshienResults.inferMatchWinner(match);
   const validation = validateKoshienMatchResult(match);
   if (!validation.ok) {
     setKoshienMatchMessage(validation.message, "error");
     renderActiveEventManager();
-    return;
+    return false;
   }
   const completed = window.YosoKoshienResults.completeMatch(match);
   Object.assign(match, completed.match);
@@ -4528,11 +4629,11 @@ async function saveKoshienMatchResult(matchId) {
   saveLocalStateOnly();
   setKoshienMatchMessage(`${koshienRoundLabel(match.round)} ${match.match_no} を保存しました。ランキングを再計算しました。`, "success");
   renderScoresOnly();
-  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
+  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return true;
   if (!currentAuthUser()) {
     setKoshienMatchMessage("端末内には保存しましたが、Supabaseには未保存です。オンラインログイン後に再保存してください。", "error");
     renderScoresOnly();
-    return;
+    return false;
   }
   setKoshienMatchMessage("Supabaseへ保存しています...", "success");
   renderActiveEventManager();
@@ -4543,10 +4644,13 @@ async function saveKoshienMatchResult(matchId) {
       refreshKoshienLaterPhaseState({ renderAfter: false }),
     ]);
     setKoshienMatchMessage(koshienSaveOutcomeMessage(result, "Supabaseへ結果を保存しました。"), result?.skipped || result?.partial ? "error" : "success");
+    renderScoresOnly();
+    return !(result?.skipped || result?.partial);
   } catch (error) {
     setKoshienMatchMessage(koshienStructuredSaveErrorMessage(error), "error");
+    renderScoresOnly();
+    return false;
   }
-  renderScoresOnly();
 }
 
 function hasPreparedKoshienDownstream(roundKey) {

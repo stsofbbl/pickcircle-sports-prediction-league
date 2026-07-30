@@ -34,7 +34,7 @@
       return { ok: false, message: "スコアは両校とも0以上の整数で入力してください。" };
     }
     if (scoreA === scoreB) {
-      return { ok: false, message: "同点は保存できません。勝敗が決まったスコアを入力してください。" };
+      return { ok: false, message: "同点では試合を確定できません" };
     }
     if (![match.team_a_id, match.team_b_id].includes(match.winner_id)) {
       return { ok: false, message: "勝者をteam_aまたはteam_bから選んでください。" };
@@ -44,6 +44,27 @@
       return { ok: false, message: "勝者とスコアの整合性を確認してください。" };
     }
     return { ok: true };
+  }
+
+  function inferMatchWinner(match) {
+    if (!match?.team_a_id || !match?.team_b_id || match.team_a_id === match.team_b_id) return "";
+    if (match.score_a === "" || match.score_a === null || match.score_a === undefined
+      || match.score_b === "" || match.score_b === null || match.score_b === undefined) return "";
+    const scoreA = Number(match.score_a);
+    const scoreB = Number(match.score_b);
+    if (!Number.isInteger(scoreA) || scoreA < 0 || !Number.isInteger(scoreB) || scoreB < 0 || scoreA === scoreB) return "";
+    return scoreA > scoreB ? match.team_a_id : match.team_b_id;
+  }
+
+  function nextUnenteredMatchId(matches = [], currentMatchId = "") {
+    if (!matches.length) return "";
+    const currentIndex = matches.findIndex((match) => match?.match_id === currentMatchId);
+    const startIndex = currentIndex >= 0 ? currentIndex : -1;
+    for (let offset = 1; offset <= matches.length; offset += 1) {
+      const match = matches[(startIndex + offset) % matches.length];
+      if (match?.status !== "completed" && match?.status !== "final") return match?.match_id || "";
+    }
+    return "";
   }
 
   function completeMatch(match) {
@@ -204,5 +225,17 @@
     });
   }
 
-  return { OFFICIAL_PHASE1_POINTS, buildMatchRows, buildScoreRows, calculatePhase1Breakdown, completeMatch, loserFinishForRound, normalizeFinish, rankScoreRows, validateMatchResult };
+  return {
+    OFFICIAL_PHASE1_POINTS,
+    buildMatchRows,
+    buildScoreRows,
+    calculatePhase1Breakdown,
+    completeMatch,
+    inferMatchWinner,
+    loserFinishForRound,
+    nextUnenteredMatchId,
+    normalizeFinish,
+    rankScoreRows,
+    validateMatchResult,
+  };
 });

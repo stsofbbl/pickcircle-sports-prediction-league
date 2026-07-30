@@ -27,7 +27,27 @@ test("official phase-one points match the confirmed 2026 rules", () => {
 });
 
 test("completed match validation rejects a tie", () => {
-  assert.equal(koshien.validateMatchResult(validMatch({ score_a: 2, score_b: 2 })).ok, false);
+  const result = koshien.validateMatchResult(validMatch({ score_a: 2, score_b: 2 }));
+  assert.equal(result.ok, false);
+  assert.equal(result.message, "同点では試合を確定できません");
+});
+
+test("winner is inferred from the entered score without a winner selection", () => {
+  assert.equal(koshien.inferMatchWinner(validMatch({ score_a: 3, score_b: 1, winner_id: "" })), "Team A");
+  assert.equal(koshien.inferMatchWinner(validMatch({ score_a: 1, score_b: 4, winner_id: "" })), "Team B");
+  assert.equal(koshien.inferMatchWinner(validMatch({ score_a: 2, score_b: 2, winner_id: "" })), "");
+});
+
+test("the next unentered match wraps forward from the saved match", () => {
+  const matches = [
+    { match_id: "R1-1", status: "completed" },
+    { match_id: "R1-2", status: "completed" },
+    { match_id: "R1-3", status: "scheduled" },
+    { match_id: "R1-4", status: "completed" },
+  ];
+  assert.equal(koshien.nextUnenteredMatchId(matches, "R1-1"), "R1-3");
+  assert.equal(koshien.nextUnenteredMatchId(matches, "R1-4"), "R1-3");
+  assert.equal(koshien.nextUnenteredMatchId(matches.map((match) => ({ ...match, status: "completed" })), "R1-1"), "");
 });
 
 test("completed match validation rejects negative and decimal scores", () => {

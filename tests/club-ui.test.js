@@ -50,6 +50,25 @@ test("club entry paths are visible on both the my page and settings with functio
   assert.match(css, /@media \(max-width: 560px\)[\s\S]*\.club-pathway-panel/);
 });
 
+test("club search and rename inputs survive the busy rerender", () => {
+  assert.match(app, /searchQuery:\s*""/);
+  assert.match(app, /renameName:\s*null/);
+  assert.match(app, /data-club-search-query[^>]*value="\$\{escapeAttr\(clubPathwayState\.searchQuery\)\}"/);
+  assert.match(app, /data-club-rename-name[^>]*value="\$\{escapeAttr\(renameValue\)\}"/);
+  assert.ok(app.indexOf("const submittedValues =") < app.indexOf("clubPathwayState.busy = true"));
+  assert.match(app, /クラブ名は2文字以上で入力してください。/);
+});
+
+test("club member actions match Owner, Co-Owner, and Member permissions", () => {
+  const start = app.indexOf("function renderLeagueAdminManager");
+  const end = app.indexOf("\nasync function changeLeagueAdminRole", start);
+  const body = app.slice(start, end);
+
+  assert.match(body, /!isOwner && canManage[\s\S]*data-league-admin-toggle/);
+  assert.match(body, /member\.role === "member" && isClubAdmin\(\)/);
+  assert.doesNotMatch(body, /!isOwner && \(isClubOwner\(\)/);
+});
+
 test("the exact four-player database error is presented in Japanese", () => {
   assert.match(service, /exactly four submitted players are required/i);
   assert.match(service, /予想を提出済みの参加者が4人必要です/);

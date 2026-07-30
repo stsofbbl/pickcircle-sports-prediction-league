@@ -16,3 +16,27 @@ test("a completed match is persisted locally before any online-save guard or req
   assert.ok(body.indexOf("saveLocalStateOnly()") < body.indexOf("shouldAutoSaveKoshien"));
   assert.ok(body.indexOf("saveLocalStateOnly()") < body.indexOf("saveKoshienOnlineNow"));
 });
+
+test("match results use a compact round list and BottomSheet editor", () => {
+  const source = fs.readFileSync(APP_PATH, "utf8");
+  const start = source.indexOf("function koshienMatchResultEditor");
+  const end = source.indexOf("\nfunction ensureKoshienStartRoundDraft", start);
+  const body = source.slice(start, end);
+
+  assert.match(body, /data-koshien-match-list/);
+  assert.match(body, /\$\{completedCount\}\/\$\{round\.matches\.length\}完了/);
+  assert.match(body, /data-koshien-match-open/);
+  assert.match(body, /<dialog[\s\S]*data-koshien-match-sheet/);
+  assert.match(body, /data-koshien-match-team/);
+  assert.match(body, /data-koshien-match-score/);
+  assert.doesNotMatch(body, /<select[^>]*data-koshien-match-winner=/);
+});
+
+test("saving a match infers the winner, advances, and preserves list scroll", () => {
+  const source = fs.readFileSync(APP_PATH, "utf8");
+
+  assert.match(source, /inferMatchWinner\(match\)/);
+  assert.match(source, /nextUnenteredMatchId\(state\.event\.results\.matches,\s*matchId\)/);
+  assert.match(source, /koshienMatchEditorState\.listScrollTop/);
+  assert.match(source, /data-koshien-match-list[\s\S]*scrollTop/);
+});
