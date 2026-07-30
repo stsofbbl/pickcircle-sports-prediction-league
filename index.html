@@ -15,7 +15,7 @@
     <link rel="apple-touch-icon" href="./assets/yoso-app-icon.png" />
     <link rel="icon" type="image/png" href="./assets/yoso-app-icon.png" />
     <link rel="manifest" href="./manifest.json" />
-    <link rel="stylesheet" href="./styles.css?v=20260730-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260731-1" />
   </head>
   <body data-theme="dark">
     <section class="auth-screen" id="authScreen" aria-label="ログイン">
@@ -541,6 +541,23 @@
       </nav>
     </div>
 
+    <dialog id="koshienLaterPreviewDialog" class="koshien-preview-dialog" aria-labelledby="koshienLaterPreviewTitle">
+      <div class="koshien-preview-shell">
+        <div class="koshien-preview-warning" role="status">
+          <strong>UIプレビュー／本番データには保存されません</strong>
+          <button class="ghost-button small-button" type="button" data-koshien-preview-close>閉じる</button>
+        </div>
+        <div class="koshien-preview-heading">
+          <div>
+            <p class="eyebrow">ADMIN ONLY / MOBILE UI</p>
+            <h2 id="koshienLaterPreviewTitle">甲子園後半フェーズUI</h2>
+            <p>固定ダミーデータで入力・選択・確認画面を試せます。</p>
+          </div>
+        </div>
+        <div id="koshienLaterPreviewRoot"></div>
+      </div>
+    </dialog>
+
     <dialog id="confirmDialog" class="confirm-dialog">
       <form method="dialog">
         <p class="eyebrow">最終確認</p>
@@ -558,8 +575,9 @@
     <script src="./js/koshien-results.js?v=20260730-1"></script>
     <script src="./js/koshien-phase2-draft.js"></script>
     <script src="./js/koshien-later-phases.js"></script>
+    <script src="./js/koshien-later-phase-preview.js"></script>
     <script src="./js/data-service.js?v=20260730-1"></script>
-    <script src="./app.js?v=20260730-1"></script>
+    <script src="./app.js?v=20260731-1"></script>
     <script src="./js/koshien-current-stage.js?v=20260723-2"></script>
     <script src="./js/jhbf-result-import.js?v=20260725-2"></script>
     <script src="./js/jhbf-admin-visibility.js?v=20260723-2"></script>

@@ -2120,6 +2120,203 @@ dialog::backdrop {
   backdrop-filter: blur(10px);
 }
 
+.koshien-preview-launcher {
+  display: grid;
+  gap: 12px;
+}
+
+.koshien-preview-launch-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.koshien-preview-dialog {
+  width: min(880px, calc(100% - 24px));
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  overflow: auto;
+  border-radius: 20px;
+}
+
+.koshien-preview-shell {
+  position: relative;
+  min-height: min(780px, calc(100dvh - 26px));
+  padding: 0 18px 26px;
+}
+
+.koshien-preview-warning {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -18px 18px;
+  padding: 11px 18px;
+  border-bottom: 1px solid rgba(255, 190, 190, 0.32);
+  background: rgba(73, 14, 22, 0.96);
+  color: #ffe9ee;
+  backdrop-filter: blur(18px);
+}
+
+.koshien-preview-warning strong {
+  font-size: 13px;
+}
+
+.koshien-preview-heading p:not(.eyebrow) {
+  margin-bottom: 16px;
+  color: var(--muted);
+}
+
+.koshien-preview-tabs {
+  position: sticky;
+  top: 62px;
+  z-index: 8;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(24, 19, 18, 0.94);
+  backdrop-filter: blur(16px);
+}
+
+.koshien-preview-tabs .phase-tab {
+  flex: 0 0 136px;
+}
+
+.koshien-preview-phone {
+  position: relative;
+  width: min(480px, 100%);
+  min-height: 560px;
+  margin: 18px auto 0;
+  padding: 16px;
+  border: 1px solid rgba(240, 168, 190, 0.22);
+  border-radius: 24px;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(240, 168, 190, 0.1), transparent 38%),
+    rgba(20, 17, 18, 0.92);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+}
+
+.koshien-preview-phone .entry-block {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.koshien-preview-final-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 10px;
+}
+
+.koshien-preview-final-card > strong {
+  padding-bottom: 13px;
+  color: var(--muted);
+}
+
+.koshien-preview-results .result-board {
+  margin-bottom: 12px;
+}
+
+.koshien-preview-scoreboard .score-row {
+  grid-template-columns: 38px minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.koshien-preview-scoreboard .score-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.koshien-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  align-items: end;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.koshien-preview-confirm-sheet {
+  width: min(480px, 100%);
+  max-height: min(72dvh, 620px);
+  margin: 0 auto;
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 22px 22px 14px 14px;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(240, 168, 190, 0.12), transparent 40%),
+    var(--surface);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.58);
+}
+
+.koshien-preview-confirm-sheet > p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+@media (max-width: 700px) {
+  .koshien-preview-dialog {
+    width: 100%;
+    max-width: none;
+    max-height: 100dvh;
+    height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .koshien-preview-shell {
+    min-height: 100dvh;
+    padding: 0 12px 28px;
+  }
+
+  .koshien-preview-warning {
+    margin: 0 -12px 14px;
+    padding: 9px 12px;
+  }
+
+  .koshien-preview-warning strong {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .koshien-preview-tabs {
+    top: 59px;
+    margin-inline: -2px;
+  }
+
+  .koshien-preview-phone {
+    min-height: 0;
+    padding: 12px;
+    border: 0;
+    border-radius: 18px;
+    box-shadow: none;
+  }
+
+  .koshien-preview-final-card {
+    grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
+  }
+
+  .koshien-preview-scoreboard .score-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
+  .koshien-preview-scoreboard .score-row > button {
+    grid-column: 2 / -1;
+    width: 100%;
+  }
+}
+
 @media (max-width: 900px) {
   .koshien-later-admin-grid {
     grid-template-columns: 1fr;

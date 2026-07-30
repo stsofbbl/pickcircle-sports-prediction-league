@@ -286,6 +286,8 @@ const els = {
   exportText: { value: "" },
   confirmDialog: document.querySelector("#confirmDialog"),
   confirmSaveButton: document.querySelector("#confirmSaveButton"),
+  koshienLaterPreviewDialog: document.querySelector("#koshienLaterPreviewDialog"),
+  koshienLaterPreviewRoot: document.querySelector("#koshienLaterPreviewRoot"),
   matchFeatureIcon: document.querySelector("#matchFeatureIcon"),
   matchFeatureTitle: document.querySelector("#matchFeatureTitle"),
   matchFeatureMeta: document.querySelector("#matchFeatureMeta"),
@@ -343,6 +345,7 @@ let koshienLaterPhaseSaving = false;
 let koshienLaterAdminSaving = "";
 let koshienLaterPhaseMessage = "";
 let koshienLaterPhaseMessageKind = "";
+let koshienLaterPreviewState = null;
 let koshienStartRoundDraft = { eventId: "", rounds: {} };
 let koshienGameMultiplierDraft = { eventId: "", values: {} };
 let koshienStartRoundsSaving = false;
@@ -2928,6 +2931,119 @@ function renderGenericManagerPanel(base) {
   `;
 }
 
+function koshienLaterPreviewLauncher() {
+  if (!isCurrentUserAdmin()) return "";
+  const previews = [
+    ["phase2", "フェーズ2ドラフト"],
+    ["revenge", "リベンジカード"],
+    ["zombie", "ゾンビモード"],
+    ["phase3", "フェーズ3"],
+    ["results", "最終結果"],
+  ];
+  return `
+    <div class="entry-block koshien-preview-launcher">
+      <div class="block-head">
+        <div>
+          <h3>甲子園後半フェーズUIプレビュー</h3>
+          <p class="helper-text">管理者専用。固定ダミーデータでスマートフォンUIを確認します。本番データや大会状態は変更しません。</p>
+        </div>
+      </div>
+      <div class="koshien-preview-launch-actions">
+        ${previews.map(([id, label]) => `<button class="ghost-button" type="button" data-koshien-preview-open="${id}">${label}</button>`).join("")}
+      </div>
+    </div>`;
+}
+
+function openKoshienLaterPreview(screenId = "phase2") {
+  if (!isCurrentUserAdmin()) return;
+  const preview = window.YosoKoshienLaterPhasePreview;
+  if (!preview || !els.koshienLaterPreviewDialog || !els.koshienLaterPreviewRoot) return;
+  koshienLaterPreviewState = preview.createState();
+  preview.selectScreen(koshienLaterPreviewState, screenId);
+  renderKoshienLaterPreview();
+  if (els.koshienLaterPreviewDialog.showModal) els.koshienLaterPreviewDialog.showModal();
+  else els.koshienLaterPreviewDialog.setAttribute("open", "");
+}
+
+function renderKoshienLaterPreview() {
+  const preview = window.YosoKoshienLaterPhasePreview;
+  if (!preview || !koshienLaterPreviewState || !els.koshienLaterPreviewRoot) return;
+  els.koshienLaterPreviewRoot.innerHTML = preview.renderMarkup(koshienLaterPreviewState);
+  bindKoshienLaterPreview();
+}
+
+function setKoshienLaterPreviewValue(path, value) {
+  const [group, key] = path.split(".");
+  if (!koshienLaterPreviewState?.[group] || !key) return;
+  koshienLaterPreviewState[group][key] = value;
+  koshienLaterPreviewState.message = "";
+  koshienLaterPreviewState.messageKind = "";
+}
+
+function bindKoshienLaterPreview() {
+  const root = els.koshienLaterPreviewRoot;
+  const preview = window.YosoKoshienLaterPhasePreview;
+  if (!root || !preview || !koshienLaterPreviewState) return;
+  root.querySelectorAll("[data-koshien-preview-screen]").forEach((button) => {
+    button.addEventListener("click", () => {
+      preview.selectScreen(koshienLaterPreviewState, button.dataset.koshienPreviewScreen);
+      renderKoshienLaterPreview();
+    });
+  });
+  root.querySelectorAll("[data-koshien-preview-value]").forEach((input) => {
+    const update = () => setKoshienLaterPreviewValue(input.dataset.koshienPreviewValue, input.value);
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
+  });
+  root.querySelectorAll("[data-koshien-preview-save]").forEach((button) => {
+    button.addEventListener("click", () => {
+      try {
+        const kind = button.dataset.koshienPreviewSave;
+        if (kind === "phase3") {
+          const { scoreA, scoreB } = koshienLaterPreviewState.phase3;
+          const validation = window.YosoKoshienLaterPhases.validateFinalScore(scoreA, scoreB);
+          if (!validation.ok) throw new Error(validation.message);
+        }
+        preview.requestSave(koshienLaterPreviewState, kind);
+      } catch (error) {
+        koshienLaterPreviewState.message = error?.message || "入力内容を確認してください。";
+        koshienLaterPreviewState.messageKind = "error";
+      }
+      renderKoshienLaterPreview();
+    });
+  });
+  root.querySelector("[data-koshien-preview-confirm]")?.addEventListener("click", () => {
+    preview.confirmSave(koshienLaterPreviewState);
+    renderKoshienLaterPreview();
+  });
+  root.querySelector("[data-koshien-preview-cancel]")?.addEventListener("click", () => {
+    koshienLaterPreviewState.pendingAction = null;
+    renderKoshienLaterPreview();
+  });
+  root.querySelector("[data-koshien-preview-reset]")?.addEventListener("click", () => {
+    const screenId = koshienLaterPreviewState.activeScreen;
+    koshienLaterPreviewState = preview.createState();
+    preview.selectScreen(koshienLaterPreviewState, screenId);
+    renderKoshienLaterPreview();
+  });
+  root.querySelectorAll("[data-koshien-preview-detail]").forEach((button) => {
+    button.addEventListener("click", () => {
+      koshienLaterPreviewState.detailPlayerId = button.dataset.koshienPreviewDetail;
+      renderKoshienLaterPreview();
+    });
+  });
+  root.querySelector("[data-koshien-preview-detail-close]")?.addEventListener("click", () => {
+    koshienLaterPreviewState.detailPlayerId = "";
+    renderKoshienLaterPreview();
+  });
+}
+
+function closeKoshienLaterPreview() {
+  if (els.koshienLaterPreviewDialog?.open) els.koshienLaterPreviewDialog.close();
+  koshienLaterPreviewState = null;
+  if (els.koshienLaterPreviewRoot) els.koshienLaterPreviewRoot.innerHTML = "";
+}
+
 function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
   normalizeKoshienEvent(state.event);
   const teams = getTeams();
@@ -2938,6 +3054,7 @@ function renderKoshienManagerPanel({ canEditSettings, canEditResults }) {
       <span>${canEditResults ? "勝ち上がりと決勝スコア結果を入力できます。入力後に結果を提出してください。" : "管理者権限、または確定状態を確認してください。"}</span>
     </div>
     ${resultFlowPanel()}
+    ${koshienLaterPreviewLauncher()}
     ${koshienLaterAdminControls(canEditResults)}
     ${koshienMatchResultEditor(teams, disabledResults)}
     <div class="entry-block koshien-results">
@@ -3514,6 +3631,13 @@ function bindActiveEventManagerInputs() {
     });
     if (!matchSheet.open) matchSheet.showModal();
   }
+
+  root.querySelectorAll("[data-koshien-preview-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!isCurrentUserAdmin()) return;
+      openKoshienLaterPreview(button.dataset.koshienPreviewOpen);
+    });
+  });
 
   root.querySelectorAll("[data-koshien-later-prepare]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -7246,6 +7370,12 @@ els.saveButton?.addEventListener("click", () => {
 
 els.confirmSaveButton?.addEventListener("click", () => {
   confirmSave();
+});
+
+els.koshienLaterPreviewDialog?.querySelector("[data-koshien-preview-close]")?.addEventListener("click", closeKoshienLaterPreview);
+els.koshienLaterPreviewDialog?.addEventListener("close", () => {
+  koshienLaterPreviewState = null;
+  if (els.koshienLaterPreviewRoot) els.koshienLaterPreviewRoot.innerHTML = "";
 });
 
 async function confirmSave() {
