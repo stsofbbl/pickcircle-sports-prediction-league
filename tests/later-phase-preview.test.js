@@ -48,6 +48,25 @@ test("phase 2 preview advances the dummy draft without changing the original fix
   assert.equal(second.draft.picks.length, 4);
 });
 
+test("phase 2 preview renders the specified four-row snake order with crest placeholders", () => {
+  const state = preview.createState();
+  const markup = preview.renderMarkup(state);
+
+  assert.deepEqual(state.draft.snakeOrder, [
+    "takumi", "wada", "ino", "ginji",
+    "ginji", "ino", "takumi", "wada",
+    "takumi", "wada", "ino", "ginji",
+    "ginji", "ino", "takumi", "wada",
+  ]);
+  assert.equal((markup.match(/class="koshien-preview-draft-round"/g) || []).length, 4);
+  assert.equal((markup.match(/class="koshien-preview-school-crest"/g) || []).length, 16);
+  assert.match(markup, /data-pick-no="8"[\s\S]*?わだ[\s\S]*?data-pick-no="7"[\s\S]*?たくみ[\s\S]*?data-pick-no="6"[\s\S]*?いの[\s\S]*?data-pick-no="5"[\s\S]*?ぎんじ/);
+  assert.match(markup, /data-pick-no="16"[\s\S]*?わだ[\s\S]*?data-pick-no="15"[\s\S]*?たくみ[\s\S]*?data-pick-no="14"[\s\S]*?いの[\s\S]*?data-pick-no="13"[\s\S]*?ぎんじ/);
+  assert.doesNotMatch(markup, /の手番です/);
+  assert.match(markup, /data-koshien-preview-save="phase2"/);
+  assert.match(markup, /data-koshien-preview-reset/);
+});
+
 test("only the platform admin can display, open, and operate the preview", () => {
   const platformAdminUid = "d72f73b0-c429-4609-8311-17ae8d8dca85";
   const platformAdminStart = app.indexOf("function isPlatformAdmin");
@@ -99,7 +118,7 @@ test("only the platform admin can display, open, and operate the preview", () =>
 
 test("preview reuses the existing YOSO cards and has a mobile-safe persistent warning", () => {
   assert.match(previewSource, /koshien-phase2-board/);
-  assert.match(previewSource, /koshien-phase2-team-grid/);
+  assert.match(previewSource, /koshien-preview-draft-rounds/);
   assert.match(previewSource, /koshien-later-participant/);
   assert.match(previewSource, /scoreboard/);
   assert.match(previewSource, /data-koshien-preview-save="phase2"/);
@@ -113,4 +132,10 @@ test("preview reuses the existing YOSO cards and has a mobile-safe persistent wa
   assert.match(preview.renderMarkup(state), /data-koshien-preview-save="zombie"/);
   assert.match(css, /\.koshien-preview-warning[\s\S]*position:\s*sticky/);
   assert.match(css, /@media \(max-width: 700px\)[\s\S]*\.koshien-preview-dialog/);
+  assert.match(css, /\.koshien-preview-draft-row[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  const draftRowCss = css.slice(
+    css.indexOf(".koshien-preview-draft-row {"),
+    css.indexOf(".koshien-preview-draft-card {"),
+  );
+  assert.doesNotMatch(draftRowCss, /overflow-x:\s*(auto|scroll)/);
 });

@@ -36,9 +36,9 @@
     ],
     snakeOrder: [
       "takumi", "wada", "ino", "ginji",
-      "ginji", "ino", "wada", "takumi",
+      "ginji", "ino", "takumi", "wada",
       "takumi", "wada", "ino", "ginji",
-      "ginji", "ino", "wada", "takumi",
+      "ginji", "ino", "takumi", "wada",
     ],
     picks: [
       { pickNo: 1, playerId: "takumi", teamId: "yokohama" },
@@ -181,36 +181,66 @@
     const picksByNo = new Map(state.draft.picks.map((pick) => [pick.pickNo, pick]));
     const nextPickNo = state.draft.picks.length + 1;
     const currentPlayerId = state.draft.snakeOrder[nextPickNo - 1];
+    const rounds = Array.from({ length: 4 }, (_, roundIndex) => {
+      const firstPickNo = (roundIndex * 4) + 1;
+      const pickNumbers = Array.from({ length: 4 }, (_, index) => firstPickNo + index);
+      return {
+        direction: roundIndex % 2 === 0 ? "forward" : "reverse",
+        pickNumbers: roundIndex % 2 === 0 ? pickNumbers : pickNumbers.reverse(),
+        roundNo: roundIndex + 1,
+      };
+    });
+    const availableTeams = availableDraftTeams(state);
     return `
-      <div class="entry-block koshien-phase2-draft koshien-phase2-board">
-        <div class="wc-participant-head">
+      <div class="entry-block koshien-phase2-draft koshien-phase2-board koshien-preview-phase2-board">
+        <div class="wc-participant-head koshien-preview-draft-head">
           <h3>フェーズ2・ベスト16ドラフト</h3>
-          <span>ドラフト中 / 16校中${state.draft.picks.length}校指名済み</span>
+          <button class="ghost-button small-button" type="button" data-koshien-preview-reset>リセット</button>
         </div>
-        <p class="wc-phase-intro">${nextPickNo}番目・2巡目：${escapeHtml(playerName(state, currentPlayerId))} の手番です。</p>
-        <div class="koshien-phase2-meta"><span>締切 8/14 18:00</span><span>スネーク方式</span><span>ダミーデータ</span></div>
-        <div class="koshien-phase2-team-grid" aria-label="ドラフト指名順">
-          ${state.draft.snakeOrder.map((playerId, index) => {
-            const pickNo = index + 1;
-            const pick = picksByNo.get(pickNo);
-            return `<div class="koshien-phase2-slot ${pick ? "is-picked" : pickNo === nextPickNo ? "is-current" : ""}">
-              <span>${pickNo} / ${Math.floor(index / 4) + 1}巡目</span>
-              <strong>${escapeHtml(playerName(state, playerId))}</strong>
-              <small>${escapeHtml(pick ? teamName(state, pick.teamId) : pickNo === nextPickNo ? "現在の手番" : "未指名")}</small>
-            </div>`;
-          }).join("")}
+        <p class="koshien-preview-draft-rule">スネーク方式：ベスト16を1人4校ずつ、重複なしで指名します</p>
+        <div class="koshien-preview-draft-rounds" aria-label="4巡16枠のドラフト指名順">
+          ${rounds.map(({ direction, pickNumbers, roundNo }) => `
+            <section class="koshien-preview-draft-round" aria-labelledby="koshien-preview-round-${roundNo}">
+              <div class="koshien-preview-draft-round-head">
+                <strong id="koshien-preview-round-${roundNo}">${roundNo}巡目 <small>（${((roundNo - 1) * 4) + 1}〜${roundNo * 4}番）</small></strong>
+                <span class="is-${direction}"><b aria-hidden="true">${direction === "forward" ? "→" : "←"}</b> ${direction === "forward" ? "左から右へ" : "右から左へ"}</span>
+              </div>
+              <div class="koshien-preview-draft-row" data-direction="${direction}">
+                ${pickNumbers.map((pickNo, visualIndex) => {
+                  const playerId = state.draft.snakeOrder[pickNo - 1];
+                  const pick = picksByNo.get(pickNo);
+                  const status = pick ? "指名済み" : pickNo === nextPickNo ? "現在の手番" : "未指名";
+                  const stateClass = pick ? "is-picked" : pickNo === nextPickNo ? "is-current" : "is-empty";
+                  const schoolName = pick ? teamName(state, pick.teamId) : "未指名";
+                  return `<article class="koshien-preview-draft-card ${stateClass}" data-pick-no="${pickNo}">
+                    <div class="koshien-preview-draft-card-head">
+                      <span class="koshien-preview-pick-number">${pickNo}</span>
+                      <strong>${escapeHtml(playerName(state, playerId))}</strong>
+                    </div>
+                    <span class="koshien-preview-school-crest" data-team-id="${escapeHtml(pick?.teamId || "")}" role="img" aria-label="${escapeHtml(schoolName)}の校章表示領域">
+                      <span>校章</span>
+                    </span>
+                    <span class="koshien-preview-school-name">${escapeHtml(schoolName)}</span>
+                    <small class="koshien-preview-pick-status">${status}</small>
+                    ${visualIndex < 3 ? `<span class="koshien-preview-draft-flow" aria-hidden="true">${direction === "forward" ? "→" : "←"}</span>` : ""}
+                  </article>`;
+                }).join("")}
+              </div>
+            </section>`).join("")}
         </div>
         <div class="koshien-phase2-pick-form">
-          <label class="field"><span>指名校（ベスト16）</span>
-            <select data-koshien-preview-value="draft.selectedTeamId">
-              <option value="">高校を選択</option>
-              ${availableDraftTeams(state).map((team) => `<option value="${team.teamId}" ${state.draft.selectedTeamId === team.teamId ? "selected" : ""}>${escapeHtml(team.name)}</option>`).join("")}
+          <span class="koshien-preview-pick-form-label">高校を選択してください</span>
+          <div class="koshien-preview-pick-controls">
+            <select aria-label="指名する高校" data-koshien-preview-value="draft.selectedTeamId">
+              <option value="">高校を選択してください</option>
+              ${availableTeams.map((team) => `<option value="${team.teamId}" ${state.draft.selectedTeamId === team.teamId ? "selected" : ""}>${escapeHtml(team.name)}</option>`).join("")}
             </select>
-          </label>
-          <div class="koshien-phase2-actions">
-            <button class="primary-button" type="button" data-koshien-preview-save="phase2">この高校を指名する</button>
-            <button class="ghost-button" type="button" data-koshien-preview-reset>表示をリセット</button>
+            <span class="koshien-preview-remaining"><strong>残り${availableTeams.length}校</strong><small>（全16校中）</small></span>
           </div>
+          <button class="primary-button" type="button" data-koshien-preview-save="phase2">この高校を指名する（${escapeHtml(playerName(state, currentPlayerId))}の指名）</button>
+        </div>
+        <div class="koshien-preview-draft-legend" aria-label="表示状態">
+          <span class="is-picked">指名済み</span><span class="is-current">現在の手番</span><span class="is-empty">未指名</span>
         </div>
       </div>`;
   }
@@ -327,7 +357,7 @@
       results: ["最終結果", "ランキング"],
     };
     return `
-      <div class="worldcup-phase-tabs koshien-preview-tabs" aria-label="プレビュー画面切り替え">
+      <div class="worldcup-phase-tabs koshien-preview-tabs ${state.activeScreen === "phase2" ? "is-phase2" : ""}" aria-label="プレビュー画面切り替え">
         ${SCREEN_IDS.map((screenId) => `<button type="button" class="phase-tab ${state.activeScreen === screenId ? "is-active" : ""}" data-koshien-preview-screen="${screenId}">
           <strong>${labels[screenId][0]}</strong><span>${labels[screenId][1]}</span>
         </button>`).join("")}

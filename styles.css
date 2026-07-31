@@ -2206,6 +2206,327 @@ dialog::backdrop {
   padding-top: 0;
 }
 
+.koshien-preview-phone[data-koshien-preview-active="phase2"] {
+  overflow-x: clip;
+}
+
+.koshien-preview-phase2-board {
+  gap: 10px;
+  padding: 12px;
+  overflow-x: clip;
+}
+
+.koshien-preview-draft-head {
+  align-items: center;
+}
+
+.koshien-preview-draft-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.koshien-preview-draft-rule {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(238, 232, 224, 0.14);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.koshien-preview-draft-rounds {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.koshien-preview-draft-round {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.koshien-preview-draft-round-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.koshien-preview-draft-round-head strong {
+  min-width: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.koshien-preview-draft-round-head strong small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.koshien-preview-draft-round-head > span {
+  color: #f6a8c7;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.koshien-preview-draft-round-head > span.is-reverse {
+  color: #65b9ff;
+}
+
+.koshien-preview-draft-round-head b {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.koshien-preview-draft-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.koshien-preview-draft-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 32px minmax(24px, auto) auto;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 110px;
+  padding: 6px 4px;
+  border: 1px solid rgba(238, 232, 224, 0.15);
+  border-radius: 9px;
+  background: rgba(9, 8, 8, 0.34);
+}
+
+.koshien-preview-draft-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+}
+
+.koshien-preview-draft-card-head strong {
+  overflow: hidden;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koshien-preview-pick-number {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid #f6a8c7;
+  border-radius: 50%;
+  color: #f6a8c7;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.koshien-preview-draft-round:nth-child(even) .koshien-preview-pick-number {
+  border-color: #52adff;
+  color: #52adff;
+}
+
+.koshien-preview-school-crest {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px dashed rgba(238, 232, 224, 0.28);
+  border-radius: 8px;
+  color: rgba(238, 232, 224, 0.48);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.koshien-preview-school-crest > span {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.koshien-preview-school-name {
+  align-self: center;
+  overflow: hidden;
+  width: 100%;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koshien-preview-pick-status {
+  max-width: 100%;
+  padding: 2px 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(238, 232, 224, 0.08);
+  font-size: 8px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.koshien-preview-draft-card.is-picked {
+  border-color: rgba(246, 168, 199, 0.4);
+  background: rgba(70, 27, 47, 0.3);
+}
+
+.koshien-preview-draft-card.is-picked .koshien-preview-pick-status {
+  color: #9ee2bd;
+  background: rgba(28, 100, 68, 0.26);
+}
+
+.koshien-preview-draft-card.is-current {
+  border-color: #68baff;
+  background: rgba(68, 142, 224, 0.25);
+  box-shadow: 0 0 0 2px rgba(82, 173, 255, 0.2), 0 0 16px rgba(82, 173, 255, 0.38);
+}
+
+.koshien-preview-draft-card.is-current .koshien-preview-pick-status {
+  color: #eff8ff;
+  background: #1976d2;
+}
+
+.koshien-preview-draft-flow {
+  position: absolute;
+  top: 50%;
+  right: -8px;
+  z-index: 2;
+  width: 10px;
+  color: #f6a8c7;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  transform: translateY(-50%);
+}
+
+.koshien-preview-draft-row[data-direction="reverse"] .koshien-preview-draft-flow {
+  color: #52adff;
+}
+
+.koshien-preview-phase2-board .koshien-phase2-pick-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(238, 232, 224, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.koshien-preview-pick-form-label {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.koshien-preview-pick-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  min-width: 0;
+}
+
+.koshien-preview-pick-controls select {
+  min-width: 0;
+}
+
+.koshien-preview-remaining {
+  display: grid;
+  align-content: center;
+  min-width: 68px;
+  padding: 5px 7px;
+  border-radius: 9px;
+  color: var(--text);
+  background: rgba(238, 232, 224, 0.08);
+  text-align: center;
+}
+
+.koshien-preview-remaining strong {
+  font-size: 10px;
+}
+
+.koshien-preview-remaining small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.koshien-preview-phase2-board .koshien-phase2-pick-form > .primary-button {
+  width: 100%;
+  min-height: 40px;
+}
+
+.koshien-preview-draft-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.koshien-preview-draft-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.koshien-preview-draft-legend span::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: rgba(238, 232, 224, 0.18);
+  content: "";
+}
+
+.koshien-preview-draft-legend span.is-picked::before {
+  background: #d56c9b;
+}
+
+.koshien-preview-draft-legend span.is-current::before {
+  background: #52adff;
+}
+
+.koshien-preview-tabs.is-phase2 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  overflow-x: clip;
+}
+
+.koshien-preview-tabs.is-phase2 .phase-tab {
+  min-width: 0;
+  padding-inline: 4px;
+}
+
+.koshien-preview-tabs.is-phase2 .phase-tab strong,
+.koshien-preview-tabs.is-phase2 .phase-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .koshien-preview-final-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -2301,6 +2622,79 @@ dialog::backdrop {
     border: 0;
     border-radius: 18px;
     box-shadow: none;
+  }
+
+  .koshien-preview-tabs.is-phase2 .phase-tab {
+    padding: 7px 2px;
+  }
+
+  .koshien-preview-tabs.is-phase2 {
+    margin-inline: 0;
+  }
+
+  .koshien-preview-tabs.is-phase2 .phase-tab strong {
+    font-size: 9px;
+  }
+
+  .koshien-preview-tabs.is-phase2 .phase-tab span {
+    font-size: 8px;
+  }
+
+  .koshien-preview-phase2-board {
+    gap: 8px;
+    padding: 8px 7px;
+  }
+
+  .koshien-preview-draft-rounds {
+    gap: 5px;
+  }
+
+  .koshien-preview-draft-round {
+    gap: 4px;
+    padding: 5px;
+  }
+
+  .koshien-preview-draft-row {
+    gap: 5px;
+  }
+
+  .koshien-preview-draft-card {
+    grid-template-rows: auto 24px minmax(18px, auto) auto;
+    min-height: 84px;
+    padding: 4px 2px;
+  }
+
+  .koshien-preview-draft-card-head {
+    gap: 2px;
+  }
+
+  .koshien-preview-draft-card-head strong {
+    font-size: 10px;
+  }
+
+  .koshien-preview-pick-number {
+    flex-basis: 18px;
+    width: 18px;
+    height: 18px;
+    font-size: 9px;
+  }
+
+  .koshien-preview-school-crest {
+    width: 24px;
+    height: 24px;
+  }
+
+  .koshien-preview-school-name {
+    font-size: 9px;
+  }
+
+  .koshien-preview-pick-status {
+    font-size: 7px;
+  }
+
+  .koshien-preview-draft-flow {
+    right: -7px;
+    font-size: 12px;
   }
 
   .koshien-preview-final-card {
