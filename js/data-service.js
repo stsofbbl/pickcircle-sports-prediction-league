@@ -933,9 +933,13 @@
     };
   }
 
-  async function saveKoshienSnapshot({ state, event, participantName, scoreRows = [] }) {
+  async function saveKoshienSnapshot({ state, event, eventId, participantName, scoreRows = [] }) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
     if (!event || event.templateId !== "koshien") return { skipped: true, reason: "event is not koshien" };
+    const normalizedEventId = String(eventId || event.id || "").trim();
+    if (String(event.id || "").trim() !== normalizedEventId) {
+      throw new Error("表示中の甲子園大会IDが一致しません。");
+    }
 
     const supabase = await supabaseClient();
     const user = await window.YosoSupabase.sessionUser();
@@ -957,11 +961,10 @@
     }
 
     const deadline = event.deadline ? new Date(event.deadline).toISOString() : null;
-    const eventId = String(event.id);
     const { data: existingEvent, error: existingEventError } = await supabase
       .from("events")
       .select("id, rules")
-      .eq("id", eventId)
+      .eq("id", normalizedEventId)
       .maybeSingle();
     if (existingEventError) throw existingEventError;
     const {
@@ -980,10 +983,10 @@
         ({ error: eventError } = await supabase
           .from("events")
           .update(eventSettings)
-          .eq("id", eventId));
+          .eq("id", normalizedEventId));
       } else {
         const eventPayload = {
-          id: eventId,
+          id: normalizedEventId,
           league_id: league.id,
           ...eventSettings,
           preset_type: "koshien",
@@ -1005,7 +1008,7 @@
           throw new Error("代表校49校の保存済みデータを復元できません。公式代表校を再読込してください。");
         }
         await replaceKoshienRepresentatives({
-          eventId,
+          eventId: normalizedEventId,
           year: eventForSave.config?.externalResults?.year,
           rows: teams.map((name) => ({
             districtName: eventForSave.config?.teamMeta?.[name]?.district || "",
@@ -1058,7 +1061,7 @@
       scoresSaved = true;
     } else if (isAdmin && eventForSave.results) {
       const { error: resultsError } = await supabase.from("results").upsert({
-        event_id: eventId,
+        event_id: normalizedEventId,
         payload: eventForSave.results,
         updated_by: user.id,
       }, { onConflict: "event_id" });

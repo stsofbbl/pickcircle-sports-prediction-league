@@ -314,6 +314,7 @@ let authRecoveryMode = false;
 let lastAuthActivityWrite = 0;
 let onlineAuthUser = null;
 let onlineLeagueId = "";
+let onlineKoshienEventId = "";
 let onlineLeagueMembers = [];
 let onlineLeagueAdminMessage = "";
 let onlineLeagueAdminSaving = false;
@@ -492,6 +493,7 @@ async function handleSupabaseAuthEvent(event) {
   if (event === "SIGNED_OUT") {
     applyOnlineAuthUser(null);
     onlineLeagueId = "";
+    onlineKoshienEventId = "";
     onlineLeagueMembers = [];
     onlineLeagueAdminMessage = "";
     clubPathwayState = { ...clubPathwayState, mode: "", message: "", searchResults: [], inviteMatch: null, myClubs: [], myRequests: [], pendingRequests: [] };
@@ -1622,10 +1624,17 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
   if (baseTemplateId(state.event?.templateId) !== "koshien") {
     return { skipped: true, reason: "event is not koshien" };
   }
+  const displayedEventId = String(onlineKoshienEventId || "").trim();
+  const activeEventId = String(state.activeEventId || "").trim();
+  const currentEventId = String(state.event?.id || "").trim();
+  if (!displayedEventId || currentEventId !== displayedEventId || activeEventId !== displayedEventId) {
+    throw new Error("現在表示中の正式な甲子園大会を確認できません。画面を再読み込みしてください。");
+  }
   clearTimeout(pendingKoshienSyncTimer);
   const result = await window.YosoDataService.koshien.saveSnapshot({
     state,
     event: state.event,
+    eventId: displayedEventId,
     participantName,
     scoreRows: koshienHasScorableResults(state.event) ? koshienScoreRows() : [],
   });
@@ -2007,6 +2016,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
   const eventRow = snapshot.event;
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
   onlineLeagueId = String(snapshot.league?.id || "");
+  onlineKoshienEventId = String(eventRow?.id || "");
   onlineLeagueMembers = (snapshot.members || []).map((row) => ({
     userId: String(row.user_id || ""),
     displayName: row.profiles?.display_name
@@ -2643,6 +2653,7 @@ function setClubPathwayMessage(message = "", kind = "") {
 function saveActiveClub(club) {
   const leagueId = String(club?.league_id || "");
   if (!leagueId) return;
+  const leagueChanged = String(onlineLeagueId) !== leagueId;
   state.leagueName = club.league_name || state.leagueName;
   clubPathwayState.renameLeagueId = leagueId;
   clubPathwayState.renameName = club.league_name || null;
@@ -2657,6 +2668,7 @@ function saveActiveClub(club) {
     leagueId: club.invite_code || state.connection?.leagueId,
   });
   onlineLeagueId = leagueId;
+  if (leagueChanged) onlineKoshienEventId = "";
   lastKoshienOnlineLoadUserId = "";
 }
 
@@ -2771,6 +2783,7 @@ async function handleClubPathwayAction(button) {
       if (confirmationName === null) return;
       await league?.deleteClub?.({ leagueId: activeClub?.league_id, confirmationName });
       onlineLeagueId = "";
+      onlineKoshienEventId = "";
       window.YosoSupabase?.saveConfig?.({ activeLeagueId: "", inviteCode: "", leagueName: state.leagueName });
       clubPathwayState.message = "クラブを削除しました。";
     }
@@ -6111,7 +6124,7 @@ function bindGenericInputs() {
           const result = await saveKoshienOnlineNow({ participantName: name });
           setKoshienPhase1Message(name, koshienSaveOutcomeMessage(result, "フェーズ1予想を保存しました。"));
         } catch (error) {
-          setKoshienPhase1Message(name, "Supabaseに接続できません。通信環境またはログイン状態を確認してください。");
+          setKoshienPhase1Message(name, error?.message || "フェーズ1予想を保存できませんでした。");
         }
         return;
       }

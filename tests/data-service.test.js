@@ -8,6 +8,7 @@ const DATA_SERVICE_PATH = path.join(__dirname, "..", "js", "data-service.js");
 
 function createSupabaseMock({
   rpcError = null,
+  phase1RpcError = null,
   teamError = null,
   playersError = null,
   missingEventId = "",
@@ -175,7 +176,10 @@ function createSupabaseMock({
       },
       rpc(name, args) {
         calls.push({ operation: "rpc", name, args });
-        return Promise.resolve({ data: null, error: name === "save_koshien_result_snapshot" ? rpcError : null });
+        const error = name === "save_koshien_result_snapshot"
+          ? rpcError
+          : (name === "save_koshien_phase1_prediction" ? phase1RpcError : null);
+        return Promise.resolve({ data: null, error });
       },
     },
   };
@@ -385,6 +389,62 @@ test("phase 1 autosave never writes later-phase tables directly", async () => {
   assert.equal(writtenTables.includes("final_score_predictions"), false);
   assert.equal(supabase.calls.some((call) => call.name === "save_koshien_phase1_prediction"), true);
   assert.equal(supabase.calls.some((call) => call.table === "predictions"), false);
+});
+
+test("phase 1 save uses the explicitly displayed event id for the RPC", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const event = completedEvent();
+  const displayedEventId = "2930e8b6-0fe7-45c4-bcf6-edeb8b1407f0";
+  event.id = displayedEventId;
+  event.status = "open";
+  event.deadline = "2099-08-31T15:00:00.000Z";
+  event.results = { matches: [], finishes: {} };
+  event.config.teams = ["Team A", "Team B", "Team C", "Team D", "Team E", "Team F", "Team G", "Team H"];
+  event.config.teamMeta = Object.fromEntries(event.config.teams.map((name) => [name, { startRound: 1, odds: 1 }]));
+  event.predictions.Admin = {
+    teams: ["Team A", "Team B", "Team C", "Team D", "Team E", "Team F", "Team G", "Team H"],
+    captain: "Team A",
+  };
+  await service.koshien.saveSnapshot({
+    state: { approvalPolicy: "half" },
+    event,
+    eventId: displayedEventId,
+    participantName: "Admin",
+    scoreRows: [],
+  });
+
+  const phase1Rpc = supabase.calls.find((call) => call.name === "save_koshien_phase1_prediction");
+  assert.equal(phase1Rpc?.args?.p_event_id, displayedEventId);
+
+  await assert.rejects(
+    service.koshien.saveSnapshot({
+      state: { approvalPolicy: "half" },
+      event,
+      eventId: "stale-local-event-id",
+      participantName: "Admin",
+      scoreRows: [],
+    }),
+    /大会IDが一致しません/,
+  );
+  assert.equal(
+    supabase.calls.filter((call) => call.name === "save_koshien_phase1_prediction").length,
+    1,
+  );
+
+  const rpcError = { code: "P0002", message: "koshien event was not found" };
+  const failingSupabase = createSupabaseMock({ phase1RpcError: rpcError });
+  const failingService = loadDataService(failingSupabase.client);
+  await assert.rejects(
+    failingService.koshien.saveSnapshot({
+      state: { approvalPolicy: "half" },
+      event,
+      eventId: displayedEventId,
+      participantName: "Admin",
+      scoreRows: [],
+    }),
+    (error) => error?.message === rpcError.message && error?.code === rpcError.code,
+  );
 });
 
 test("existing Koshien autosave never rewrites the roster or draw-owned rules", async () => {

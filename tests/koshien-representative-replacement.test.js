@@ -41,3 +41,14 @@ test("UI applies representatives and online loads against the selected event", (
   assert.match(importer, /view\.eventId[\s\S]*state\.event\?\.id/);
   assert.match(app, /loadSnapshot\(\{\s*eventId:/);
 });
+
+test("phase 1 save passes the displayed event id and shows the RPC error message", () => {
+  assert.match(app, /onlineKoshienEventId\s*=\s*String\(eventRow\?\.id/);
+  assert.match(app, /displayedEventId\s*=\s*String\(onlineKoshienEventId/);
+  assert.match(app, /currentEventId\s*!==\s*displayedEventId[\s\S]*?activeEventId\s*!==\s*displayedEventId/);
+  assert.match(app, /saveSnapshot\(\{[\s\S]*?event:\s*state\.event,[\s\S]*?eventId:\s*displayedEventId/);
+  assert.match(
+    app,
+    /data-koshien-phase1-save[\s\S]*?catch \(error\) \{[\s\S]*?setKoshienPhase1Message\(name,\s*error\?\.message/,
+  );
+});
