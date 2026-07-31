@@ -40,3 +40,30 @@ test("saving a match infers the winner, advances, and preserves list scroll", ()
   assert.match(source, /koshienMatchEditorState\.listScrollTop/);
   assert.match(source, /data-koshien-match-list[\s\S]*scrollTop/);
 });
+
+test("match editor uses round-qualified candidates for each school selector", () => {
+  const source = fs.readFileSync(APP_PATH, "utf8");
+  const start = source.indexOf("function koshienMatchBottomSheet");
+  const end = source.indexOf("\nfunction ensureKoshienStartRoundDraft", start);
+  const body = source.slice(start, end);
+
+  assert.match(body, /eligibleTeamsForMatch/);
+  assert.match(body, /side:\s*"a"/);
+  assert.match(body, /side:\s*"b"/);
+});
+
+test("opening or changing a match clears an earlier result-save message", () => {
+  const source = fs.readFileSync(APP_PATH, "utf8");
+  const section = (startMarker, endMarker) => {
+    const start = source.indexOf(startMarker);
+    const end = source.indexOf(endMarker, start);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end);
+  };
+
+  assert.match(section('[data-koshien-match-round]', '[data-koshien-match-open]'), /clearKoshienMatchMessage/);
+  assert.match(section('[data-koshien-match-open]', 'const matchSheet'), /clearKoshienMatchMessage/);
+  assert.match(section('[data-koshien-match-team]', '[data-koshien-match-score]'), /clearKoshienMatchMessage/);
+  assert.match(section('[data-koshien-match-score]', '[data-koshien-match-save]'), /clearKoshienMatchMessage/);
+  assert.match(section('[data-koshien-match-save]', '[data-koshien-match-cancel]'), /nextUnenteredMatchId[\s\S]*clearKoshienMatchMessage/);
+});

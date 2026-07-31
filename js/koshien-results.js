@@ -67,6 +67,51 @@
     return "";
   }
 
+  function eligibleTeamsForMatch({ teams = [], teamMeta = {}, matches = [], matchId = "", side = "a" }) {
+    const match = matches.find((item) => item?.match_id === matchId);
+    if (!match) return [];
+
+    const previousRound = { R2: "R1", R3: "R2", QF: "R3", SF: "QF", F: "SF" }[match.round];
+    const advancingTeams = new Set(
+      matches
+        .filter((item) => item?.round === previousRound
+          && (item.status === "completed" || item.status === "final")
+          && item.winner_id)
+        .map((item) => item.winner_id),
+    );
+    const eligible = match.round === "R1"
+      ? new Set(teams.filter((team) => Number(teamMeta?.[team]?.startRound) !== 2))
+      : match.round === "R2"
+        ? new Set([
+          ...advancingTeams,
+          ...teams.filter((team) => Number(teamMeta?.[team]?.startRound) === 2),
+        ])
+        : advancingTeams;
+    const eliminated = new Set(
+      matches
+        .filter((item) => item?.status === "completed" || item?.status === "final")
+        .map((item) => item.loser_id)
+        .filter(Boolean),
+    );
+    const usedByOtherMatch = new Set(
+      matches
+        .filter((item) => item?.round === match.round && item.match_id !== matchId)
+        .flatMap((item) => [item.team_a_id, item.team_b_id])
+        .filter(Boolean),
+    );
+    const current = side === "b" ? match.team_b_id : match.team_a_id;
+    const opposite = side === "b" ? match.team_a_id : match.team_b_id;
+
+    return teams.filter((team) => (
+      team !== opposite
+      && (team === current || (
+        !usedByOtherMatch.has(team)
+        && eligible.has(team)
+        && !eliminated.has(team)
+      ))
+    ));
+  }
+
   function completeMatch(match) {
     const validation = validateMatchResult(match);
     if (!validation.ok) return validation;
@@ -231,6 +276,7 @@
     buildScoreRows,
     calculatePhase1Breakdown,
     completeMatch,
+    eligibleTeamsForMatch,
     inferMatchWinner,
     loserFinishForRound,
     nextUnenteredMatchId,

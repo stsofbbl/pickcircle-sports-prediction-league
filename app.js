@@ -3328,6 +3328,20 @@ function koshienMatchListRow(match, disabledResults) {
 }
 
 function koshienMatchBottomSheet(match, teams, disabledResults, message) {
+  const teamAOptions = window.YosoKoshienResults.eligibleTeamsForMatch({
+    teams,
+    teamMeta: state.event.config.teamMeta,
+    matches: state.event.results.matches,
+    matchId: match.match_id,
+    side: "a",
+  });
+  const teamBOptions = window.YosoKoshienResults.eligibleTeamsForMatch({
+    teams,
+    teamMeta: state.event.config.teamMeta,
+    matches: state.event.results.matches,
+    matchId: match.match_id,
+    side: "b",
+  });
   return `
     <dialog class="koshien-match-sheet" data-koshien-match-sheet data-match-id="${escapeAttr(match.match_id)}">
       <div class="koshien-match-sheet-handle" aria-hidden="true"></div>
@@ -3339,8 +3353,8 @@ function koshienMatchBottomSheet(match, teams, disabledResults, message) {
         <button class="ghost-button small-button" type="button" data-koshien-match-close>閉じる</button>
       </div>
       <div class="koshien-match-sheet-fields">
-        <label class="field"><span>高校A</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:a" ${disabledResults}>${optionList(teams, match.team_a_id)}</select></label>
-        <label class="field"><span>高校B</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:b" ${disabledResults}>${optionList(teams, match.team_b_id)}</select></label>
+        <label class="field"><span>高校A</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:a" ${disabledResults}>${optionList(teamAOptions, match.team_a_id)}</select></label>
+        <label class="field"><span>高校B</span><select data-koshien-match-team="${escapeAttr(match.match_id)}:b" ${disabledResults}>${optionList(teamBOptions, match.team_b_id)}</select></label>
         <label class="field score-field"><span>高校A得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:a" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(match.score_a)}" ${disabledResults}></label>
         <label class="field score-field"><span>高校B得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:b" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(match.score_b)}" ${disabledResults}></label>
       </div>
@@ -3638,6 +3652,8 @@ function bindActiveEventManagerInputs() {
   }
   root.querySelectorAll("[data-koshien-match-round]").forEach((round) => {
     round.addEventListener("toggle", () => {
+      const wasOpen = koshienMatchEditorState.openRounds.has(round.dataset.koshienMatchRound);
+      if (round.open !== wasOpen) clearKoshienMatchMessage(root);
       if (round.open) koshienMatchEditorState.openRounds.add(round.dataset.koshienMatchRound);
       else koshienMatchEditorState.openRounds.delete(round.dataset.koshienMatchRound);
     });
@@ -3645,6 +3661,7 @@ function bindActiveEventManagerInputs() {
   root.querySelectorAll("[data-koshien-match-open]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!canEditResults) return;
+      clearKoshienMatchMessage(root);
       koshienMatchEditorState.listScrollTop = matchList?.scrollTop || 0;
       koshienMatchEditorState.matchId = button.dataset.koshienMatchOpen;
       const match = koshienMatchById(koshienMatchEditorState.matchId);
@@ -3814,6 +3831,7 @@ function bindActiveEventManagerInputs() {
     input.disabled = !canEditResults;
     input.addEventListener("change", () => {
       if (!canEditResults) return;
+      clearKoshienMatchMessage(root);
       const [matchId, side] = input.dataset.koshienMatchTeam.split(":");
       const match = koshienMatchById(matchId);
       if (!match) return;
@@ -3830,6 +3848,7 @@ function bindActiveEventManagerInputs() {
     input.disabled = !canEditResults;
     input.addEventListener("input", () => {
       if (!canEditResults) return;
+      clearKoshienMatchMessage(root);
       const [matchId, side] = input.dataset.koshienMatchScore.split(":");
       const match = koshienMatchById(matchId);
       if (!match) return;
@@ -3852,6 +3871,7 @@ function bindActiveEventManagerInputs() {
         return;
       }
       const nextMatchId = window.YosoKoshienResults.nextUnenteredMatchId(state.event.results.matches, matchId);
+      if (nextMatchId) clearKoshienMatchMessage(root);
       koshienMatchEditorState.matchId = nextMatchId;
       const nextMatch = koshienMatchById(nextMatchId);
       if (nextMatch?.round) koshienMatchEditorState.openRounds.add(nextMatch.round);
@@ -4878,6 +4898,14 @@ async function cancelKoshienMatchResult(matchId) {
 function setKoshienMatchMessage(text, type = "success") {
   state.event.results ||= createResults("koshien");
   state.event.results.matchMessage = text ? { text, type } : null;
+}
+
+function clearKoshienMatchMessage(root = els.activeEventManager) {
+  setKoshienMatchMessage("");
+  root?.querySelectorAll("[data-koshien-match-message], [data-koshien-sheet-message]").forEach((message) => {
+    message.textContent = "";
+    message.classList.remove("is-error", "is-success");
+  });
 }
 
 function koshienStructuredSaveErrorMessage(error) {

@@ -50,6 +50,61 @@ test("the next unentered match wraps forward from the saved match", () => {
   assert.equal(koshien.nextUnenteredMatchId(matches.map((match) => ({ ...match, status: "completed" })), "R1-1"), "");
 });
 
+test("round-one candidates contain only unused round-one starters", () => {
+  const teams = ["A", "B", "C", "D"];
+  const matches = [
+    { match_id: "R1-1", round: "R1", team_a_id: "A", team_b_id: "B", status: "scheduled" },
+    { match_id: "R1-2", round: "R1", team_a_id: "", team_b_id: "", status: "scheduled" },
+  ];
+  const teamMeta = { A: { startRound: 1 }, B: { startRound: 1 }, C: { startRound: 1 }, D: { startRound: 2 } };
+
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, teamMeta, matches, matchId: "R1-2", side: "a" }), ["C"]);
+});
+
+test("round-two candidates are advancing winners and round-two starters that are unused in that round", () => {
+  const teams = ["A", "B", "C", "D", "E", "F", "G"];
+  const matches = [
+    { match_id: "R1-1", round: "R1", team_a_id: "A", team_b_id: "B", winner_id: "A", loser_id: "B", status: "completed" },
+    { match_id: "R1-2", round: "R1", team_a_id: "C", team_b_id: "D", winner_id: "C", loser_id: "D", status: "completed" },
+    { match_id: "R2-1", round: "R2", team_a_id: "A", team_b_id: "E", status: "scheduled" },
+    { match_id: "R2-2", round: "R2", team_a_id: "C", team_b_id: "F", status: "scheduled" },
+    { match_id: "R2-3", round: "R2", team_a_id: "", team_b_id: "", status: "scheduled" },
+  ];
+  const teamMeta = {
+    A: { startRound: 1 }, B: { startRound: 1 }, C: { startRound: 1 }, D: { startRound: 1 },
+    E: { startRound: 2 }, F: { startRound: 2 }, G: { startRound: 2 },
+  };
+
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, teamMeta, matches, matchId: "R2-3", side: "a" }), ["G"]);
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, teamMeta, matches, matchId: "R2-1", side: "a" }), ["A", "G"]);
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, teamMeta, matches, matchId: "R2-1", side: "b" }), ["E", "G"]);
+});
+
+test("later-round candidates are only winners from the immediately preceding round", () => {
+  const teams = ["A", "B", "C", "D", "E"];
+  const matches = [
+    { match_id: "R2-1", round: "R2", team_a_id: "A", team_b_id: "B", winner_id: "A", loser_id: "B", status: "completed" },
+    { match_id: "R2-2", round: "R2", team_a_id: "C", team_b_id: "D", winner_id: "D", loser_id: "C", status: "completed" },
+    { match_id: "R3-1", round: "R3", team_a_id: "A", team_b_id: "", status: "scheduled" },
+  ];
+
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, matches, matchId: "R3-1", side: "a" }), ["A", "D"]);
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, matches, matchId: "R3-1", side: "b" }), ["D"]);
+});
+
+test("an existing selection remains selectable while the opposite side cannot select the same school", () => {
+  const teams = ["A", "B", "C"];
+  const matches = [
+    { match_id: "R1-1", round: "R1", team_a_id: "A", team_b_id: "B", winner_id: "A", loser_id: "B", status: "completed" },
+    { match_id: "R2-1", round: "R2", team_a_id: "B", team_b_id: "C", status: "scheduled" },
+    { match_id: "R2-2", round: "R2", team_a_id: "B", team_b_id: "", status: "scheduled" },
+  ];
+  const teamMeta = { A: { startRound: 1 }, B: { startRound: 1 }, C: { startRound: 2 } };
+
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, teamMeta, matches, matchId: "R2-1", side: "a" }), ["A", "B"]);
+  assert.deepEqual(koshien.eligibleTeamsForMatch({ teams, teamMeta, matches, matchId: "R2-1", side: "b" }), ["A", "C"]);
+});
+
 test("completed match validation rejects negative and decimal scores", () => {
   assert.equal(koshien.validateMatchResult(validMatch({ score_a: -1 })).ok, false);
   assert.equal(koshien.validateMatchResult(validMatch({ score_b: 1.5 })).ok, false);
