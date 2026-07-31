@@ -48,7 +48,21 @@ test("phase 2 preview advances the dummy draft without changing the original fix
   assert.equal(second.draft.picks.length, 4);
 });
 
-test("admin launcher and preview dialog are present but preview handlers cannot call production saves", () => {
+test("only the platform admin can display, open, and operate the preview", () => {
+  const platformAdminUid = "d72f73b0-c429-4609-8311-17ae8d8dca85";
+  const platformAdminStart = app.indexOf("function isPlatformAdmin");
+  const platformAdminEnd = app.indexOf("\n}", platformAdminStart) + 2;
+  assert.ok(platformAdminStart >= 0 && platformAdminEnd > platformAdminStart);
+  const createPlatformAdminCheck = new Function(
+    "isSupabaseAuthEnabled",
+    "currentAuthUser",
+    `${app.slice(platformAdminStart, platformAdminEnd)}; return isPlatformAdmin;`,
+  );
+  assert.equal(createPlatformAdminCheck(() => true, () => ({ id: platformAdminUid, clubRole: "member" }))(), true);
+  assert.equal(createPlatformAdminCheck(() => true, () => ({ id: "club-owner", clubRole: "owner" }))(), false);
+  assert.equal(createPlatformAdminCheck(() => true, () => ({ id: "club-co-owner", clubRole: "co_owner" }))(), false);
+  assert.equal(createPlatformAdminCheck(() => false, () => ({ id: platformAdminUid, clubRole: "owner" }))(), false);
+
   const previewScript = html.indexOf("./js/koshien-later-phase-preview.js");
   const application = html.indexOf("./app.js");
   assert.ok(previewScript >= 0 && previewScript < application);
@@ -58,19 +72,29 @@ test("admin launcher and preview dialog are present but preview handlers cannot 
   const launcherStart = app.indexOf("function koshienLaterPreviewLauncher");
   const launcherEnd = app.indexOf("function renderKoshienManagerPanel", launcherStart);
   assert.ok(launcherStart >= 0 && launcherEnd > launcherStart);
-  assert.match(app.slice(launcherStart, launcherEnd), /isCurrentUserAdmin\(\)/);
+  assert.match(app.slice(launcherStart, launcherEnd), /isPlatformAdmin\(\)/);
+  assert.doesNotMatch(app.slice(launcherStart, launcherEnd), /isCurrentUserAdmin\(\)/);
 
   const previewStart = app.indexOf("function openKoshienLaterPreview");
   const previewEnd = app.indexOf("function renderKoshienLaterPreview", previewStart);
   assert.ok(previewStart >= 0 && previewEnd > previewStart);
-  assert.match(app.slice(previewStart, previewEnd), /if \(!isCurrentUserAdmin\(\)\) return/);
+  assert.match(app.slice(previewStart, previewEnd), /if \(!isPlatformAdmin\(\)\) return/);
 
   const previewHandlersStart = app.indexOf("function bindKoshienLaterPreview");
   const previewHandlersEnd = app.indexOf("function closeKoshienLaterPreview", previewHandlersStart);
   const previewHandlers = app.slice(previewHandlersStart, previewHandlersEnd);
+  assert.match(previewHandlers, /if \(!isPlatformAdmin\(\)\)/);
+  assert.match(previewHandlers, /guardPlatformAdmin/);
+  assert.doesNotMatch(previewHandlers, /isCurrentUserAdmin\(\)/);
   assert.doesNotMatch(previewHandlers, /YosoDataService|persist\(|saveKoshien|queueKoshienOnlineSave|render\(\)/);
   assert.match(previewHandlers, /YosoKoshienLaterPhases\.validateFinalScore/);
   assert.doesNotMatch(previewSource, /YosoDataService|localStorage|sessionStorage|fetch\(|XMLHttpRequest/);
+
+  const launcherBindingStart = app.indexOf('root.querySelectorAll("[data-koshien-preview-open]")');
+  const launcherBindingEnd = app.indexOf('root.querySelectorAll("[data-koshien-later-prepare]")', launcherBindingStart);
+  assert.ok(launcherBindingStart >= 0 && launcherBindingEnd > launcherBindingStart);
+  assert.match(app.slice(launcherBindingStart, launcherBindingEnd), /isPlatformAdmin\(\)/);
+  assert.doesNotMatch(app.slice(launcherBindingStart, launcherBindingEnd), /isCurrentUserAdmin\(\)/);
 });
 
 test("preview reuses the existing YOSO cards and has a mobile-safe persistent warning", () => {

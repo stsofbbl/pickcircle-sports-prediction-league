@@ -2932,7 +2932,7 @@ function renderGenericManagerPanel(base) {
 }
 
 function koshienLaterPreviewLauncher() {
-  if (!isCurrentUserAdmin()) return "";
+  if (!isPlatformAdmin()) return "";
   const previews = [
     ["phase2", "フェーズ2ドラフト"],
     ["revenge", "リベンジカード"],
@@ -2955,7 +2955,7 @@ function koshienLaterPreviewLauncher() {
 }
 
 function openKoshienLaterPreview(screenId = "phase2") {
-  if (!isCurrentUserAdmin()) return;
+  if (!isPlatformAdmin()) return;
   const preview = window.YosoKoshienLaterPhasePreview;
   if (!preview || !els.koshienLaterPreviewDialog || !els.koshienLaterPreviewRoot) return;
   koshienLaterPreviewState = preview.createState();
@@ -2966,6 +2966,10 @@ function openKoshienLaterPreview(screenId = "phase2") {
 }
 
 function renderKoshienLaterPreview() {
+  if (!isPlatformAdmin()) {
+    closeKoshienLaterPreview();
+    return;
+  }
   const preview = window.YosoKoshienLaterPhasePreview;
   if (!preview || !koshienLaterPreviewState || !els.koshienLaterPreviewRoot) return;
   els.koshienLaterPreviewRoot.innerHTML = preview.renderMarkup(koshienLaterPreviewState);
@@ -2973,6 +2977,7 @@ function renderKoshienLaterPreview() {
 }
 
 function setKoshienLaterPreviewValue(path, value) {
+  if (!isPlatformAdmin()) return;
   const [group, key] = path.split(".");
   if (!koshienLaterPreviewState?.[group] || !key) return;
   koshienLaterPreviewState[group][key] = value;
@@ -2981,22 +2986,33 @@ function setKoshienLaterPreviewValue(path, value) {
 }
 
 function bindKoshienLaterPreview() {
+  if (!isPlatformAdmin()) {
+    closeKoshienLaterPreview();
+    return;
+  }
   const root = els.koshienLaterPreviewRoot;
   const preview = window.YosoKoshienLaterPhasePreview;
   if (!root || !preview || !koshienLaterPreviewState) return;
+  const guardPlatformAdmin = (handler) => (...args) => {
+    if (!isPlatformAdmin()) {
+      closeKoshienLaterPreview();
+      return;
+    }
+    handler(...args);
+  };
   root.querySelectorAll("[data-koshien-preview-screen]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", guardPlatformAdmin(() => {
       preview.selectScreen(koshienLaterPreviewState, button.dataset.koshienPreviewScreen);
       renderKoshienLaterPreview();
-    });
+    }));
   });
   root.querySelectorAll("[data-koshien-preview-value]").forEach((input) => {
-    const update = () => setKoshienLaterPreviewValue(input.dataset.koshienPreviewValue, input.value);
+    const update = guardPlatformAdmin(() => setKoshienLaterPreviewValue(input.dataset.koshienPreviewValue, input.value));
     input.addEventListener("input", update);
     input.addEventListener("change", update);
   });
   root.querySelectorAll("[data-koshien-preview-save]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", guardPlatformAdmin(() => {
       try {
         const kind = button.dataset.koshienPreviewSave;
         if (kind === "phase3") {
@@ -3010,32 +3026,32 @@ function bindKoshienLaterPreview() {
         koshienLaterPreviewState.messageKind = "error";
       }
       renderKoshienLaterPreview();
-    });
+    }));
   });
-  root.querySelector("[data-koshien-preview-confirm]")?.addEventListener("click", () => {
+  root.querySelector("[data-koshien-preview-confirm]")?.addEventListener("click", guardPlatformAdmin(() => {
     preview.confirmSave(koshienLaterPreviewState);
     renderKoshienLaterPreview();
-  });
-  root.querySelector("[data-koshien-preview-cancel]")?.addEventListener("click", () => {
+  }));
+  root.querySelector("[data-koshien-preview-cancel]")?.addEventListener("click", guardPlatformAdmin(() => {
     koshienLaterPreviewState.pendingAction = null;
     renderKoshienLaterPreview();
-  });
-  root.querySelector("[data-koshien-preview-reset]")?.addEventListener("click", () => {
+  }));
+  root.querySelector("[data-koshien-preview-reset]")?.addEventListener("click", guardPlatformAdmin(() => {
     const screenId = koshienLaterPreviewState.activeScreen;
     koshienLaterPreviewState = preview.createState();
     preview.selectScreen(koshienLaterPreviewState, screenId);
     renderKoshienLaterPreview();
-  });
+  }));
   root.querySelectorAll("[data-koshien-preview-detail]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", guardPlatformAdmin(() => {
       koshienLaterPreviewState.detailPlayerId = button.dataset.koshienPreviewDetail;
       renderKoshienLaterPreview();
-    });
+    }));
   });
-  root.querySelector("[data-koshien-preview-detail-close]")?.addEventListener("click", () => {
+  root.querySelector("[data-koshien-preview-detail-close]")?.addEventListener("click", guardPlatformAdmin(() => {
     koshienLaterPreviewState.detailPlayerId = "";
     renderKoshienLaterPreview();
-  });
+  }));
 }
 
 function closeKoshienLaterPreview() {
@@ -3634,7 +3650,7 @@ function bindActiveEventManagerInputs() {
 
   root.querySelectorAll("[data-koshien-preview-open]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (!isCurrentUserAdmin()) return;
+      if (!isPlatformAdmin()) return;
       openKoshienLaterPreview(button.dataset.koshienPreviewOpen);
     });
   });
@@ -3959,6 +3975,11 @@ function currentKoshienParticipantName() {
 function isCurrentUserAdmin() {
   if (isSupabaseAuthEnabled() && currentAuthUser()) return isClubAdmin();
   return currentParticipantName() === state.participants[0];
+}
+
+function isPlatformAdmin() {
+  return isSupabaseAuthEnabled()
+    && String(currentAuthUser()?.id || "") === "d72f73b0-c429-4609-8311-17ae8d8dca85";
 }
 
 function eventsByStatus(...statuses) {
