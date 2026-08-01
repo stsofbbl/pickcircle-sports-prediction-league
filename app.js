@@ -341,6 +341,7 @@ let koshienPhase2DraftSaving = false;
 let koshienPhase2DraftMessage = "";
 let koshienPhase2DraftMessageKind = "";
 let koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
+let koshienOnlineRankingView = { eventId: "", loadedFromDb: false, members: [], players: [], scores: [] };
 let koshienLaterPhaseLoading = false;
 let koshienLaterPhaseSaving = false;
 let koshienLaterAdminSaving = "";
@@ -1763,6 +1764,9 @@ function applyKoshienLaterPhaseResponse(response, eventId = state.event?.id) {
     eventId: String(eventId || ""),
     loadedFromDb: true,
   };
+  if (koshienOnlineRankingView.eventId === String(eventId || "") && Array.isArray(response.official_scores)) {
+    koshienOnlineRankingView.scores = response.official_scores;
+  }
   return koshienLaterPhaseView;
 }
 
@@ -2073,6 +2077,16 @@ function applyKoshienOnlineSnapshot(snapshot) {
     currentParticipantKey,
     ...predictionEntries.map((entry) => entry.participantKey),
   ]);
+  koshienOnlineRankingView = {
+    eventId: String(eventRow?.id || ""),
+    loadedFromDb: true,
+    members: participantEntries.map((entry) => ({
+      user_id: entry.userId,
+      display_name: entry.participantKey,
+    })),
+    players: snapshot.players || [],
+    scores: snapshot.scores || [],
+  };
   const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
   const rules = eventRow.rules || {};
   const storedTeamMeta = rules.config?.teamMeta || {};
@@ -4666,12 +4680,17 @@ function participantDraftBlock(name, teams) {
   `;
 }
 
+function koshienPhase1PredictionsPublic(event = state.event) {
+  if (["resultWait", "finalized", "archive"].includes(event?.status)) return true;
+  return Boolean(event?.deadline && Date.now() >= Date.parse(event.deadline));
+}
+
 function renderKoshienForm() {
   normalizeKoshienEvent(state.event);
   const teams = getTeams();
   const participant = currentKoshienParticipantName();
   const activePhase = state.event.config.activePhase || "phase1";
-  const showPublic = state.event.status !== "open" || isResultFinalized(state.event);
+  const showPublic = koshienPhase1PredictionsPublic(state.event);
   els.eventForm.innerHTML = `
     <div class="worldcup-phase-panel koshien-preset-panel">
       <span class="match-kicker">甲子園2026 / 8校指名</span>
@@ -5269,7 +5288,21 @@ function participantKoshienFinalScoreBlock() {
   if (round.status === "ready") return `<div class="entry-block"><h3>フェーズ3・決勝スコア</h3><p class="helper-text">受付開始までお待ちください</p></div>`;
   if (["locked", "completed"].includes(round.status)) {
     const submittedScore = prediction ? `${prediction.predicted_score_a} - ${prediction.predicted_score_b}` : "未提出";
-    return `<div class="entry-block"><h3>フェーズ3・決勝スコア</h3><p class="helper-text">受付終了</p><p class="helper-text">提出内容: ${escapeHtml(submittedScore)}</p></div>`;
+    const publicPredictions = koshienLaterPhaseView.phase3?.predictions || [];
+    return `
+      <div class="entry-block">
+        <h3>フェーズ3・決勝スコア</h3>
+        <p class="helper-text">受付終了</p>
+        <p class="helper-text">あなたの提出内容: ${escapeHtml(submittedScore)}</p>
+        <div class="history-list">
+          ${publicPredictions.length ? publicPredictions.map((row) => `
+            <div class="history-row wc-public-row">
+              <strong>${escapeHtml(row.display_name || "参加者")}</strong>
+              <span>${escapeHtml(`${row.predicted_score_a} - ${row.predicted_score_b}`)}</span>
+            </div>
+          `).join("") : `<p class="helper-text">提出済み予想はありません。</p>`}
+        </div>
+      </div>`;
   }
   const canSave = koshienLaterRoundOpen(round) && !koshienLaterPhaseSaving;
   return `
@@ -6863,8 +6896,11 @@ function scoreboardInsight(rows) {
 function calculateScores() {
   const templateId = baseTemplateId(state.event.templateId);
   const koshienScorable = templateId === "koshien" && koshienHasScorableResults(state.event);
-  const koshienRows = koshienScorable ? koshienScoreRows() : [];
-  if (koshienScorable) return window.YosoKoshienResults.rankScoreRows(koshienRows);
+  const hasOfficialKoshienScores = templateId === "koshien"
+    && koshienOnlineRankingView.loadedFromDb
+    && koshienOnlineRankingView.eventId === String(state.event?.id || "");
+  const koshienRows = koshienScorable || hasOfficialKoshienScores ? koshienScoreRows() : [];
+  if (koshienScorable || hasOfficialKoshienScores) return window.YosoKoshienResults.rankScoreRows(koshienRows);
   const rows = state.participants.map((name) => {
     ensurePrediction(name);
     if (baseTemplateId(state.event.templateId) !== "worldCup" && !isResultFinalized(state.event) && !koshienScorable) {
@@ -6942,6 +6978,13 @@ function koshienHasScorableResults(event = state.event) {
 }
 
 function koshienScoreRows() {
+  if (koshienOnlineRankingView.eventId === String(state.event?.id || "")
+    && koshienOnlineRankingView.loadedFromDb) {
+    return window.YosoKoshienResults.buildOfficialScoreRows(koshienOnlineRankingView).map((row) => ({
+      ...row,
+      detail: `フェーズ1 ${formatScore(row.breakdown.phase1)} / リベンジ ${formatScore(row.breakdown.revenge)} / フェーズ2 ${formatScore(row.breakdown.phase2)} / ゾンビ ${formatScore(row.breakdown.zombie)} / フェーズ3 ${formatScore(row.breakdown.phase3)}`,
+    }));
+  }
   const officialRows = koshienLaterPhaseView.eventId === String(state.event?.id || "")
     && koshienLaterPhaseView.loadedFromDb
     ? koshienLaterPhaseView.official_scores || []

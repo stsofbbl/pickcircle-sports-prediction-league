@@ -1124,6 +1124,8 @@
       { data: structuredTeams, error: structuredTeamsError },
       { data: results, error: resultsError },
       { data: members, error: membersError },
+      { data: players, error: playersError },
+      { data: scores, error: scoresError },
     ] = await Promise.all([
       supabase
         .from("event_teams")
@@ -1144,11 +1146,21 @@
         .select("user_id, role, membership_status, profiles(display_name)")
         .eq("league_id", league.id)
         .eq("membership_status", "active"),
+      supabase
+        .from("players")
+        .select("id, profile_id, display_name")
+        .eq("league_id", league.id),
+      supabase
+        .from("scores")
+        .select("player_id, phase1_score, phase2_score, phase3_score, revenge_score, zombie_score, total_score, breakdown")
+        .eq("event_id", event.id),
     ]);
     if (teamsError) throw teamsError;
     if (structuredTeamsError) throw structuredTeamsError;
     if (resultsError) throw resultsError;
     if (membersError) throw membersError;
+    if (playersError) throw playersError;
+    if (scoresError) throw scoresError;
 
     const structuredTeamByRepresentativeKey = new Map();
     const structuredTeamsByName = new Map();
@@ -1203,6 +1215,8 @@
       event,
       teams: teamsWithGameMultipliers,
       members: members || [],
+      players: players || [],
+      scores: scores || [],
       predictions: predictions || [],
       results: results || null,
       predictionsPublic: isPredictionPublic(event),

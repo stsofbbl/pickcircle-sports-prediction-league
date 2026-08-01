@@ -254,6 +254,35 @@
     });
   }
 
+  function buildOfficialScoreRows({ members = [], players = [], scores = [] } = {}) {
+    const playersByProfileId = new Map(players.map((player) => [String(player.profile_id || ""), player]));
+    const scoresByPlayerId = new Map(scores.map((score) => [String(score.player_id || ""), score]));
+    return members.map((member) => {
+      const profileId = String(member.user_id || member.profile_id || "");
+      const player = playersByProfileId.get(profileId);
+      const score = scoresByPlayerId.get(String(player?.id || ""));
+      const phase1 = Number(score?.phase1_score) || 0;
+      const phase2 = Number(score?.phase2_score) || 0;
+      const phase3 = Number(score?.phase3_score) || 0;
+      const revenge = Number(score?.revenge_score) || 0;
+      const zombie = Number(score?.zombie_score) || 0;
+      return {
+        name: member.display_name || member.displayName || player?.display_name || "参加者",
+        playerId: player?.id || "",
+        profileId,
+        score: Number(score?.total_score) || 0,
+        breakdown: {
+          ...(score?.breakdown || {}),
+          phase1,
+          phase2,
+          phase3,
+          revenge,
+          zombie,
+        },
+      };
+    });
+  }
+
   function rankScoreRows(rows = []) {
     const sorted = [...rows].sort((left, right) => (
       (Number(right.score) - Number(left.score))
@@ -273,6 +302,7 @@
   return {
     OFFICIAL_PHASE1_POINTS,
     buildMatchRows,
+    buildOfficialScoreRows,
     buildScoreRows,
     calculatePhase1Breakdown,
     completeMatch,

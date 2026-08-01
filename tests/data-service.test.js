@@ -11,6 +11,11 @@ function createSupabaseMock({
   phase1RpcError = null,
   teamError = null,
   playersError = null,
+  playerRows = null,
+  scoreRows = null,
+  predictionRows = null,
+  eventStatus = "open",
+  predictionDeadline = "2099-08-31T15:00:00.000Z",
   missingEventId = "",
   existingEventTeams = null,
   existingEventRules = {},
@@ -41,7 +46,8 @@ function createSupabaseMock({
       this.expectsList = false;
     }
 
-    select() {
+    select(columns) {
+      this.columns = columns;
       return this;
     }
 
@@ -100,7 +106,7 @@ function createSupabaseMock({
     }
 
     resolve() {
-      queries.push({ table: this.table, operation: this.operation, filters: { ...this.filters } });
+      queries.push({ table: this.table, operation: this.operation, columns: this.columns, filters: { ...this.filters } });
       if (this.table === "leagues") return { data: [{ id: "league-id", invite_code: "league-code" }], error: null };
       if (this.table === "league_members" && this.filters.user_id) {
         return { data: { league_id: "league-id", role: "admin" }, error: null };
@@ -137,8 +143,8 @@ function createSupabaseMock({
             league_id: "league-id",
             name: "YOSO 夏の甲子園2026",
             preset_type: "koshien",
-            status: "open",
-            prediction_deadline: "2099-08-31T15:00:00.000Z",
+            status: eventStatus,
+            prediction_deadline: predictionDeadline,
             rules: existingEventRules,
           }],
           error: null,
@@ -152,8 +158,8 @@ function createSupabaseMock({
             league_id: "league-id",
             name: "選択中の夏の甲子園",
             preset_type: "koshien",
-            status: "open",
-            prediction_deadline: "2099-08-31T15:00:00.000Z",
+            status: eventStatus,
+            prediction_deadline: predictionDeadline,
             rules: existingEventRules,
           },
           error: null,
@@ -161,7 +167,12 @@ function createSupabaseMock({
       }
       if (this.table === "events" && this.operation === "select") return { data: { id: "event-id" }, error: null };
       if (this.table === "players" && this.operation === "upsert") return { data: { id: "player-id" }, error: null };
-      if (this.table === "players") return { data: [{ id: "player-id", display_name: "Admin" }], error: playersError };
+      if (this.table === "players") return {
+        data: playerRows || [{ id: "player-id", profile_id: "user-id", display_name: "Admin" }],
+        error: playersError,
+      };
+      if (this.table === "scores") return { data: scoreRows || [], error: null };
+      if (this.table === "predictions") return { data: predictionRows || [], error: null };
       if (this.table === "teams") return { data: teamRows, error: teamError };
       return { data: null, error: null };
     }
@@ -662,6 +673,87 @@ test("loadSnapshot returns all league members while predictions remain private b
   ]);
   const predictionQuery = supabase.queries.find((call) => call.table === "predictions" && call.operation === "select");
   assert.equal(predictionQuery?.filters?.user_id, "user-id");
+});
+
+test("loadSnapshot returns players and official scores independently of private predictions", async () => {
+  const players = [
+    { id: "player-1", profile_id: "user-id", display_name: "Admin" },
+    { id: "player-2", profile_id: "friend-1", display_name: "イノ" },
+    { id: "player-3", profile_id: "friend-2", display_name: "ギン" },
+    { id: "player-4", profile_id: "friend-3", display_name: "テストくん" },
+  ];
+  const scores = [{
+    player_id: "player-2",
+    phase1_score: 12,
+    phase2_score: 20,
+    phase3_score: 30,
+    revenge_score: 4,
+    zombie_score: -20,
+    total_score: 46,
+    breakdown: { scoring_basis: "current_stage" },
+  }];
+  const supabase = createSupabaseMock({ playerRows: players, scoreRows: scores });
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.players)), players);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.scores)), scores);
+  assert.equal(supabase.queries.find((query) => query.table === "scores")?.filters?.event_id, "event-id");
+  assert.equal(supabase.queries.find((query) => query.table === "predictions")?.filters?.user_id, "user-id");
+});
+
+test("loadSnapshot publishes all phase 1 predictions after the deadline without changing score loading", async () => {
+  const predictions = [
+    { user_id: "user-id", payload: { teams: ["Team A"] } },
+    { user_id: "friend-1", payload: { teams: ["Team B"] } },
+    { user_id: "friend-2", payload: { teams: ["Team C"] } },
+    { user_id: "friend-3", payload: { teams: ["Team D"] } },
+  ];
+  const scores = [{ player_id: "player-id", phase1_score: 2, total_score: 2 }];
+  const supabase = createSupabaseMock({
+    predictionDeadline: "2020-08-01T00:00:00.000Z",
+    predictionRows: predictions,
+    scoreRows: scores,
+  });
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot();
+
+  assert.equal(snapshot.predictionsPublic, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.predictions)), predictions);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.scores)), scores);
+  assert.equal(supabase.queries.find((query) => query.table === "predictions")?.filters?.user_id, undefined);
+});
+
+test("result cancellation sends all active ranking rows so every affected score trigger can rerun", async () => {
+  const players = [
+    { id: "player-1", profile_id: "user-id", display_name: "Admin" },
+    { id: "player-2", profile_id: "friend-1", display_name: "イノ" },
+    { id: "player-3", profile_id: "friend-2", display_name: "ギン" },
+    { id: "player-4", profile_id: "friend-3", display_name: "テストくん" },
+  ];
+  const supabase = createSupabaseMock({ playerRows: players });
+  const service = loadDataService(supabase.client);
+  const scoreRows = players.map((player) => ({
+    name: player.display_name,
+    playerId: player.id,
+    profileId: player.profile_id,
+    score: 0,
+    breakdown: { phase1: 0, phase2: 0, phase3: 0, revenge: 0, zombie: 0 },
+  }));
+
+  await service.koshien.cancelKoshienMatchResult({
+    eventId: "event-id",
+    roundKey: "R1",
+    matchNo: 1,
+    resultsPayload: { matches: [], finishes: {} },
+    scoreRows,
+  });
+
+  const request = supabase.calls.find((call) => call.name === "cancel_koshien_match_result");
+  assert.equal(request.args.p_score_rows.length, 4);
+  assert.deepEqual(request.args.p_score_rows.map((row) => row.player_id), players.map((player) => player.id));
 });
 
 test("loadSnapshot merges saved game multipliers by representative key or unique school name", async () => {
