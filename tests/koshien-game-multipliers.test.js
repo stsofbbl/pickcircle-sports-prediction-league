@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const migrationPath = path.join(
   __dirname,
@@ -47,6 +48,19 @@ test("admin edits and saves the complete 49-school multiplier list", () => {
 });
 
 test("phase-one choices show a saved multiplier or the explicit unset state", () => {
+  assert.match(dataService, /select\("name, game_multiplier, metadata"\)/);
   assert.match(app, /gameMultiplier[^]*?倍率未設定/);
   assert.match(app, /`\$\{team\}（\$\{formatScore\(gameMultiplier\)\}倍）`/);
+});
+
+test("online multiplier state prefers the loaded value, including an explicit unset value", () => {
+  const resolverSource = app.match(
+    /function resolveKoshienOnlineGameMultiplier\(metadata, current\) \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(resolverSource);
+  const resolveGameMultiplier = vm.runInNewContext(`(${resolverSource})`);
+
+  assert.equal(resolveGameMultiplier({ gameMultiplier: 2.2 }, { gameMultiplier: 9 }), 2.2);
+  assert.equal(resolveGameMultiplier({ gameMultiplier: null }, { gameMultiplier: 9 }), null);
+  assert.equal(resolveGameMultiplier({}, { gameMultiplier: 9 }), 9);
 });

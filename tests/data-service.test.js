@@ -664,6 +664,29 @@ test("loadSnapshot returns all league members while predictions remain private b
   assert.equal(predictionQuery?.filters?.user_id, "user-id");
 });
 
+test("loadSnapshot merges saved game multipliers by representative key or unique school name", async () => {
+  const eventTeams = [
+    { name: "横浜", seed: 1, metadata: { representative_key: "kanagawa:yokohama", startRound: 1, district: "神奈川" } },
+    { name: "享栄", seed: 2, metadata: { startRound: 2, district: "愛知" } },
+    { name: "横手", seed: 3, metadata: { representative_key: "akita:yokote", startRound: 1, district: "秋田" } },
+  ];
+  const structuredTeams = [
+    { id: "team-1", name: "横浜高校", game_multiplier: 2.2, metadata: { representative_key: "kanagawa:yokohama" } },
+    { id: "team-2", name: "享栄", game_multiplier: 7.08, metadata: {} },
+    { id: "team-3", name: "横手", game_multiplier: null, metadata: { representative_key: "akita:yokote" } },
+  ];
+  const supabase = createSupabaseMock({ existingEventTeams: eventTeams, structuredTeamRows: structuredTeams });
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.teams)), [
+    { name: "横浜", seed: 1, metadata: { representative_key: "kanagawa:yokohama", startRound: 1, district: "神奈川", gameMultiplier: 2.2 } },
+    { name: "享栄", seed: 2, metadata: { startRound: 2, district: "愛知", gameMultiplier: 7.08 } },
+    { name: "横手", seed: 3, metadata: { representative_key: "akita:yokote", startRound: 1, district: "秋田", gameMultiplier: null } },
+  ]);
+});
+
 test("loadSnapshot uses the currently selected event id", async () => {
   const supabase = createSupabaseMock();
   const service = loadDataService(supabase.client);

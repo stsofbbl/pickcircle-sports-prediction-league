@@ -1121,6 +1121,7 @@
 
     const [
       { data: teams, error: teamsError },
+      { data: structuredTeams, error: structuredTeamsError },
       { data: results, error: resultsError },
       { data: members, error: membersError },
     ] = await Promise.all([
@@ -1129,6 +1130,10 @@
         .select("name, seed, metadata")
         .eq("event_id", event.id)
         .order("seed", { ascending: true }),
+      supabase
+        .from("teams")
+        .select("name, game_multiplier, metadata")
+        .eq("event_id", event.id),
       supabase
         .from("results")
         .select("payload, updated_at")
@@ -1141,8 +1146,38 @@
         .eq("membership_status", "active"),
     ]);
     if (teamsError) throw teamsError;
+    if (structuredTeamsError) throw structuredTeamsError;
     if (resultsError) throw resultsError;
     if (membersError) throw membersError;
+
+    const structuredTeamByRepresentativeKey = new Map();
+    const structuredTeamsByName = new Map();
+    (structuredTeams || []).forEach((team) => {
+      const representativeKey = String(team.metadata?.representative_key || "").trim();
+      const name = String(team.name || "").trim();
+      if (representativeKey) structuredTeamByRepresentativeKey.set(representativeKey, team);
+      if (name) {
+        const rows = structuredTeamsByName.get(name) || [];
+        rows.push(team);
+        structuredTeamsByName.set(name, rows);
+      }
+    });
+    const teamsWithGameMultipliers = (teams || []).map((team) => {
+      const representativeKey = String(team.metadata?.representative_key || "").trim();
+      const nameMatches = structuredTeamsByName.get(String(team.name || "").trim()) || [];
+      const structuredTeam = (representativeKey && structuredTeamByRepresentativeKey.get(representativeKey))
+        || (nameMatches.length === 1 ? nameMatches[0] : null);
+      if (!structuredTeam) return team;
+      return {
+        ...team,
+        metadata: {
+          ...(team.metadata || {}),
+          gameMultiplier: structuredTeam.game_multiplier === null
+            ? null
+            : Number(structuredTeam.game_multiplier),
+        },
+      };
+    });
 
     const predictionSelect = isPredictionPublic(event)
       ? supabase
@@ -1166,7 +1201,7 @@
         displayName: profile?.display_name || user.user_metadata?.display_name || user.email?.split("@")[0] || "あなた",
       },
       event,
-      teams: teams || [],
+      teams: teamsWithGameMultipliers,
       members: members || [],
       predictions: predictions || [],
       results: results || null,

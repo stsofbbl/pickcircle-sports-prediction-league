@@ -2012,6 +2012,12 @@ function koshienLoadSkipMessage(reason) {
   return "Supabaseから読み込むデータがないため、ローカル保存を表示しています。";
 }
 
+function resolveKoshienOnlineGameMultiplier(metadata, current) {
+  return Object.hasOwn(metadata, "gameMultiplier")
+    ? metadata.gameMultiplier
+    : (current.gameMultiplier ?? null);
+}
+
 function applyKoshienOnlineSnapshot(snapshot) {
   const eventRow = snapshot.event;
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
@@ -2069,9 +2075,11 @@ function applyKoshienOnlineSnapshot(snapshot) {
     const current = storedTeamMeta[name] || {};
     const metadata = team.metadata || {};
     const startRound = normalizeKoshienStartRound(current.startRound ?? metadata.startRound, index);
+    const gameMultiplier = resolveKoshienOnlineGameMultiplier(metadata, current);
     return [name, {
       ...current,
       startRound,
+      gameMultiplier,
       ...(metadata.district && !current.district ? { district: metadata.district } : {}),
       ...(metadata.source && !current.source ? { source: metadata.source } : {}),
       ...(metadata.representative_key && !current.representativeKey
