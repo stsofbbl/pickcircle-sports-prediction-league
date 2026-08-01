@@ -3928,6 +3928,7 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
           ? `
             <a class="ghost-link admin-action ${adminOnly ? "is-disabled" : ""}" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
             ${canUseOfficialData ? `<a class="ghost-link admin-action" href="#active" data-event-action="official-data" data-event-id="${escapeAttr(event.id)}" data-jhbf-open-panel>公式データ取得</a>` : ""}
+            ${baseTemplateId(event.templateId) === "koshien" ? sportsBullScheduleLinkMarkup({ fullRow: true }) : ""}
             <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
           `
           : `<a class="ghost-link" href="#active" data-event-action="settings" data-event-id="${escapeAttr(event.id)}">大会編集</a>`}
@@ -3935,6 +3936,12 @@ function tournamentCardMarkup(event, { status, statusClass, actionLabel, missing
       ${koshienRuleGuideMarkup({ event, compact: true, summaryLabel: "ルールを見る" })}
     </article>
   `;
+}
+
+const sportsBullKoshienUrl = "https://vk.sportsbull.jp/sp/koshien/";
+
+function sportsBullScheduleLinkMarkup({ fullRow = false } = {}) {
+  return `<a class="ghost-link external-schedule-link ${fullRow ? "is-full-row" : ""}" href="${sportsBullKoshienUrl}" target="_blank" rel="noopener noreferrer">日程・組み合わせ <span aria-hidden="true">↗︎</span></a>`;
 }
 
 function statusPreviewCardMarkup(status, text, statusClass) {
@@ -3978,6 +3985,7 @@ function resultWaitCardMarkup(event) {
         <a class="primary-link admin-action ${adminOnly || finalized ? "is-disabled" : ""}" href="#active" data-event-action="result" data-event-id="${escapeAttr(event.id)}">結果入力</a>
         ${canUseOfficialData ? `<a class="ghost-link admin-action" href="#active" data-event-action="official-data" data-event-id="${escapeAttr(event.id)}" data-jhbf-open-panel>公式データ取得</a>` : ""}
         <a class="ghost-link ${finalized ? "is-disabled" : ""}" href="#active" data-event-action="approve" data-event-id="${escapeAttr(event.id)}">結果承認</a>
+        ${baseTemplateId(event.templateId) === "koshien" ? sportsBullScheduleLinkMarkup({ fullRow: true }) : ""}
         <button class="ghost-link danger-action admin-action" type="button" data-event-delete data-event-id="${escapeAttr(event.id)}" ${adminOnly}>削除</button>
       </div>
       ${koshienRuleGuideMarkup({ event, compact: true, summaryLabel: "ルールを見る" })}
@@ -4950,6 +4958,7 @@ function participantKoshienBlock(name, teams) {
       <p class="wc-phase-intro">${koshienStartRoundsConfirmed()
         ? "8校を選び、その中からキャプテンを1校選びます。1回戦スタート校は最低5校、2回戦スタート校は最大3校までです。"
         : "開始ラウンドは組み合わせ抽選前の仮データです。現在は仮の2回戦スタート校を最大3校として判定し、抽選後に正式データへ切り替わります。"}</p>
+      ${sportsBullScheduleLinkMarkup()}
       <div class="prediction-grid koshien-pick-grid">
         ${picks.map((pick, index) => `
           <label class="field">

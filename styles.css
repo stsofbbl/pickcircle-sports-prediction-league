@@ -2870,6 +2870,7 @@ dialog::backdrop {
   --app-muted: #c2bbc3;
   --app-line: rgba(241, 237, 240, 0.15);
   --app-line-strong: rgba(240, 168, 190, 0.38);
+  --external-link: #38bdf8;
 }
 
 body {
@@ -2887,6 +2888,7 @@ body[data-theme="day"] {
   --app-text: #14151a;
   --app-muted: #676a75;
   --app-line: rgba(14, 15, 18, 0.12);
+  --external-link: #0369a1;
   background:
     radial-gradient(ellipse at 50% -12%, rgba(240, 168, 190, 0.18), transparent 38%),
     linear-gradient(180deg, #ffffff 0%, #f7f8fb 56%, #eef0f6 100%);
@@ -3436,6 +3438,17 @@ body[data-theme="day"] .tournament-card {
   border: 1px solid var(--app-line);
   background: rgba(255, 255, 255, 0.06);
   color: var(--app-text);
+}
+
+.external-schedule-link {
+  width: 100%;
+  margin-bottom: 12px;
+  color: var(--external-link);
+}
+
+.tournament-actions .external-schedule-link.is-full-row {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
 }
 
 .ghost-link.danger-action {
