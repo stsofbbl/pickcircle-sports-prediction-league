@@ -318,6 +318,7 @@ let onlineKoshienEventId = "";
 let onlineLeagueMembers = [];
 let onlineLeagueAdminMessage = "";
 let onlineLeagueAdminSaving = false;
+let loadedKoshienOnlineEventId = "";
 let clubPathwayState = {
   mode: "",
   busy: false,
@@ -332,7 +333,6 @@ let clubPathwayState = {
   myRequests: [],
   pendingRequests: [],
 };
-let pendingKoshienSyncTimer = null;
 let pendingKoshienLoadPromise = null;
 let lastKoshienOnlineLoadUserId = "";
 let koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
@@ -462,7 +462,13 @@ function isSupabaseAuthEnabled() {
 }
 
 function applyOnlineAuthUser(user) {
+  const previousUserId = String(onlineAuthUser?.id || "");
+  const nextUserId = String(user?.id || "");
   onlineAuthUser = user || null;
+  if (previousUserId !== nextUserId) {
+    loadedKoshienOnlineEventId = "";
+    lastKoshienOnlineLoadUserId = "";
+  }
   if (onlineAuthUser) ensureParticipantForAuth(onlineAuthUser);
 }
 
@@ -496,6 +502,7 @@ async function handleSupabaseAuthEvent(event) {
     onlineKoshienEventId = "";
     onlineLeagueMembers = [];
     onlineLeagueAdminMessage = "";
+    loadedKoshienOnlineEventId = "";
     clubPathwayState = { ...clubPathwayState, mode: "", message: "", searchResults: [], inviteMatch: null, myClubs: [], myRequests: [], pendingRequests: [] };
     lastKoshienOnlineLoadUserId = "";
     koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
@@ -802,6 +809,7 @@ function koshienSaveSkipMessage(reason) {
   if (reason === "event is not koshien") return "甲子園大会を選択してから保存してください。";
   if (reason === "Supabase session is not ready") return "Supabaseログインが確認できません。メールアドレスでログインしてください。";
   if (reason === "league is not ready") return "参加リーグを確認できませんでした。リーグIDを確認してください。";
+  if (reason === "online Koshien state is not loaded") return "オンラインの正式な甲子園大会を読み込んでから保存してください。";
   if (reason === "admin must create the Koshien event before members can save predictions") return "まだ管理者が甲子園大会をオンライン作成していません。先に管理者で保存してください。";
   return "Supabaseへ保存できませんでした。設定とログイン状態を確認してください。";
 }
@@ -1609,7 +1617,6 @@ function persist() {
   syncActiveEvent();
   if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  queueKoshienOnlineSave();
 }
 
 function saveLocalStateOnly() {
@@ -1625,12 +1632,16 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
     return { skipped: true, reason: "event is not koshien" };
   }
   const displayedEventId = String(onlineKoshienEventId || "").trim();
+  const loadedEventId = String(loadedKoshienOnlineEventId || "").trim();
   const activeEventId = String(state.activeEventId || "").trim();
   const currentEventId = String(state.event?.id || "").trim();
-  if (!displayedEventId || currentEventId !== displayedEventId || activeEventId !== displayedEventId) {
-    throw new Error("現在表示中の正式な甲子園大会を確認できません。画面を再読み込みしてください。");
+  if (!loadedEventId
+    || !displayedEventId
+    || loadedEventId !== displayedEventId
+    || currentEventId !== displayedEventId
+    || activeEventId !== displayedEventId) {
+    return { skipped: true, reason: "online Koshien state is not loaded" };
   }
-  clearTimeout(pendingKoshienSyncTimer);
   const result = await window.YosoDataService.koshien.saveSnapshot({
     state,
     event: state.event,
@@ -1646,29 +1657,22 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
   return result;
 }
 
-function queueKoshienOnlineSave() {
-  if (!window.YosoDataService?.shouldAutoSaveKoshien?.()) return;
-  clearTimeout(pendingKoshienSyncTimer);
-  pendingKoshienSyncTimer = setTimeout(async () => {
-    try {
-      await saveKoshienOnlineNow({ updateConnection: false });
-    } catch (error) {
-      console.warn("Koshien Supabase save skipped", error);
-    }
-  }, 900);
-}
-
 async function loadKoshienOnlineState({ force = false } = {}) {
   if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.loadSnapshot) return null;
   const userId = currentAuthUser()?.id || "";
-  if (!force && userId && lastKoshienOnlineLoadUserId === userId) return null;
+  const selectedEventId = baseTemplateId(state.event?.templateId) === "koshien"
+    ? String(state.activeEventId || state.event?.id || "")
+    : "";
+  if (!force
+    && userId
+    && lastKoshienOnlineLoadUserId === userId
+    && selectedEventId
+    && loadedKoshienOnlineEventId === selectedEventId) return null;
   if (pendingKoshienLoadPromise) return pendingKoshienLoadPromise;
+  loadedKoshienOnlineEventId = "";
   setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
   pendingKoshienLoadPromise = (async () => {
     try {
-      const selectedEventId = baseTemplateId(state.event?.templateId) === "koshien"
-        ? String(state.activeEventId || state.event?.id || "")
-        : "";
       const snapshot = await window.YosoDataService.koshien.loadSnapshot({ eventId: selectedEventId });
       if (snapshot?.ok) {
         applyKoshienOnlineSnapshot(snapshot);
@@ -1677,6 +1681,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
           refreshKoshienPhase2DraftState({ renderAfter: false }),
           refreshKoshienLaterPhaseState({ renderAfter: false }),
         ]);
+        loadedKoshienOnlineEventId = String(snapshot.event?.id || "");
         render();
         setConnectionMessage(`Supabaseから甲子園データを読み込みました。${snapshot.predictionsPublic ? "締切後のため他メンバーの予想も取得しています。" : "締切前のため自分の予想だけ取得しています。"}`);
       } else if (snapshot?.skipped) {
@@ -1684,6 +1689,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
       }
       return snapshot;
     } catch (error) {
+      loadedKoshienOnlineEventId = "";
       console.warn("Koshien Supabase load failed", error);
       setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。");
       return null;
@@ -2676,7 +2682,10 @@ function saveActiveClub(club) {
     leagueId: club.invite_code || state.connection?.leagueId,
   });
   onlineLeagueId = leagueId;
-  if (leagueChanged) onlineKoshienEventId = "";
+  if (leagueChanged) {
+    onlineKoshienEventId = "";
+    loadedKoshienOnlineEventId = "";
+  }
   lastKoshienOnlineLoadUserId = "";
 }
 
