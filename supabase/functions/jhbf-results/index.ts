@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
-import { parseJhbfRepresentativeTeamsHtml, parseJhbfResultsHtml } from "../_shared/jhbf-parser.mjs";
+import { parseJhbfRepresentativeTeamsHtml, parseJhbfResultsHtml, parseJhbfStartRoundsHtml } from "../_shared/jhbf-parser.mjs";
 
 const CORS_HEADERS = Object.freeze({
   "Access-Control-Allow-Origin": "*",
@@ -14,7 +14,7 @@ const MAX_REDIRECTS = 2;
 const FETCH_TIMEOUT_MS = 12_000;
 
 interface FetchRequest {
-  kind: "results" | "representatives";
+  kind: "results" | "representatives" | "start_rounds";
   eventId: string;
   competitionType: "summer" | "senbatsu";
   year: number;
@@ -35,7 +35,9 @@ function errorMessage(error: unknown): string {
 function parseRequest(value: unknown): FetchRequest {
   const body = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const eventId = String(body.eventId || "").trim();
-  const kind = body.kind === "representatives" ? "representatives" : "results";
+  const kind = body.kind === "representatives"
+    ? "representatives"
+    : body.kind === "start_rounds" ? "start_rounds" : "results";
   const competitionType = body.competitionType === "senbatsu" ? "senbatsu" : body.competitionType === "summer" ? "summer" : "";
   const year = Number(body.year);
   const baseDate = String(body.baseDate || "").trim();
@@ -48,7 +50,9 @@ function parseRequest(value: unknown): FetchRequest {
     }
     if (Number(baseDate.slice(0, 4)) !== year) throw new Error("baseDate year must match year");
   }
-  if (kind === "representatives" && competitionType !== "summer") throw new Error("representatives are only supported for summer");
+  if (["representatives", "start_rounds"].includes(kind) && competitionType !== "summer") {
+    throw new Error(`${kind} is only supported for summer`);
+  }
   return { kind, eventId, competitionType, year, baseDate: kind === "results" ? baseDate : undefined };
 }
 
@@ -70,11 +74,17 @@ function representativeSourceUrlFor(request: FetchRequest): URL {
   return new URL(`https://www.jhbf.or.jp/sensyuken/${request.year}/team/`);
 }
 
+function startRoundsSourceUrlFor(request: FetchRequest): URL {
+  return new URL(`https://www.jhbf.or.jp/sensyuken/${request.year}/tournament/`);
+}
+
 function assertAllowedJhbfUrl(url: URL, request: FetchRequest): void {
   const expectedRoot = request.competitionType === "summer" ? "sensyuken" : "senbatsu";
   const expectedPath = request.kind === "representatives"
     ? new RegExp(`^/${expectedRoot}/${request.year}/team/?$`)
-    : new RegExp(`^/${expectedRoot}/${request.year}/schedule/schedule_[0-9]{8}\\.html$`);
+    : request.kind === "start_rounds"
+      ? new RegExp(`^/${expectedRoot}/${request.year}/tournament/?$`)
+      : new RegExp(`^/${expectedRoot}/${request.year}/schedule/schedule_[0-9]{8}\\.html$`);
   if (url.protocol !== "https:" || !ALLOWED_HOSTS.has(url.hostname) || url.username || url.password || url.port || url.search || url.hash
     || !expectedPath.test(url.pathname)) {
     throw new Error("JHBF source URL was rejected by the allowlist");
@@ -163,6 +173,31 @@ Deno.serve(async (req: Request) => {
     } catch (error) {
       console.error("JHBF representative fetch failed", errorMessage(error));
       return jsonResponse({ error: "jhbf_fetch_failed", message: "日本高野連公式の代表校一覧を取得できませんでした。既存データは変更していません。" }, 502);
+    }
+  }
+
+  if (request.kind === "start_rounds") {
+    const { error: adminError } = await supabase.rpc("get_koshien_external_import_context", {
+      p_event_id: request.eventId,
+    });
+    if (adminError) {
+      return jsonResponse({ error: "fetch_not_allowed", message: "開始ラウンド候補の取得には管理者権限が必要です。" }, 403);
+    }
+    try {
+      const requestedUrl = startRoundsSourceUrlFor(request);
+      assertAllowedJhbfUrl(requestedUrl, request);
+      const fetched = await fetchAllowedHtml(requestedUrl, request);
+      const fetchedAt = new Date().toISOString();
+      const parsed = parseJhbfStartRoundsHtml(fetched.html, {
+        sourceUrl: fetched.url,
+        fetchedAt,
+        competitionType: request.competitionType,
+        year: request.year,
+      });
+      return jsonResponse({ source: SOURCE, rows: parsed.rows, warnings: parsed.warnings, sourceUrls: [fetched.url], fetchedAt });
+    } catch (error) {
+      console.error("JHBF start-round fetch failed", errorMessage(error));
+      return jsonResponse({ error: "jhbf_fetch_failed", message: "日本高野連公式の組み合わせ表を取得できませんでした。既存データは変更していません。" }, 502);
     }
   }
 

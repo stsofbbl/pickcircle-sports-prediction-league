@@ -37,6 +37,13 @@
     representativeWarnings: [],
     representativeMessage: "",
     representativeMessageKind: "",
+    startRoundRows: [],
+    startRoundWarnings: [],
+    startRoundMessage: "",
+    startRoundMessageKind: "",
+    startRoundSourceUrl: "",
+    startRoundFetchedAt: "",
+    invalidPredictionCount: 0,
   };
   let browserInstalled = false;
   let managerObserver = null;
@@ -241,6 +248,120 @@
     };
   }
 
+  function addMappedValue(map, key, value) {
+    if (!key) return;
+    const values = map.get(key) || [];
+    values.push(value);
+    map.set(key, values);
+  }
+
+  function buildStartRoundPreview(sourceRows = [], currentTeams = [], teamMeta = {}, context = {}, warnings = []) {
+    const contextTeams = Array.isArray(context?.teams) ? context.teams : [];
+    const aliases = Array.isArray(context?.aliases) ? context.aliases : [];
+    const contextNameById = new Map(contextTeams.map((team) => [String(team.teamId || ""), String(team.name || "")]));
+    const records = currentTeams.map((team) => ({
+      team,
+      representativeKey: String(teamMeta?.[team]?.representativeKey || "").trim(),
+      normalizedName: normalizeSchoolName(team),
+    }));
+    const byRepresentativeKey = new Map();
+    const byName = new Map();
+    records.forEach((record) => {
+      addMappedValue(byRepresentativeKey, record.representativeKey, record);
+      addMappedValue(byName, record.normalizedName, record);
+    });
+    const byAlias = new Map();
+    aliases.forEach((alias) => {
+      const teamName = contextNameById.get(String(alias.teamId || ""));
+      const record = records.find((candidate) => candidate.team === teamName);
+      if (record) addMappedValue(byAlias, normalizeSchoolName(alias.normalizedExternalName || alias.externalName), record);
+    });
+
+    const mappedRows = sourceRows.map((row) => {
+      const sourceRepresentativeKey = representativeKeyFor(row.districtName, row.schoolName);
+      const representativeMatches = byRepresentativeKey.get(sourceRepresentativeKey) || [];
+      const normalizedName = normalizeSchoolName(row.schoolName);
+      const nameMatches = byName.get(normalizedName) || [];
+      const aliasMatches = byAlias.get(normalizedName) || [];
+      let matches = representativeMatches;
+      let matchedBy = "representative_key";
+      if (!matches.length) {
+        matches = nameMatches.length ? nameMatches : aliasMatches;
+        matchedBy = nameMatches.length ? "school_name" : "alias";
+      }
+      const match = matches.length === 1 ? matches[0] : null;
+      return { ...row, sourceRepresentativeKey, matchedTeam: match?.team || "", matchedBy, ambiguous: matches.length > 1 };
+    });
+
+    const matchedCounts = new Map();
+    mappedRows.forEach((row) => {
+      if (row.matchedTeam) matchedCounts.set(row.matchedTeam, (matchedCounts.get(row.matchedTeam) || 0) + 1);
+    });
+    const duplicateTeams = [...matchedCounts].filter(([, count]) => count > 1).map(([team]) => team);
+    const sourceKeyCounts = new Map();
+    mappedRows.forEach((row) => sourceKeyCounts.set(
+      row.sourceRepresentativeKey,
+      (sourceKeyCounts.get(row.sourceRepresentativeKey) || 0) + 1,
+    ));
+    const duplicateSourceRows = [...sourceKeyCounts].filter(([, count]) => count > 1).map(([key]) => key);
+    const unmatchedRows = mappedRows.filter((row) => !row.matchedTeam || row.ambiguous);
+    const firstRoundTeams = mappedRows.map((row) => row.matchedTeam).filter(Boolean);
+    const firstRoundSet = new Set(firstRoundTeams);
+    const secondRoundTeams = currentTeams.filter((team) => !firstRoundSet.has(team));
+    const representativeKeys = records.map((record) => record.representativeKey).filter(Boolean);
+    const duplicateRepresentativeKeys = [...new Set(
+      representativeKeys.filter((key, index) => representativeKeys.indexOf(key) !== index),
+    )];
+    const rows = records.map((record) => ({
+      team: record.team,
+      representativeKey: record.representativeKey,
+      startRound: firstRoundSet.has(record.team) ? 1 : 2,
+    }));
+    const structuralWarnings = (Array.isArray(warnings) ? warnings : []).map(String).filter(Boolean);
+    const valid = currentTeams.length === 49
+      && sourceRows.length === 34
+      && firstRoundSet.size === 34
+      && secondRoundTeams.length === 15
+      && !unmatchedRows.length
+      && !duplicateTeams.length
+      && !duplicateSourceRows.length
+      && rows.every((row) => row.representativeKey)
+      && new Set(representativeKeys).size === 49
+      && !duplicateRepresentativeKeys.length
+      && !structuralWarnings.length;
+
+    return {
+      rows,
+      valid,
+      firstRoundTeams: [...firstRoundSet],
+      secondRoundTeams,
+      unmatchedRows,
+      duplicateTeams,
+      duplicateSourceRows,
+      duplicateRepresentativeKeys,
+      structuralWarnings,
+      currentTeamCount: currentTeams.length,
+    };
+  }
+
+  function canConfirmStartRounds(event, now = Date.now()) {
+    if (!["draft", "open"].includes(String(event?.status || ""))) return false;
+    const deadline = String(event?.deadline || "").trim();
+    return !deadline || (Number.isFinite(Date.parse(deadline)) && Number(now) < Date.parse(deadline));
+  }
+
+  async function confirmStartRoundsOnline({ eventId, rows, updateStartRounds, reloadOnline, isConfirmed }) {
+    const saved = await updateStartRounds({ eventId, rows });
+    if (Number(saved?.count) !== 49 || saved?.startRoundsConfirmed !== true) {
+      throw new Error("49校の開始ラウンドを確定できませんでした。");
+    }
+    const snapshot = await reloadOnline();
+    if (!snapshot?.ok || !isConfirmed()) {
+      throw new Error("正式反映後のオンラインデータを再読込できませんでした。画面を再読込して確認してください。");
+    }
+    return saved;
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -291,6 +412,10 @@
 
   async function fetchRepresentatives(payload) {
     return fetchResults({ ...payload, kind: "representatives" });
+  }
+
+  async function fetchStartRounds(payload) {
+    return fetchResults({ ...payload, kind: "start_rounds" });
   }
 
   async function loadContext(eventId) {
@@ -392,6 +517,48 @@
       </div>`;
   }
 
+  function startRoundRowsMarkup(preview) {
+    if (!view.startRoundRows.length && !view.startRoundMessage) {
+      return `<p class="helper-text">組み合わせ抽選後に取得すると、1回戦34校・2回戦15校の候補を表示します。</p>`;
+    }
+    const unmatched = preview.unmatchedRows.map((row) => row.schoolName || "名称不明");
+    const duplicates = [
+      ...preview.duplicateTeams,
+      ...preview.duplicateSourceRows,
+      ...preview.duplicateRepresentativeKeys,
+    ];
+    const problems = [
+      preview.currentTeamCount !== 49 ? `代表校: ${preview.currentTeamCount}/49` : "",
+      unmatched.length ? `未一致: ${unmatched.join("、")}` : "未一致: 0校",
+      duplicates.length ? `重複: ${duplicates.join("、")}` : "重複: 0校",
+      preview.structuralWarnings.length ? `公式HTML確認: ${preview.structuralWarnings.join("、")}` : "",
+    ].filter(Boolean);
+    const fetchedAt = view.startRoundFetchedAt && !Number.isNaN(Date.parse(view.startRoundFetchedAt))
+      ? new Date(view.startRoundFetchedAt).toLocaleString("ja-JP")
+      : "未取得";
+    const source = view.startRoundSourceUrl
+      ? `<a class="ghost-link" href="${escapeHtml(view.startRoundSourceUrl)}" target="_blank" rel="noopener noreferrer">日本高野連公式 組み合わせ表 ↗︎</a>`
+      : "日本高野連公式 組み合わせ表";
+    return `
+      <div class="history-list">
+        <article class="history-row">
+          <span>1回戦 ${preview.firstRoundTeams.length}校 / 2回戦 ${preview.secondRoundTeams.length}校</span>
+          <strong>${preview.valid ? "正式反映できる候補です" : "正式反映できません"}</strong>
+          <small>${escapeHtml(problems.join(" / "))}</small>
+          <small>取得元: ${source} / 取得日時: ${escapeHtml(fetchedAt)}</small>
+        </article>
+        <article class="history-row">
+          <span>1回戦スタート候補（${preview.firstRoundTeams.length}校）</span>
+          <strong>${escapeHtml(preview.firstRoundTeams.join("、") || "候補なし")}</strong>
+        </article>
+        <article class="history-row">
+          <span>2回戦スタート候補（${preview.secondRoundTeams.length}校）</span>
+          <strong>${escapeHtml(preview.secondRoundTeams.join("、") || "候補なし")}</strong>
+        </article>
+        ${view.invalidPredictionCount > 0 ? `<article class="history-row"><strong>既存予想の要確認: ${view.invalidPredictionCount}人</strong><small>2回戦スタート校が4校以上の予想は保持されています。次回保存時に最大3校ルールが適用されます。</small></article>` : ""}
+      </div>`;
+  }
+
   function importPanel(canEditResults) {
     if (!view.baseDate) view.baseDate = jstDateValue();
     const config = sourceConfig();
@@ -404,8 +571,17 @@
       state.event?.config?.teamMeta || {},
       view.representativeWarnings,
     );
+    const startRoundPreview = buildStartRoundPreview(
+      view.startRoundRows,
+      currentTeams,
+      state.event?.config?.teamMeta || {},
+      view.context || {},
+      view.startRoundWarnings,
+    );
+    const startRoundConditionReady = canConfirmStartRounds(state.event);
     const representativesDisabled = !canEditResults || view.loading || view.applying ? "disabled" : "";
     const applyRepresentativesDisabled = representativesDisabled || !representativePreview.valid ? "disabled" : "";
+    const applyStartRoundsDisabled = representativesDisabled || !startRoundPreview.valid || !startRoundConditionReady ? "disabled" : "";
     return `
       <div class="entry-block koshien-jhbf-import">
         <div class="block-head">
@@ -443,6 +619,22 @@
           </div>
           ${representativeRowsMarkup(representativePreview)}
         </div>
+        <div class="entry-block">
+          <div class="block-head">
+            <div>
+              <h3>開始ラウンド候補</h3>
+              <p class="helper-text">公式組み合わせ表から候補を取得します。確認して「正式反映」を押すまでDBは変更しません。</p>
+            </div>
+            <span class="status-label ${startRoundPreview.valid ? "open" : "pending"}">${startRoundPreview.firstRoundTeams.length}/34・${startRoundPreview.secondRoundTeams.length}/15</span>
+          </div>
+          ${view.startRoundMessage ? `<p class="auth-message is-${escapeHtml(view.startRoundMessageKind || "pending")}" role="status">${escapeHtml(view.startRoundMessage)}</p>` : ""}
+          ${!startRoundConditionReady ? `<p class="auth-message is-error" role="status">大会状態または予想締切の条件により、開始ラウンドを正式反映できません。</p>` : ""}
+          <div class="result-flow-actions">
+            <button class="ghost-button" type="button" data-jhbf-fetch-start-rounds ${representativesDisabled}>組み合わせから候補取得</button>
+            <button class="primary-button" type="button" data-jhbf-apply-start-rounds ${applyStartRoundsDisabled}>正式反映</button>
+          </div>
+          ${startRoundRowsMarkup(startRoundPreview)}
+        </div>
         ${view.warnings.length ? `<p class="helper-text">取得メモ: ${escapeHtml(view.warnings.join("、"))}</p>` : ""}
         ${view.message ? `<p class="auth-message is-${escapeHtml(view.messageKind || "pending")}" role="status">${escapeHtml(view.message)}</p>` : ""}
         ${importRowsMarkup()}
@@ -466,6 +658,13 @@
     view.representativeWarnings = [];
     view.representativeMessage = "";
     view.representativeMessageKind = "";
+    view.startRoundRows = [];
+    view.startRoundWarnings = [];
+    view.startRoundMessage = "";
+    view.startRoundMessageKind = "";
+    view.startRoundSourceUrl = "";
+    view.startRoundFetchedAt = "";
+    view.invalidPredictionCount = 0;
   }
 
   async function refreshPreview() {
@@ -536,6 +735,101 @@
     } finally {
       view.loading = false;
       renderActiveEventManager();
+    }
+  }
+
+  async function handleFetchStartRounds(root) {
+    const config = sourceConfig();
+    const year = Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    view.loading = true;
+    view.startRoundMessage = "日本高野連公式の組み合わせ表を取得しています…";
+    view.startRoundMessageKind = "pending";
+    view.invalidPredictionCount = 0;
+    renderActiveEventManager();
+    try {
+      const [response, context] = await Promise.all([
+        fetchStartRounds({ eventId: view.eventId, competitionType: "summer", year }),
+        loadContext(view.eventId),
+      ]);
+      view.context = context;
+      view.startRoundRows = Array.isArray(response.rows) ? response.rows : [];
+      view.startRoundWarnings = Array.isArray(response.warnings) ? response.warnings : [];
+      view.startRoundSourceUrl = String(response.sourceUrls?.[0] || "");
+      view.startRoundFetchedAt = String(response.fetchedAt || "");
+      const preview = buildStartRoundPreview(
+        view.startRoundRows,
+        getTeams(),
+        state.event?.config?.teamMeta || {},
+        view.context,
+        view.startRoundWarnings,
+      );
+      view.startRoundMessage = preview.valid
+        ? "1回戦34校・2回戦15校の候補を取得しました。内容を確認して正式反映してください。"
+        : "候補を安全に確定できません。未一致・重複・公式HTMLの取得状態を確認し、必要なら手動編集してください。";
+      view.startRoundMessageKind = preview.valid ? "success" : "error";
+    } catch (error) {
+      console.warn("JHBF start-round fetch failed", error);
+      view.startRoundRows = [];
+      view.startRoundWarnings = [];
+      view.startRoundSourceUrl = "";
+      view.startRoundFetchedAt = "";
+      view.startRoundMessage = error?.message || "開始ラウンド候補を取得できませんでした。既存データは変更していません。";
+      view.startRoundMessageKind = "error";
+    } finally {
+      view.loading = false;
+      renderActiveEventManager();
+    }
+  }
+
+  async function handleApplyStartRounds() {
+    const eventId = String(state.event?.id || "");
+    const preview = buildStartRoundPreview(
+      view.startRoundRows,
+      getTeams(),
+      state.event?.config?.teamMeta || {},
+      view.context || {},
+      view.startRoundWarnings,
+    );
+    if (!preview.valid || !canConfirmStartRounds(state.event)) {
+      view.startRoundMessage = "49校・34校/15校・未一致0・重複0と締切条件を満たしていないため正式反映できません。";
+      view.startRoundMessageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
+    if (!eventId || eventId !== view.eventId) {
+      view.startRoundMessage = "選択中の大会が変わりました。組み合わせを再取得してください。";
+      view.startRoundMessageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
+    if (!window.confirm("表示中の1回戦34校・2回戦15校を正式反映します。既存予想は保持されます。よろしいですか？")) return;
+
+    view.applying = true;
+    view.startRoundMessage = "開始ラウンドを正式反映しています…";
+    view.startRoundMessageKind = "pending";
+    renderActiveEventManager();
+    try {
+      const saved = await confirmStartRoundsOnline({
+        eventId,
+        rows: preview.rows,
+        updateStartRounds: (args) => window.YosoDataService?.koshien?.updateStartRounds?.(args),
+        reloadOnline: () => typeof loadKoshienOnlineState === "function"
+          ? loadKoshienOnlineState({ force: true })
+          : null,
+        isConfirmed: () => state.event?.config?.startRoundsConfirmed === true,
+      });
+      view.invalidPredictionCount = Number(saved.invalidPredictionCount) || 0;
+      view.startRoundMessage = view.invalidPredictionCount > 0
+        ? `正式反映しました。既存予想${view.invalidPredictionCount}人は2回戦スタート校が4校以上のため要確認です。`
+        : "開始ラウンドを正式反映し、予想入力画面へ反映しました。";
+      view.startRoundMessageKind = "success";
+    } catch (error) {
+      view.startRoundMessage = error?.message || "開始ラウンドを正式反映できませんでした。既存データを確認してください。";
+      view.startRoundMessageKind = "error";
+    } finally {
+      view.applying = false;
+      renderActiveEventManager();
+      renderScoresOnly();
     }
   }
 
@@ -758,6 +1052,8 @@
     if (!root) return;
     root.querySelector("[data-jhbf-fetch-representatives]")?.addEventListener("click", () => handleFetchRepresentatives(root));
     root.querySelector("[data-jhbf-apply-representatives]")?.addEventListener("click", () => handleApplyRepresentatives());
+    root.querySelector("[data-jhbf-fetch-start-rounds]")?.addEventListener("click", () => handleFetchStartRounds(root));
+    root.querySelector("[data-jhbf-apply-start-rounds]")?.addEventListener("click", () => handleApplyStartRounds());
     root.querySelector("[data-jhbf-fetch]")?.addEventListener("click", () => handleFetch(root));
     root.querySelector("[data-jhbf-apply]")?.addEventListener("click", () => handleApply(root));
     root.querySelectorAll("[data-jhbf-save-alias]").forEach((button) => {
@@ -848,6 +1144,9 @@
     buildCanonicalPayload,
     buildImportPreview,
     buildRepresentativePreview,
+    buildStartRoundPreview,
+    canConfirmStartRounds,
+    confirmStartRoundsOnline,
     representativeKeyFor,
     sameCompletedMatch,
     installBrowser,

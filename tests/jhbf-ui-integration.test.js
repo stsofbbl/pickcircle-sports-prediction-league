@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const moduleSource = fs.readFileSync(path.join(__dirname, "../js/jhbf-result-import.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(__dirname, "../index.html"), "utf8");
 const appSource = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
+const edgeSource = fs.readFileSync(path.join(__dirname, "../supabase/functions/jhbf-results/index.ts"), "utf8");
 
 test("admin manager loads the semi-automatic JHBF result module", () => {
   assert.match(indexSource, /js\/jhbf-result-import\.js/);
@@ -34,12 +35,28 @@ test("manager extensions load deterministically after app.js", () => {
 test("browser integration invokes only fixed Edge Function and audited RPCs", () => {
   assert.match(moduleSource, /functions\.invoke\("jhbf-results"/);
   assert.match(moduleSource, /kind: "representatives"/);
+  assert.match(moduleSource, /kind: "start_rounds"/);
   assert.match(moduleSource, /代表校を取得/);
   assert.match(moduleSource, /49代表校へ反映/);
   assert.match(moduleSource, /get_koshien_external_import_context/);
   assert.match(moduleSource, /save_koshien_external_team_alias/);
   assert.match(moduleSource, /record_koshien_external_imports/);
+  assert.match(moduleSource, /updateStartRounds/);
+  assert.match(moduleSource, /loadKoshienOnlineState\(\{ force: true \}\)/);
   assert.doesNotMatch(moduleSource, /fetch\s*\(\s*["'`]https:\/\/www\.jhbf/);
+});
+
+test("admin confirms start rounds only after reviewing a complete safe preview", () => {
+  assert.match(moduleSource, /組み合わせから候補取得/);
+  assert.match(moduleSource, /1回戦スタート候補/);
+  assert.match(moduleSource, /2回戦スタート候補/);
+  assert.match(moduleSource, /未一致: 0校/);
+  assert.match(moduleSource, /重複: 0校/);
+  assert.match(moduleSource, /取得日時/);
+  assert.match(moduleSource, /data-jhbf-apply-start-rounds/);
+  assert.match(moduleSource, /!startRoundPreview\.valid/);
+  assert.match(moduleSource, /invalidPredictionCount/);
+  assert.match(edgeSource, /request\.kind === "start_rounds"[\s\S]*?get_koshien_external_import_context/);
 });
 
 test("tournament cards expose a shortcut to the reused official data panel", () => {

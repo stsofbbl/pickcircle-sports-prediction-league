@@ -219,4 +219,79 @@ export function parseJhbfRepresentativeTeamsHtml(html, options = {}) {
   return { rows, warnings, textSample: rows.length ? "" : text.slice(0, 300) };
 }
 
+function tournamentTeamFromRow(rowHtml) {
+  const cell = [...String(rowHtml || "").matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)]
+    .find((match) => /(?:^|\s)teamName(?:\s|$)/i.test(String(match[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || ""));
+  if (!cell) return null;
+  const label = normalizeSchoolName(htmlToStructuredText(cell[2]));
+  const match = label.match(/^(.+?)\s*[（(]([^()（）]+)[）)]$/u);
+  if (!match) return null;
+  return {
+    schoolName: normalizeSchoolName(match[1]),
+    districtName: normalizeSchoolName(match[2]),
+  };
+}
+
+export function parseJhbfStartRoundsHtml(html, options = {}) {
+  const {
+    sourceUrl = "",
+    fetchedAt = new Date().toISOString(),
+    competitionType = "summer",
+    year,
+  } = options;
+  if (!Number.isInteger(Number(year))) throw new Error("year is required");
+  if (competitionType !== "summer") throw new Error("start rounds are only supported for summer");
+
+  const tournamentTables = [...String(html || "").matchAll(/<table\b([^>]*)>([\s\S]*?)<\/table>/gi)]
+    .filter((match) => /(?:^|\s)tournamentTable(?:\s|$)/i.test(
+      String(match[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || "",
+    ));
+  if (!tournamentTables.length) {
+    return { rows: [], warnings: ["tournament_table_not_found"], textSample: htmlToStructuredText(html).slice(0, 300) };
+  }
+
+  const tableRows = tournamentTables.flatMap((table) => (
+    [...table[2].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)]
+  )).map((match) => {
+    const rowHtml = match[1];
+    const cells = [...rowHtml.matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)];
+    const gameCellIndex = cells.findIndex((cell) => /(?:^|\s)gameDay(?:\s|$)/i.test(
+      String(cell[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || "",
+    ));
+    return {
+      team: tournamentTeamFromRow(rowHtml),
+      gameCellIndex,
+      gameLabel: gameCellIndex >= 0 ? normalizeSchoolName(htmlToStructuredText(cells[gameCellIndex][2])) : "",
+    };
+  });
+
+  const rows = [];
+  let firstRoundGameCount = 0;
+  tableRows.forEach((row, index) => {
+    if (row.gameCellIndex !== 1 || !/^第\d+日\s*第\d+試合$/u.test(row.gameLabel)) return;
+    const teamA = tableRows.slice(0, index).reverse().find((candidate) => candidate.team)?.team;
+    const teamB = tableRows.slice(index + 1).find((candidate) => candidate.team)?.team;
+    if (!teamA || !teamB) return;
+    firstRoundGameCount += 1;
+    [teamA, teamB].forEach((team) => rows.push({
+      source: "jhbf",
+      sourceUrl,
+      fetchedAt,
+      competitionYear: Number(year),
+      competitionType,
+      roundKey: "R1",
+      gameLabel: row.gameLabel,
+      ...team,
+    }));
+  });
+
+  const warnings = [];
+  const stableKeys = rows.map((row) => `${normalizeSchoolName(row.districtName)}:${normalizeSchoolName(row.schoolName)}`);
+  const duplicateKeys = [...new Set(stableKeys.filter((key, index) => stableKeys.indexOf(key) !== index))];
+  if (firstRoundGameCount !== 17) warnings.push(`first_round_game_count:${firstRoundGameCount}`);
+  if (rows.length !== 34) warnings.push(`first_round_team_count:${rows.length}`);
+  duplicateKeys.forEach((key) => warnings.push(`duplicate_first_round_team:${key}`));
+  return { rows, warnings, textSample: warnings.length ? htmlToStructuredText(tournamentTables.map((table) => table[0]).join("\n")).slice(0, 300) : "" };
+}
+
 export { normalizeSchoolName, roundKeyFor };

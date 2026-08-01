@@ -137,3 +137,90 @@ test("representative preview deduplicates identical stable keys but reports conf
   assert.equal(conflict.valid, false);
   assert.deepEqual(conflict.duplicateDistricts, ["北北海道"]);
 });
+
+function startRoundInputs() {
+  const teams = Array.from({ length: 49 }, (_, index) => `School ${index + 1}`);
+  const teamMeta = Object.fromEntries(teams.map((team, index) => [team, {
+    representativeKey: `district-${index + 1}:school-${index + 1}`,
+  }]));
+  const sourceRows = teams.slice(0, 34).map((team, index) => ({
+    districtName: `district-${index + 1}`,
+    schoolName: `school-${index + 1}`,
+  }));
+  return { teams, teamMeta, sourceRows };
+}
+
+test("start-round preview resolves representative keys first and derives the remaining 15 schools", () => {
+  const { teams, teamMeta, sourceRows } = startRoundInputs();
+  const preview = api.buildStartRoundPreview(sourceRows, teams, teamMeta);
+
+  assert.equal(preview.valid, true);
+  assert.equal(preview.firstRoundTeams.length, 34);
+  assert.equal(preview.secondRoundTeams.length, 15);
+  assert.deepEqual(preview.unmatchedRows, []);
+  assert.deepEqual(preview.duplicateTeams, []);
+  assert.deepEqual(preview.rows.map((row) => row.startRound), [
+    ...Array(34).fill(1),
+    ...Array(15).fill(2),
+  ]);
+});
+
+test("start-round preview blocks incomplete, unmatched, duplicate, and 34/15-invalid candidates", () => {
+  const { teams, teamMeta, sourceRows } = startRoundInputs();
+  assert.equal(api.buildStartRoundPreview(sourceRows, teams.slice(0, 48), teamMeta).valid, false);
+  assert.equal(api.buildStartRoundPreview(
+    [{ districtName: "unknown", schoolName: "unknown" }, ...sourceRows.slice(1)],
+    teams,
+    teamMeta,
+  ).valid, false);
+  assert.equal(api.buildStartRoundPreview([...sourceRows.slice(0, 33), sourceRows[0]], teams, teamMeta).valid, false);
+  assert.equal(api.buildStartRoundPreview(sourceRows.slice(0, 33), teams, teamMeta).valid, false);
+  assert.equal(api.buildStartRoundPreview(sourceRows, teams, teamMeta, {}, ["tournament_table_changed"]).valid, false);
+});
+
+test("start-round preview uses exact school names and saved aliases only as safe fallbacks", () => {
+  const { teams, teamMeta, sourceRows } = startRoundInputs();
+  delete teamMeta[teams[0]].representativeKey;
+  teamMeta[teams[0]].representativeKey = "district-1:school-1";
+  sourceRows[0] = { districtName: "different", schoolName: teams[0] };
+  assert.equal(api.buildStartRoundPreview(sourceRows, teams, teamMeta).firstRoundTeams[0], teams[0]);
+
+  sourceRows[0] = { districtName: "different", schoolName: "Saved Alias" };
+  const context = {
+    teams: [{ teamId: "team-1", name: teams[0] }],
+    aliases: [{ normalizedExternalName: "SavedAlias", teamId: "team-1" }],
+  };
+  assert.equal(api.buildStartRoundPreview(sourceRows, teams, teamMeta, context).firstRoundTeams[0], teams[0]);
+});
+
+test("start-round confirmation follows the RPC deadline condition", () => {
+  const now = Date.parse("2026-08-02T00:00:00Z");
+  assert.equal(api.canConfirmStartRounds({ status: "open", deadline: "2026-08-04T14:59:00Z" }, now), true);
+  assert.equal(api.canConfirmStartRounds({ status: "open", deadline: "2026-08-01T14:59:00Z" }, now), false);
+  assert.equal(api.canConfirmStartRounds({ status: "finalized", deadline: "2026-08-04T14:59:00Z" }, now), false);
+});
+
+test("official start-round confirmation reloads online state after the existing RPC succeeds", async () => {
+  const calls = [];
+  let confirmed = false;
+  const saved = await api.confirmStartRoundsOnline({
+    eventId: "event-id",
+    rows: Array.from({ length: 49 }, (_, index) => ({
+      representativeKey: `district-${index + 1}:school-${index + 1}`,
+      startRound: index < 34 ? 1 : 2,
+    })),
+    async updateStartRounds(args) {
+      calls.push(["update", args.eventId, args.rows.length]);
+      return { count: 49, startRoundsConfirmed: true, invalidPredictionCount: 2 };
+    },
+    async reloadOnline() {
+      calls.push(["reload"]);
+      confirmed = true;
+      return { ok: true };
+    },
+    isConfirmed: () => confirmed,
+  });
+
+  assert.deepEqual(calls, [["update", "event-id", 49], ["reload"]]);
+  assert.equal(saved.invalidPredictionCount, 2);
+});

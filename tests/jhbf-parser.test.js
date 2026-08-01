@@ -111,3 +111,43 @@ test("deduplicates identical representative rows by district and school", async 
   ]);
   assert.deepEqual(result.warnings, ["duplicate_representative_row:北北海道:白樺学園"]);
 });
+
+function startRoundTournamentHtml(gameCount = 17) {
+  return Array.from({ length: gameCount }, (_, index) => `
+    <table class="tournamentTable">
+      <tr><td class="teamName">第${index + 1}高校A (地区${index + 1}A)</td><td></td></tr>
+      <tr><td>&nbsp;</td><td colspan="3" class="gameDay">第${index + 1}日 第1試合</td></tr>
+      <tr><td class="teamName">第${index + 1}高校B (地区${index + 1}B)</td><td></td></tr>
+      <tr><td></td><td></td><td></td><td colspan="3" class="gameDay">第${index + 7}日 第1試合</td></tr>
+    </table>
+  `).join("");
+}
+
+test("parses exactly 17 first-round games and 34 schools from the summer bracket", async () => {
+  const api = await parser();
+  const result = api.parseJhbfStartRoundsHtml(fixture("jhbf-2026-tournament-sanitized.html"), {
+    sourceUrl: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
+    competitionType: "summer",
+    year: 2026,
+  });
+
+  assert.equal(result.rows.length, 34);
+  assert.equal(new Set(result.rows.map((row) => row.gameLabel)).size, 17);
+  assert.deepEqual(result.rows.slice(0, 2).map((row) => [row.schoolName, row.districtName]), [
+    ["札幌日大", "南北海道"],
+    ["仙台育英", "宮城"],
+  ]);
+  assert.deepEqual(result.rows.slice(-2).map((row) => row.schoolName), ["横浜", "沖縄尚学"]);
+  assert.deepEqual(result.warnings, []);
+});
+
+test("reports an abnormal bracket instead of treating it as complete", async () => {
+  const api = await parser();
+  const result = api.parseJhbfStartRoundsHtml(startRoundTournamentHtml(16), {
+    competitionType: "summer",
+    year: 2026,
+  });
+
+  assert.equal(result.rows.length, 32);
+  assert.deepEqual(result.warnings, ["first_round_game_count:16", "first_round_team_count:32"]);
+});
