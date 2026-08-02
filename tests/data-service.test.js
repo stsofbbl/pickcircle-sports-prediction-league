@@ -313,6 +313,23 @@ test("the four-submitted-player RPC error is localized before reaching the UI", 
   );
 });
 
+test("profile update writes the signed-in user's formal display name without creating another identity", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+
+  const result = await service.auth.updateProfile({ displayName: "新しい表示名" });
+
+  assert.equal(result.ok, true);
+  const profileUpdate = supabase.calls.find((call) => call.table === "profiles" && call.operation === "update");
+  const playerUpdate = supabase.calls.find((call) => call.table === "players" && call.operation === "update");
+  assert.deepEqual(JSON.parse(JSON.stringify(profileUpdate.payload)), { display_name: "新しい表示名" });
+  assert.deepEqual(JSON.parse(JSON.stringify(playerUpdate.payload)), { display_name: "新しい表示名" });
+  assert.ok(supabase.queries.some((query) => query.table === "profiles" && query.filters.id === "user-id"));
+  assert.ok(supabase.queries.some((query) => query.table === "players" && query.filters.profile_id === "user-id"));
+  assert.equal(supabase.calls.some((call) => call.operation === "insert" || call.operation === "upsert"), false);
+  assert.equal(supabase.calls.some((call) => ["league_members", "predictions", "scores"].includes(call.table)), false);
+});
+
 test("score payload preparation failure stops before the result transaction", async () => {
   const supabase = createSupabaseMock({ playersError: { code: "42501", message: "players RLS denied" } });
   const service = loadDataService(supabase.client);

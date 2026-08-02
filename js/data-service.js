@@ -539,6 +539,27 @@
     return { ok: true, user: data.user || null };
   }
 
+  async function updateProfile({ displayName } = {}) {
+    const normalizedDisplayName = String(displayName || "").trim();
+    if (!normalizedDisplayName) throw new Error("表示名を入力してください。");
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user?.id) throw new Error("Supabaseログインを確認できませんでした。");
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ display_name: normalizedDisplayName })
+      .eq("id", user.id)
+      .select("display_name")
+      .single();
+    if (error) throw error;
+    const { error: playerError } = await supabase
+      .from("players")
+      .update({ display_name: normalizedDisplayName })
+      .eq("profile_id", user.id);
+    if (playerError) throw playerError;
+    return { ok: true, profile: data || { display_name: normalizedDisplayName } };
+  }
+
   async function onAuthStateChange(callback) {
     const supabase = await supabaseClient();
     if (!supabase) return null;
@@ -1242,6 +1263,7 @@
       signIn,
       sendPasswordResetEmail,
       updatePassword,
+      updateProfile,
       onAuthStateChange,
       signOut,
       deleteAccount,

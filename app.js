@@ -454,7 +454,7 @@ function renderAuthState() {
     if (!authRecoveryMode && !isSupabaseAuthEnabled()) setAuthMode(loadAuthUsers().length ? "login" : "register");
     return;
   }
-  ensureParticipantForAuth(user);
+  if (!isSupabaseAuthEnabled()) ensureParticipantForAuth(user);
   renderAccountSettings(user);
 }
 
@@ -470,7 +470,6 @@ function applyOnlineAuthUser(user) {
     loadedKoshienOnlineEventId = "";
     lastKoshienOnlineLoadUserId = "";
   }
-  if (onlineAuthUser) ensureParticipantForAuth(onlineAuthUser);
 }
 
 async function bootstrapSupabaseAuth() {
@@ -1346,7 +1345,7 @@ function saveUpdatedAuthUser(nextUser) {
   return true;
 }
 
-function handleAccountSave() {
+async function handleAccountSave() {
   const user = currentAuthUser();
   if (!user) return;
   const nextDisplayName = (els.accountDisplayNameInput?.value || "").trim();
@@ -1355,6 +1354,29 @@ function handleAccountSave() {
   const rememberDefault = Boolean(els.accountRememberDefault?.checked);
   if (!nextDisplayName) {
     setAccountMessage("表示名を入力してください。");
+    return;
+  }
+  if (isSupabaseAuthEnabled()) {
+    if (!window.YosoDataService?.auth?.updateProfile) {
+      setAccountMessage("プロフィール更新機能を利用できません。");
+      return;
+    }
+    if (els.accountSaveButton) els.accountSaveButton.disabled = true;
+    setAccountMessage("アカウント情報を保存しています…");
+    try {
+      await window.YosoDataService.auth.updateProfile({ displayName: nextDisplayName });
+      applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
+      await loadKoshienOnlineState({ force: true });
+      await refreshClubPathwayData({ renderAfter: false });
+      renderAuthState();
+      render();
+      setAccountMessage("アカウント情報を保存しました。");
+    } catch (error) {
+      console.warn("Supabase profile update failed", error);
+      setAccountMessage(error?.message || "アカウント情報を保存できませんでした。");
+    } finally {
+      if (els.accountSaveButton) els.accountSaveButton.disabled = false;
+    }
     return;
   }
   const users = loadAuthUsers();
@@ -2526,8 +2548,11 @@ function normalizeFixedArray(value, length) {
 function render() {
   updateEventStatuses();
   if (els.leagueName) {
+    const onlineClubMode = isSupabaseAuthEnabled() && Boolean(currentAuthUser());
     els.leagueName.value = state.leagueName;
-    els.leagueName.disabled = isSupabaseAuthEnabled() && Boolean(currentAuthUser());
+    els.leagueName.disabled = onlineClubMode;
+    const legacyLeagueNameField = els.leagueName.closest?.(".field");
+    if (legacyLeagueNameField) legacyLeagueNameField.hidden = onlineClubMode;
   }
   renderConnectionSettings();
   renderClubPathways();
