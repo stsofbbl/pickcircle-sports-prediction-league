@@ -9,19 +9,19 @@
   "theme_color": "#050507",
   "icons": [
     {
-      "src": "./assets/yoso-app-icon-192.png",
+      "src": "./assets/yoso-app-icon-192.png?v=matte-20260802",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "./assets/yoso-app-icon-512.png",
+      "src": "./assets/yoso-app-icon-512.png?v=matte-20260802",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "./assets/yoso-app-icon.png",
+      "src": "./assets/yoso-app-icon.png?v=matte-20260802",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"
