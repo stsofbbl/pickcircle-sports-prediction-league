@@ -178,6 +178,14 @@
       released = true;
       if (timeoutId) window.clearTimeout(timeoutId);
       stateObserver?.disconnect();
+
+      if (!authScreen.hidden) {
+        const loginButton = document.querySelector('[data-auth-mode="login"]');
+        loginButton?.click();
+        authScreen.dataset.mode = "login";
+        syncRegisterFields();
+      }
+
       authScreen.style.visibility = "";
       appShell.style.visibility = "";
       overlay.remove();
