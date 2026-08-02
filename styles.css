@@ -3696,6 +3696,18 @@ body[data-theme="day"] .preset-description {
   width: min(180px, 100%);
 }
 
+.field > .koshien-captain-label {
+  color: var(--soap-pink);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+.create-submit-row [data-koshien-phase1-save] {
+  width: min(220px, 100%);
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
 body[data-theme="day"] .event-create-form {
   background: rgba(255, 255, 255, 0.72);
 }

@@ -5029,7 +5029,7 @@ function participantKoshienBlock(name, teams) {
         `).join("")}
       </div>
       <div class="form-grid">
-        <label class="field"><span>キャプテン校</span><select data-koshien-captain="${escapeAttr(name)}">${koshienGroupedOptionList(pickedTeams, prediction.captain)}</select></label>
+        <label class="field"><span class="koshien-captain-label">キャプテン校</span><select data-koshien-captain="${escapeAttr(name)}">${koshienGroupedOptionList(pickedTeams, prediction.captain)}</select></label>
       </div>
       <div class="create-submit-row">
         <button class="primary-button" type="button" data-koshien-phase1-save="${escapeAttr(name)}">フェーズ1予想を保存</button>
