@@ -130,6 +130,89 @@
     return data.user || null;
   }
 
+  function installAuthBootGuard() {
+    const authScreen = document.querySelector("#authScreen");
+    const appShell = document.querySelector(".app-shell");
+    if (!authScreen || !appShell) return;
+
+    const registerFields = [...document.querySelectorAll(".auth-register-only")];
+    const syncRegisterFields = () => {
+      const isRegister = authScreen.dataset.mode === "register";
+      registerFields.forEach((field) => {
+        field.hidden = !isRegister;
+      });
+    };
+    syncRegisterFields();
+
+    const modeObserver = new MutationObserver(syncRegisterFields);
+    modeObserver.observe(authScreen, { attributes: true, attributeFilter: ["data-mode"] });
+
+    const overlay = document.createElement("div");
+    overlay.id = "authBootOverlay";
+    overlay.setAttribute("role", "status");
+    overlay.setAttribute("aria-live", "polite");
+    overlay.textContent = "YOSOを起動しています…";
+    Object.assign(overlay.style, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "9999",
+      display: "grid",
+      placeItems: "center",
+      padding: "24px",
+      background: "#050507",
+      color: "#f3a7bd",
+      font: "600 14px/1.5 system-ui, -apple-system, sans-serif",
+      letterSpacing: "0.04em",
+    });
+
+    authScreen.style.visibility = "hidden";
+    appShell.style.visibility = "hidden";
+    document.body.append(overlay);
+
+    let released = false;
+    let timeoutId = 0;
+    let stateObserver = null;
+
+    const release = (message = "") => {
+      if (released) return;
+      released = true;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      stateObserver?.disconnect();
+      authScreen.style.visibility = "";
+      appShell.style.visibility = "";
+      overlay.remove();
+      if (message) {
+        const messageNode = document.querySelector("#authMessage");
+        if (messageNode && !messageNode.textContent) messageNode.textContent = message;
+      }
+    };
+
+    stateObserver = new MutationObserver(() => {
+      const accountChip = document.querySelector("#accountChip");
+      if (authScreen.hidden || (accountChip && !accountChip.hidden)) release();
+    });
+    stateObserver.observe(authScreen, { attributes: true, attributeFilter: ["hidden"] });
+    const accountChip = document.querySelector("#accountChip");
+    if (accountChip) stateObserver.observe(accountChip, { attributes: true, attributeFilter: ["hidden"] });
+
+    timeoutId = window.setTimeout(() => {
+      release("セッション確認に時間がかかりました。必要に応じて再度ログインしてください。");
+    }, 12000);
+
+    Promise.resolve()
+      .then(async () => {
+        if (!hasConfig()) {
+          release();
+          return;
+        }
+        const user = await sessionUser();
+        if (!user) release();
+      })
+      .catch(() => {
+        release("セッションを確認できませんでした。再度ログインしてください。");
+      });
+  }
+
   window.YosoSupabase = {
     config,
     hasConfig,
@@ -143,4 +226,5 @@
     const current = config();
     saveConfig({ inviteCode: current.inviteCode || defaultLeagueId() });
   }
+  installAuthBootGuard();
 })();
