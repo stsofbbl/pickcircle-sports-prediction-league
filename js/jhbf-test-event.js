@@ -29,6 +29,7 @@
     message: "",
     messageKind: "pending",
   };
+  let localEventDeletePersistenceInstalled = false;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -48,6 +49,27 @@
     if (typeof canCurrentUserManageLeague === "function") return canCurrentUserManageLeague();
     if (typeof isCurrentUserAdmin === "function") return isCurrentUserAdmin();
     return false;
+  }
+
+  function installLocalEventDeletePersistence() {
+    if (localEventDeletePersistenceInstalled || typeof document === "undefined") return;
+    localEventDeletePersistenceInstalled = true;
+    document.addEventListener("click", (event) => {
+      const deleteButton = event.target?.closest?.("[data-event-delete]");
+      const eventId = String(deleteButton?.dataset?.eventId || "");
+      if (!eventId || typeof state === "undefined" || !Array.isArray(state.events)) return;
+      const target = state.events.find((candidate) => String(candidate?.id || "") === eventId);
+      if (!target) return;
+      const templateId = typeof baseTemplateId === "function"
+        ? baseTemplateId(target.templateId)
+        : String(target.templateId || "");
+      if (templateId === "koshien") return;
+      queueMicrotask(() => {
+        const wasDeleted = Array.isArray(state.events)
+          && !state.events.some((candidate) => String(candidate?.id || "") === eventId);
+        if (wasDeleted && typeof saveLocalStateOnly === "function") saveLocalStateOnly();
+      });
+    }, { capture: true });
   }
 
   function messageMarkup() {
@@ -202,6 +224,7 @@
   }
 
   function installBrowser() {
+    installLocalEventDeletePersistence();
     if (typeof window !== "undefined") window.YosoJhbfResults?.installBrowser?.();
     if (typeof renderKoshienManagerPanel !== "function" || typeof bindActiveEventManagerInputs !== "function") return false;
     const originalPanel = renderKoshienManagerPanel;
