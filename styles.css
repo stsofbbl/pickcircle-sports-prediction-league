@@ -151,13 +151,6 @@ body.auth-locked .app-shell {
   box-shadow: var(--shadow);
 }
 
-.auth-logo {
-  display: block;
-  width: 122px;
-  height: auto;
-  margin-bottom: 20px;
-}
-
 .auth-copy h1 {
   margin-bottom: 8px;
   font-size: 30px;
