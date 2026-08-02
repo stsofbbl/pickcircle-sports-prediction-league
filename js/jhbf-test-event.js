@@ -31,7 +31,7 @@
     messageKind: "pending",
   };
   let localEventDeletePersistenceInstalled = false;
-  let defaultStateOverrideInstalled = false;
+  let onlineEventMergeDedupeInstalled = false;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -47,62 +47,30 @@
       && event?.config?.testHarness?.kind === TEST_KIND;
   }
 
-  function isLegacyWorldCupSample(event) {
-    const templateId = typeof baseTemplateId === "function"
+  function eventBaseTemplateId(event) {
+    return typeof baseTemplateId === "function"
       ? baseTemplateId(event?.templateId)
       : String(event?.templateId || "");
-    return templateId === "worldCup" && event?.name === LEGACY_WORLD_CUP_EVENT_NAME;
   }
 
-  function createKoshienFallbackEvent(participants) {
-    if (typeof createEvent !== "function") return null;
-    const name = typeof templates !== "undefined"
-      ? templates?.koshien?.eventName || "夏の甲子園2026 YOSO"
-      : "夏の甲子園2026 YOSO";
-    return createEvent("koshien", Array.isArray(participants) ? participants : [], { name });
+  function isLegacyWorldCupSample(event) {
+    return eventBaseTemplateId(event) === "worldCup"
+      && event?.name === LEGACY_WORLD_CUP_EVENT_NAME;
   }
 
-  function normalizeWithoutLegacyWorldCup(nextState) {
-    if (!nextState || typeof nextState !== "object") return nextState;
-    const events = Array.isArray(nextState.events)
-      ? nextState.events.filter((event) => !isLegacyWorldCupSample(event))
-      : [];
-    if (!events.length) {
-      const fallback = createKoshienFallbackEvent(nextState.participants);
-      if (fallback) events.push(fallback);
-    }
-    if (!events.length) return nextState;
-    const active = events.find((event) => String(event?.id || "") === String(nextState.activeEventId || ""))
-      || events.find((event) => (typeof baseTemplateId === "function" ? baseTemplateId(event?.templateId) : event?.templateId) === "koshien")
-      || events[0];
-    return {
-      ...nextState,
-      events,
-      event: active,
-      activeEventId: active.id,
-      activeTemplate: active.templateId,
+  function installOnlineEventMergeDedupe() {
+    if (onlineEventMergeDedupeInstalled || typeof mergeEventList !== "function") return;
+    onlineEventMergeDedupeInstalled = true;
+    const originalMergeEventList = mergeEventList;
+    mergeEventList = function mergeEventListWithoutLocalDuplicates(events, nextEvent) {
+      const nextIsKoshien = eventBaseTemplateId(nextEvent) === "koshien";
+      const filtered = (events || []).filter((event) => {
+        if (isLegacyWorldCupSample(event)) return false;
+        if (!nextIsKoshien || eventBaseTemplateId(event) !== "koshien") return true;
+        return String(event?.name || "") !== String(nextEvent?.name || "");
+      });
+      return originalMergeEventList(filtered, nextEvent);
     };
-  }
-
-  function installDefaultStateOverride() {
-    if (defaultStateOverrideInstalled || typeof createDefaultState !== "function") return;
-    defaultStateOverrideInstalled = true;
-    const originalCreateDefaultState = createDefaultState;
-    createDefaultState = function createDefaultStateWithoutLegacyWorldCup() {
-      return normalizeWithoutLegacyWorldCup(originalCreateDefaultState());
-    };
-  }
-
-  function removeLegacyWorldCupSample() {
-    if (typeof state === "undefined" || !Array.isArray(state.events)) return false;
-    const normalized = normalizeWithoutLegacyWorldCup(state);
-    const changed = normalized.events.length !== state.events.length
-      || normalized.events.some((event, index) => event !== state.events[index]);
-    if (!changed) return false;
-    state = normalized;
-    if (typeof saveLocalStateOnly === "function") saveLocalStateOnly();
-    else if (typeof persist === "function") persist();
-    return true;
   }
 
   function isAdminViewer() {
@@ -120,10 +88,7 @@
       if (!eventId || typeof state === "undefined" || !Array.isArray(state.events)) return;
       const target = state.events.find((candidate) => String(candidate?.id || "") === eventId);
       if (!target) return;
-      const templateId = typeof baseTemplateId === "function"
-        ? baseTemplateId(target.templateId)
-        : String(target.templateId || "");
-      if (templateId === "koshien") return;
+      if (eventBaseTemplateId(target) === "koshien") return;
       queueMicrotask(() => {
         const wasDeleted = Array.isArray(state.events)
           && !state.events.some((candidate) => String(candidate?.id || "") === eventId);
@@ -284,11 +249,9 @@
   }
 
   function installBrowser() {
-    installDefaultStateOverride();
-    const removedLegacySample = removeLegacyWorldCupSample();
+    installOnlineEventMergeDedupe();
     installLocalEventDeletePersistence();
     if (typeof window !== "undefined") window.YosoJhbfResults?.installBrowser?.();
-    if (removedLegacySample && typeof render === "function") render();
     if (typeof renderKoshienManagerPanel !== "function" || typeof bindActiveEventManagerInputs !== "function") return false;
     const originalPanel = renderKoshienManagerPanel;
     const originalBind = bindActiveEventManagerInputs;
