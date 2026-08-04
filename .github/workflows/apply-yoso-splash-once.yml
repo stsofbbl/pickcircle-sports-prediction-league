@@ -1,0 +1,41 @@
+name: Apply YOSO splash once
+
+on:
+  push:
+    branches:
+      - tmp/splash-implementation-staging
+    paths:
+      - .github/workflows/apply-yoso-splash-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp/splash-implementation-staging
+          fetch-depth: 0
+
+      - name: Apply splash patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply .splash/yoso-splash.patch
+          test -f assets/yoso-koshien-splash-1206x2622.jpg
+          grep -q 'id="appStartupSplash"' index.html
+          grep -q 'apple-touch-startup-image' index.html
+          git diff --check
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .splash/yoso-splash.patch .github/workflows/apply-yoso-splash-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html assets/yoso-koshien-splash-1206x2622.jpg
+          git commit -m "Add Koshien startup splash"
+          git push origin HEAD:tmp/splash-implementation-staging

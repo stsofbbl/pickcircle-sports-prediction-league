@@ -1,0 +1,98 @@
+diff --git a/index.html b/index.html
+--- a/index.html
++++ b/index.html
+@@
+     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+     <link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon-matte-2026.png" />
++    <link
++      rel="apple-touch-startup-image"
++      href="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
++      media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
++    />
++    <link
++      rel="apple-touch-startup-image"
++      href="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
++    />
+     <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png?v=matte-20260802" />
+     <link rel="manifest" href="./manifest.json?v=matte-20260802" />
++    <link
++      rel="preload"
++      as="image"
++      href="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
++      type="image/jpeg"
++    />
++    <style>
++      #appStartupSplash {
++        position: fixed;
++        inset: 0;
++        z-index: 2147483647;
++        display: grid;
++        width: 100%;
++        min-height: 100vh;
++        min-height: 100dvh;
++        place-items: center;
++        overflow: hidden;
++        background: #050507;
++        opacity: 1;
++        transition: opacity 220ms ease;
++      }
++
++      #appStartupSplash::before {
++        content: "";
++        position: absolute;
++        inset: -8%;
++        background:
++          linear-gradient(rgba(5, 5, 7, 0.38), rgba(5, 5, 7, 0.38)),
++          url("./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1") center / cover no-repeat;
++        filter: blur(24px) brightness(0.72);
++        transform: scale(1.08);
++      }
++
++      #appStartupSplash > img {
++        position: relative;
++        z-index: 1;
++        display: block;
++        width: 100%;
++        height: 100%;
++        object-fit: contain;
++      }
++
++      #appStartupSplash.is-hidden {
++        pointer-events: none;
++        opacity: 0;
++      }
++
++      @media (prefers-reduced-motion: reduce) {
++        #appStartupSplash {
++          transition: none;
++        }
++      }
++    </style>
++    <script>
++      (() => {
++        let startupSplashDismissed = false;
++
++        const dismissStartupSplash = () => {
++          if (startupSplashDismissed) return;
++          const splash = document.querySelector("#appStartupSplash");
++          if (!splash) return;
++          startupSplashDismissed = true;
++          splash.classList.add("is-hidden");
++          window.setTimeout(() => splash.remove(), 260);
++        };
++
++        window.addEventListener(
++          "load",
++          () => window.setTimeout(dismissStartupSplash, 240),
++          { once: true },
++        );
++        window.setTimeout(dismissStartupSplash, 7000);
++      })();
++    </script>
+     <link rel="stylesheet" href="./styles.css?v=20260802-2" />
+   </head>
+   <body data-theme="dark">
++    <div id="appStartupSplash" aria-hidden="true">
++      <img src="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1" alt="" />
++    </div>
+     <section class="auth-screen" id="authScreen" aria-label="ログイン">
