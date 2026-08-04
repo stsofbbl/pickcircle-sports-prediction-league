@@ -1,0 +1,49 @@
+name: Repair YOSO splash image once
+
+on:
+  push:
+    branches:
+      - codex/vercel-release-candidate
+    paths:
+      - .github/workflows/fix-splash-image-once.yml
+      - .splash/**
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/vercel-release-candidate
+          fetch-depth: 0
+
+      - name: Rebuild and verify splash image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .splash/chunk-*.b64 | tr -d '\n\r ' | base64 --decode > assets/yoso-koshien-splash-1206x2622.jpg
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('assets/yoso-koshien-splash-1206x2622.jpg')
+          data = path.read_bytes()
+          assert len(data) == 18310, len(data)
+          assert data[:2] == b'\xff\xd8'
+          assert data[-2:] == b'\xff\xd9'
+          PY
+          file assets/yoso-koshien-splash-1206x2622.jpg | grep -q '402x874'
+          sed -i 's/20260805-1/20260805-2/g' index.html
+          git diff --check
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -r .splash .github/workflows/fix-splash-image-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html assets/yoso-koshien-splash-1206x2622.jpg
+          git commit -m 'Replace damaged splash image'
+          git push origin HEAD:codex/vercel-release-candidate
