@@ -9,26 +9,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>YOSO</title>
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/apple-touch-icon-matte-2026.png" />
-    <link
-      rel="apple-touch-startup-image"
-      href="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
-      media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
-    />
-    <link
-      rel="apple-touch-startup-image"
-      href="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
-    />
-    <link rel="manifest" href="./manifest.json?v=splash-20260805-1" />
-    <link
-      rel="preload"
-      as="image"
-      href="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
-      type="image/jpeg"
-    />
+    <link rel="manifest" href="./manifest.json?v=splash-20260805-2" />
     <style>
       :root {
         color-scheme: dark;
         background: #050507;
+        --startup-image: none;
       }
 
       * {
@@ -48,7 +34,6 @@
         position: fixed;
         inset: 0;
         display: grid;
-        width: 100%;
         min-height: 100vh;
         min-height: 100dvh;
         place-items: center;
@@ -61,8 +46,8 @@
         position: absolute;
         inset: -8%;
         background:
-          linear-gradient(rgba(5, 5, 7, 0.38), rgba(5, 5, 7, 0.38)),
-          url("./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1") center / cover no-repeat;
+          linear-gradient(rgba(5, 5, 7, 0.42), rgba(5, 5, 7, 0.42)),
+          var(--startup-image) center / cover no-repeat;
         filter: blur(24px) brightness(0.72);
         transform: scale(1.08);
       }
@@ -74,16 +59,36 @@
         width: 100%;
         height: 100%;
         object-fit: contain;
+        opacity: 0;
+        transition: opacity 120ms ease;
+      }
+
+      .startup-splash img.is-ready {
+        opacity: 1;
+      }
+
+      .startup-status {
+        position: relative;
+        z-index: 2;
+        color: #f2a5bd;
+        font: 700 17px/1.4 system-ui, -apple-system, sans-serif;
+      }
+
+      .startup-splash img.is-ready + .startup-status {
+        display: none;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .startup-splash img {
+          transition: none;
+        }
       }
     </style>
   </head>
   <body>
     <main class="startup-splash" aria-label="YOSOを起動しています">
-      <img
-        id="startupPoster"
-        src="./assets/yoso-koshien-splash-1206x2622.jpg?v=20260805-1"
-        alt="YOSO 夏の甲子園2026 予想王決定戦"
-      />
+      <img id="startupPoster" alt="YOSO 夏の甲子園2026 予想王決定戦" />
+      <span class="startup-status">YOSOを起動しています…</span>
     </main>
     <script>
       (() => {
@@ -91,23 +96,42 @@
         const target = new URL("./app.html", window.location.href);
         target.search = window.location.search;
         target.hash = window.location.hash || "#home";
+        const chunkUrls = [
+          "./assets/splash/chunk-00.b64?v=20260805-2",
+          "./assets/splash/chunk-01.b64?v=20260805-2",
+          "./assets/splash/chunk-02.b64?v=20260805-2",
+          "./assets/splash/chunk-03.b64?v=20260805-2",
+          "./assets/splash/chunk-04.b64?v=20260805-2",
+        ];
         let completed = false;
 
         const openApp = () => {
           if (completed) return;
           completed = true;
-          const remaining = Math.max(0, 420 - (performance.now() - startedAt));
+          const remaining = Math.max(0, 850 - (performance.now() - startedAt));
           window.setTimeout(() => window.location.replace(target.href), remaining);
         };
 
         const image = document.querySelector("#startupPoster");
-        const imageReady = image?.decode ? image.decode().catch(() => undefined) : Promise.resolve();
+        const imageReady = Promise.all(
+          chunkUrls.map((url) => fetch(url, { cache: "force-cache" }).then((response) => {
+            if (!response.ok) throw new Error(`Splash chunk failed: ${response.status}`);
+            return response.text();
+          })),
+        ).then((chunks) => {
+          const dataUri = `data:image/jpeg;base64,${chunks.join("").replace(/\s+/g, "")}`;
+          document.documentElement.style.setProperty("--startup-image", `url("${dataUri}")`);
+          image.src = dataUri;
+          return image.decode ? image.decode() : Promise.resolve();
+        }).then(() => image.classList.add("is-ready"));
+
         const appReady = fetch(`${target.pathname}${target.search}`, {
           credentials: "same-origin",
+          cache: "no-cache",
         }).catch(() => undefined);
 
         Promise.allSettled([imageReady, appReady]).then(openApp);
-        window.setTimeout(openApp, 1800);
+        window.setTimeout(openApp, 2500);
       })();
     </script>
   </body>
