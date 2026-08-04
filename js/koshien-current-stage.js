@@ -6,33 +6,98 @@
   if (root) root.YosoKoshienCurrentStage = api;
 
   if (!root || typeof root.addEventListener !== "function") return;
-  root.addEventListener("load", () => {
-    if (typeof applyKoshienMatchFinishes !== "function") return;
-    applyKoshienMatchFinishes = function applyKoshienCurrentStageFinishes() {
-      normalizeKoshienEvent(state.event);
-      const matches = state.event.results.matches || [];
-      state.event.results.finishes = api.deriveCurrentStages({
-        teams: state.event.config.teams || [],
-        matches,
-        teamMeta: state.event.config.teamMeta || {},
-      });
 
-      const finalMatch = matches.find((match) => (
-        match.round === "F"
-        && match.status === "completed"
-        && match.winner_id
-        && match.loser_id
-      ));
-      if (finalMatch) {
-        state.event.results.finalScore = {
-          champion: finalMatch.winner_id,
-          runnerUp: finalMatch.loser_id,
-          championScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_a : finalMatch.score_b,
-          runnerUpScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_b : finalMatch.score_a,
-        };
+  let deadlineRefreshTimer = 0;
+  let deadlineLookupTimer = 0;
+  let deadlineLookupAttempts = 0;
+  let deadlineRefreshInFlight = false;
+
+  function activeKoshienDeadlineMs() {
+    if (typeof state !== "object" || !state?.event) return Number.NaN;
+    const event = state.event;
+    if (!String(event.templateId || "").includes("koshien")) return Number.NaN;
+    return Date.parse(event.deadline || "");
+  }
+
+  async function forceKoshienRefresh() {
+    if (deadlineRefreshInFlight || typeof loadKoshienOnlineState !== "function") return;
+    deadlineRefreshInFlight = true;
+    try {
+      await loadKoshienOnlineState({ force: true });
+    } catch (error) {
+      console.warn("Koshien deadline refresh failed", error);
+    } finally {
+      deadlineRefreshInFlight = false;
+    }
+  }
+
+  function scheduleKoshienDeadlineRefresh() {
+    if (deadlineRefreshTimer) root.clearTimeout(deadlineRefreshTimer);
+    if (deadlineLookupTimer) root.clearTimeout(deadlineLookupTimer);
+    deadlineRefreshTimer = 0;
+    deadlineLookupTimer = 0;
+
+    const deadlineMs = activeKoshienDeadlineMs();
+    if (!Number.isFinite(deadlineMs)) {
+      if (deadlineLookupAttempts < 30) {
+        deadlineLookupAttempts += 1;
+        deadlineLookupTimer = root.setTimeout(scheduleKoshienDeadlineRefresh, 1000);
       }
-    };
+      return;
+    }
+
+    deadlineLookupAttempts = 0;
+    const delayMs = deadlineMs - Date.now();
+    if (delayMs <= 0) return;
+    deadlineRefreshTimer = root.setTimeout(() => {
+      deadlineRefreshTimer = 0;
+      void forceKoshienRefresh();
+    }, delayMs + 100);
+  }
+
+  root.addEventListener("load", () => {
+    if (typeof applyKoshienMatchFinishes === "function") {
+      applyKoshienMatchFinishes = function applyKoshienCurrentStageFinishes() {
+        normalizeKoshienEvent(state.event);
+        const matches = state.event.results.matches || [];
+        state.event.results.finishes = api.deriveCurrentStages({
+          teams: state.event.config.teams || [],
+          matches,
+          teamMeta: state.event.config.teamMeta || {},
+        });
+
+        const finalMatch = matches.find((match) => (
+          match.round === "F"
+          && match.status === "completed"
+          && match.winner_id
+          && match.loser_id
+        ));
+        if (finalMatch) {
+          state.event.results.finalScore = {
+            champion: finalMatch.winner_id,
+            runnerUp: finalMatch.loser_id,
+            championScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_a : finalMatch.score_b,
+            runnerUpScore: finalMatch.winner_id === finalMatch.team_a_id ? finalMatch.score_b : finalMatch.score_a,
+          };
+        }
+      };
+    }
+
+    scheduleKoshienDeadlineRefresh();
+    if (activeKoshienDeadlineMs() <= Date.now()) void forceKoshienRefresh();
   }, { once: true });
+
+  root.document?.addEventListener("visibilitychange", () => {
+    if (root.document.visibilityState !== "visible") return;
+    scheduleKoshienDeadlineRefresh();
+    void forceKoshienRefresh();
+  });
+
+  root.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    scheduleKoshienDeadlineRefresh();
+    void forceKoshienRefresh();
+  });
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
