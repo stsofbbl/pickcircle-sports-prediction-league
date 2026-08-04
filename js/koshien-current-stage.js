@@ -11,6 +11,9 @@
   let deadlineLookupTimer = 0;
   let deadlineLookupAttempts = 0;
   let deadlineRefreshInFlight = false;
+  let predictionRuleGuideObserver = null;
+
+  const KOSHIEN_PREDICTION_NOTICE = "この画面は予想入力専用です";
 
   function activeKoshienDeadlineMs() {
     if (typeof state !== "object" || !state?.event) return Number.NaN;
@@ -55,6 +58,31 @@
     }, delayMs + 100);
   }
 
+  function replaceKoshienPredictionNoticeWithRuleGuide() {
+    const eventForm = root.document?.querySelector("#eventForm");
+    if (!eventForm) return;
+    const notice = [...eventForm.children].find((element) => (
+      element.classList?.contains("active-manager-note")
+      && element.querySelector("strong")?.textContent.trim() === KOSHIEN_PREDICTION_NOTICE
+    ));
+    if (!notice) return;
+
+    const sourceGuide = root.document.querySelector(
+      "#activeTournamentCards .rule-guide-panel.is-compact, #homeTournamentCards .rule-guide-panel.is-compact",
+    );
+    if (!sourceGuide) return;
+    notice.replaceWith(sourceGuide.cloneNode(true));
+  }
+
+  function observeKoshienPredictionRuleGuide() {
+    const eventForm = root.document?.querySelector("#eventForm");
+    if (!eventForm || typeof root.MutationObserver !== "function") return;
+    predictionRuleGuideObserver?.disconnect();
+    predictionRuleGuideObserver = new root.MutationObserver(replaceKoshienPredictionNoticeWithRuleGuide);
+    predictionRuleGuideObserver.observe(eventForm, { childList: true });
+    replaceKoshienPredictionNoticeWithRuleGuide();
+  }
+
   root.addEventListener("load", () => {
     if (typeof applyKoshienMatchFinishes === "function") {
       applyKoshienMatchFinishes = function applyKoshienCurrentStageFinishes() {
@@ -83,6 +111,7 @@
       };
     }
 
+    observeKoshienPredictionRuleGuide();
     scheduleKoshienDeadlineRefresh();
     if (activeKoshienDeadlineMs() <= Date.now()) void forceKoshienRefresh();
   }, { once: true });
