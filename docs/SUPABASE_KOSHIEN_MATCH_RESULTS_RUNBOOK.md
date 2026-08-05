@@ -197,7 +197,7 @@ order by s.total_score desc, p.display_name;
 - 学校の到達ステージ
 - ランキングと学校別得点内訳
 
-読込の正本は `results.payload` のraw snapshotで、ランキングは復元されたresultsとpredictionsから再計算される。
+試合カードと試合結果の正本は `public.matches` とする。オンライン読込では対応する行を `results.payload` の48枠へ投影し、後続ラウンドの未確定枠はpayloadを維持する。ランキングは復元されたresultsとpredictionsから再計算される。
 
 ## 9. 別端末確認
 

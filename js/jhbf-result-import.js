@@ -38,12 +38,14 @@
     representativeMessage: "",
     representativeMessageKind: "",
     startRoundRows: [],
+    startRoundMatches: [],
     startRoundWarnings: [],
     startRoundMessage: "",
     startRoundMessageKind: "",
     startRoundSourceUrl: "",
     startRoundFetchedAt: "",
     invalidPredictionCount: 0,
+    pendingImports: {},
   };
   let browserInstalled = false;
   let managerObserver = null;
@@ -344,6 +346,101 @@
     };
   }
 
+  function buildOfficialFirstRoundPreview(sourceMatches = [], context = {}, warnings = []) {
+    const teams = Array.isArray(context?.teams) ? context.teams : [];
+    const aliases = Array.isArray(context?.aliases) ? context.aliases : [];
+    const existingMatches = Array.isArray(context?.matches) ? context.matches : [];
+    const teamsByName = new Map();
+    teams.forEach((team) => addMappedValue(teamsByName, normalizeSchoolName(team.name), team));
+    const aliasesByName = new Map();
+    aliases.forEach((alias) => {
+      const team = teams.find((candidate) => String(candidate.teamId || "") === String(alias.teamId || ""));
+      if (team) addMappedValue(aliasesByName, normalizeSchoolName(alias.normalizedExternalName || alias.externalName), team);
+    });
+    const resolve = (sourceTeam) => {
+      const key = normalizeSchoolName(sourceTeam?.schoolName);
+      const exact = teamsByName.get(key) || [];
+      const candidates = exact.length ? exact : (aliasesByName.get(key) || []);
+      return candidates.length === 1 ? candidates[0] : null;
+    };
+
+    const unresolvedTeams = [];
+    const rows = sourceMatches.map((match) => {
+      const team1 = resolve(match.teamA);
+      const team2 = resolve(match.teamB);
+      if (!team1) unresolvedTeams.push(match.teamA?.schoolName || "名称不明");
+      if (!team2) unresolvedTeams.push(match.teamB?.schoolName || "名称不明");
+      return {
+        roundKey: String(match.roundKey || ""),
+        matchNo: Number(match.matchNo),
+        team1Id: String(team1?.teamId || ""),
+        team2Id: String(team2?.teamId || ""),
+        team1Name: String(team1?.name || match.teamA?.schoolName || ""),
+        team2Name: String(team2?.name || match.teamB?.schoolName || ""),
+      };
+    });
+    const teamIds = rows.flatMap((row) => [row.team1Id, row.team2Id]).filter(Boolean);
+    const duplicateTeams = [...new Set(teamIds.filter((teamId, index) => teamIds.indexOf(teamId) !== index))];
+    const invalidStartRoundTeams = teams
+      .filter((team) => teamIds.includes(String(team.teamId || "")) && Number(team.startRound) !== 1)
+      .map((team) => team.name);
+    const matchNumbers = rows.map((row) => row.matchNo);
+    const expectedMatchNumbers = Array.from({ length: 17 }, (_, index) => index + 1);
+    const completedMatches = [];
+    const conflictingMatches = [];
+    let matchingExistingCount = 0;
+    rows.forEach((row) => {
+      const existing = existingMatches.find((match) => match.roundKey === "R1" && Number(match.matchNo) === row.matchNo);
+      if (!existing) return;
+      if (existing.status === "completed") {
+        completedMatches.push(row.matchNo);
+        return;
+      }
+      if (String(existing.team1Id || "") === row.team1Id && String(existing.team2Id || "") === row.team2Id) {
+        matchingExistingCount += 1;
+      } else {
+        conflictingMatches.push(row.matchNo);
+      }
+    });
+    const structuralWarnings = (Array.isArray(warnings) ? warnings : []).map(String).filter(Boolean);
+    const valid = sourceMatches.length === 17
+      && rows.length === 17
+      && rows.every((row) => row.roundKey === "R1" && row.team1Id && row.team2Id && row.team1Id !== row.team2Id)
+      && JSON.stringify(matchNumbers) === JSON.stringify(expectedMatchNumbers)
+      && teamIds.length === 34
+      && new Set(teamIds).size === 34
+      && !unresolvedTeams.length
+      && !duplicateTeams.length
+      && !invalidStartRoundTeams.length
+      && !completedMatches.length
+      && !conflictingMatches.length
+      && !structuralWarnings.length;
+    return {
+      rows,
+      valid,
+      idempotent: valid && matchingExistingCount === 17,
+      unresolvedTeams: [...new Set(unresolvedTeams)],
+      duplicateTeams,
+      invalidStartRoundTeams,
+      completedMatches,
+      conflictingMatches,
+      structuralWarnings,
+    };
+  }
+
+  function prefillOfficialResult(row, localMatch, teamNameById) {
+    const team1Name = teamNameById.get(row.match.team1Id) || row.match.team1Name;
+    const team2Name = teamNameById.get(row.match.team2Id) || row.match.team2Name;
+    localMatch.team_a_id = team1Name;
+    localMatch.team_b_id = team2Name;
+    localMatch.score_a = Number(row.canonicalPayload.team1Score);
+    localMatch.score_b = Number(row.canonicalPayload.team2Score);
+    localMatch.winner_id = row.canonicalPayload.winnerTeamId === row.match.team1Id ? team1Name : team2Name;
+    localMatch.loser_id = "";
+    localMatch.status = "scheduled";
+    return localMatch;
+  }
+
   function canConfirmStartRounds(event, now = Date.now()) {
     if (!["draft", "open"].includes(String(event?.status || ""))) return false;
     const deadline = String(event?.deadline || "").trim();
@@ -483,7 +580,7 @@
         <strong>${escapeHtml(row.teamANameRaw)} ${Number(row.teamAScore)}－${Number(row.teamBScore)} ${escapeHtml(row.teamBNameRaw)}</strong>
         <small>${escapeHtml(row.statusMessage || "")} / 取得元: 日本高野連公式</small>
         <div class="result-flow-actions">
-          ${row.status === "ready" ? `<label class="auth-check"><input type="checkbox" data-jhbf-select="${escapeHtml(row.externalKey)}"><span>反映対象にする</span></label>` : ""}
+          ${row.status === "ready" ? `<button class="primary-button small-button" type="button" data-jhbf-prefill="${escapeHtml(row.externalKey)}">編集シートへ入力</button><label class="auth-check"><input type="checkbox" data-jhbf-select="${escapeHtml(row.externalKey)}"><span>一括反映対象</span></label>` : ""}
           <span class="status-label ${statusClass(row.status)}">${escapeHtml(statusLabel(row.status))}</span>
         </div>
         ${row.unresolvedNames?.map((name) => aliasControl(name, view.context)).join("") || ""}
@@ -517,7 +614,7 @@
       </div>`;
   }
 
-  function startRoundRowsMarkup(preview) {
+  function startRoundRowsMarkup(preview, officialMatchPreview) {
     if (!view.startRoundRows.length && !view.startRoundMessage) {
       return `<p class="helper-text">組み合わせ抽選後に取得すると、1回戦34校・2回戦15校の候補を表示します。</p>`;
     }
@@ -555,6 +652,17 @@
           <span>2回戦スタート候補（${preview.secondRoundTeams.length}校）</span>
           <strong>${escapeHtml(preview.secondRoundTeams.join("、") || "候補なし")}</strong>
         </article>
+        ${officialMatchPreview.rows.length ? `<article class="history-row">
+          <span>公式1回戦カード（${officialMatchPreview.rows.length}/17試合）</span>
+          <strong>${officialMatchPreview.valid ? (officialMatchPreview.idempotent ? "同じ組み合わせを登録済み" : "試合カードへ反映できます") : "試合カードへ反映できません"}</strong>
+          <small>${escapeHtml([
+            officialMatchPreview.unresolvedTeams.length ? `未一致: ${officialMatchPreview.unresolvedTeams.join("、")}` : "未一致: 0校",
+            officialMatchPreview.duplicateTeams.length ? `重複: ${officialMatchPreview.duplicateTeams.length}校` : "重複: 0校",
+            officialMatchPreview.invalidStartRoundTeams.length ? `1回戦対象外: ${officialMatchPreview.invalidStartRoundTeams.join("、")}` : "",
+            officialMatchPreview.completedMatches.length ? `完了済み: R1-${officialMatchPreview.completedMatches.join("、R1-")}` : "",
+            officialMatchPreview.conflictingMatches.length ? `保存済みカードと差分: R1-${officialMatchPreview.conflictingMatches.join("、R1-")}` : "",
+          ].filter(Boolean).join(" / "))}</small>
+        </article>${officialMatchPreview.rows.map((row) => `<article class="history-row"><span>R1-${row.matchNo}</span><strong>${escapeHtml(row.team1Name)} vs ${escapeHtml(row.team2Name)}</strong></article>`).join("")}` : ""}
         ${view.invalidPredictionCount > 0 ? `<article class="history-row"><strong>既存予想の要確認: ${view.invalidPredictionCount}人</strong><small>2回戦スタート校が4校以上の予想は保持されています。次回保存時に最大3校ルールが適用されます。</small></article>` : ""}
       </div>`;
   }
@@ -578,10 +686,16 @@
       view.context || {},
       view.startRoundWarnings,
     );
+    const officialMatchPreview = buildOfficialFirstRoundPreview(
+      view.startRoundMatches,
+      view.context || {},
+      view.startRoundWarnings,
+    );
     const startRoundConditionReady = canConfirmStartRounds(state.event);
     const representativesDisabled = !canEditResults || view.loading || view.applying ? "disabled" : "";
     const applyRepresentativesDisabled = representativesDisabled || !representativePreview.valid ? "disabled" : "";
     const applyStartRoundsDisabled = representativesDisabled || !startRoundPreview.valid || !startRoundConditionReady ? "disabled" : "";
+    const applyOfficialMatchesDisabled = representativesDisabled || !officialMatchPreview.valid ? "disabled" : "";
     return `
       <div class="entry-block koshien-jhbf-import">
         <div class="block-head">
@@ -632,8 +746,9 @@
           <div class="result-flow-actions">
             <button class="ghost-button" type="button" data-jhbf-fetch-start-rounds ${representativesDisabled}>組み合わせから候補取得</button>
             <button class="primary-button" type="button" data-jhbf-apply-start-rounds ${applyStartRoundsDisabled}>正式反映</button>
+            <button class="primary-button" type="button" data-jhbf-apply-official-matches ${applyOfficialMatchesDisabled}>公式組み合わせを試合カードへ反映</button>
           </div>
-          ${startRoundRowsMarkup(startRoundPreview)}
+          ${startRoundRowsMarkup(startRoundPreview, officialMatchPreview)}
         </div>
         ${view.warnings.length ? `<p class="helper-text">取得メモ: ${escapeHtml(view.warnings.join("、"))}</p>` : ""}
         ${view.message ? `<p class="auth-message is-${escapeHtml(view.messageKind || "pending")}" role="status">${escapeHtml(view.message)}</p>` : ""}
@@ -659,12 +774,14 @@
     view.representativeMessage = "";
     view.representativeMessageKind = "";
     view.startRoundRows = [];
+    view.startRoundMatches = [];
     view.startRoundWarnings = [];
     view.startRoundMessage = "";
     view.startRoundMessageKind = "";
     view.startRoundSourceUrl = "";
     view.startRoundFetchedAt = "";
     view.invalidPredictionCount = 0;
+    view.pendingImports = {};
   }
 
   async function refreshPreview() {
@@ -753,6 +870,7 @@
       ]);
       view.context = context;
       view.startRoundRows = Array.isArray(response.rows) ? response.rows : [];
+      view.startRoundMatches = Array.isArray(response.matches) ? response.matches : [];
       view.startRoundWarnings = Array.isArray(response.warnings) ? response.warnings : [];
       view.startRoundSourceUrl = String(response.sourceUrls?.[0] || "");
       view.startRoundFetchedAt = String(response.fetchedAt || "");
@@ -764,12 +882,13 @@
         view.startRoundWarnings,
       );
       view.startRoundMessage = preview.valid
-        ? "1回戦34校・2回戦15校の候補を取得しました。内容を確認して正式反映してください。"
+        ? "1回戦34校・2回戦15校と17試合の候補を取得しました。内容を確認して必要な反映操作を選んでください。"
         : "候補を安全に確定できません。未一致・重複・公式HTMLの取得状態を確認し、必要なら手動編集してください。";
       view.startRoundMessageKind = preview.valid ? "success" : "error";
     } catch (error) {
       console.warn("JHBF start-round fetch failed", error);
       view.startRoundRows = [];
+      view.startRoundMatches = [];
       view.startRoundWarnings = [];
       view.startRoundSourceUrl = "";
       view.startRoundFetchedAt = "";
@@ -825,6 +944,58 @@
       view.startRoundMessageKind = "success";
     } catch (error) {
       view.startRoundMessage = error?.message || "開始ラウンドを正式反映できませんでした。既存データを確認してください。";
+      view.startRoundMessageKind = "error";
+    } finally {
+      view.applying = false;
+      renderActiveEventManager();
+      renderScoresOnly();
+    }
+  }
+
+  async function handleApplyOfficialFirstRoundMatches() {
+    const eventId = String(state.event?.id || "");
+    const preview = buildOfficialFirstRoundPreview(
+      view.startRoundMatches,
+      view.context || {},
+      view.startRoundWarnings,
+    );
+    if (!preview.valid) {
+      view.startRoundMessage = "17試合・34校・1回戦対象校・保存済みカードの整合条件を満たしていません。";
+      view.startRoundMessageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
+    if (!eventId || eventId !== view.eventId) {
+      view.startRoundMessage = "選択中の大会が変わりました。組み合わせを再取得してください。";
+      view.startRoundMessageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
+    if (!window.confirm("表示中のR1-1〜R1-17を試合カードへ反映します。予想・得点・開始ラウンドは変更しません。よろしいですか？")) return;
+
+    view.applying = true;
+    view.startRoundMessage = "公式組み合わせを試合カードへ反映しています…";
+    view.startRoundMessageKind = "pending";
+    renderActiveEventManager();
+    try {
+      const saved = await window.YosoDataService?.koshien?.registerOfficialFirstRoundMatches?.({
+        eventId,
+        matches: preview.rows,
+        sourceUrl: view.startRoundSourceUrl,
+        fetchedAt: view.startRoundFetchedAt,
+      });
+      if (Number(saved?.count) !== 17) throw new Error("17試合を登録できませんでした。");
+      const snapshot = typeof loadKoshienOnlineState === "function"
+        ? await loadKoshienOnlineState({ force: true })
+        : null;
+      if (!snapshot?.ok) throw new Error("登録後のオンラインデータを再読込できませんでした。");
+      view.context = await loadContext(eventId);
+      view.startRoundMessage = saved?.idempotent
+        ? "同じ公式組み合わせを登録済みです。試合カードの内容を維持しました。"
+        : "公式組み合わせ17試合を試合カードへ反映しました。";
+      view.startRoundMessageKind = "success";
+    } catch (error) {
+      view.startRoundMessage = error?.message || "公式組み合わせを試合カードへ反映できませんでした。";
       view.startRoundMessageKind = "error";
     } finally {
       view.applying = false;
@@ -971,6 +1142,61 @@
     Object.assign(localMatch, completed.match);
   }
 
+  function handlePrefill(button) {
+    const row = view.rows.find((candidate) => candidate.status === "ready" && candidate.externalKey === button.dataset.jhbfPrefill);
+    const localMatch = row ? localMatchFor(row) : null;
+    if (!row || !localMatch) {
+      view.message = "編集対象の試合カードを特定できません。組み合わせを再読込してください。";
+      view.messageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
+    const teamNameById = new Map((view.context?.teams || []).map((team) => [team.teamId, team.name]));
+    prefillOfficialResult(row, localMatch, teamNameById);
+    view.pendingImports[localMatch.match_id] = row;
+    saveLocalStateOnly();
+    setKoshienMatchMessage("公式結果を編集シートへ入力しました。内容を確認して「結果保存」を押してください。", "success");
+    koshienMatchEditorState.matchId = localMatch.match_id;
+    koshienMatchEditorState.openRounds.add(localMatch.round);
+    renderActiveEventManager();
+  }
+
+  async function recordPendingImportForMatch(matchId) {
+    const row = view.pendingImports[String(matchId || "")];
+    if (!row) return null;
+    const context = await loadContext(view.eventId);
+    const savedMatch = (context.matches || []).find((match) => (
+      match.roundKey === row.canonicalPayload.roundKey
+      && Number(match.matchNo) === Number(row.match.matchNo)
+      && unorderedPairMatches(
+        match.team1Id, match.team2Id,
+        row.canonicalPayload.team1Id, row.canonicalPayload.team2Id,
+      )
+    ));
+    if (!savedMatch?.matchId || savedMatch.status !== "completed") {
+      throw new Error("保存後の公式試合IDを確認できませんでした。");
+    }
+    if (!sameCompletedMatch(savedMatch, row.canonicalPayload)) {
+      delete view.pendingImports[String(matchId || "")];
+      view.context = context;
+      view.rows = buildImportPreview(view.sourceRows, context);
+      return { skipped: true, reason: "official_prefill_was_edited" };
+    }
+    await recordImports(view.eventId, [{
+      source: "jhbf",
+      externalKey: row.externalKey,
+      sourceUrl: row.sourceUrl,
+      fetchedAt: row.fetchedAt,
+      importedMatchId: savedMatch.matchId,
+      normalizedPayload: row.canonicalPayload,
+      rawPayload: row.rawPayload || {},
+    }]);
+    delete view.pendingImports[String(matchId || "")];
+    view.context = await loadContext(view.eventId);
+    view.rows = buildImportPreview(view.sourceRows, view.context);
+    return { recorded: true };
+  }
+
   async function handleApply(root) {
     const selectedKeys = new Set([...root.querySelectorAll("[data-jhbf-select]:checked")].map((input) => input.dataset.jhbfSelect));
     const selectedRows = view.rows.filter((row) => row.status === "ready" && selectedKeys.has(row.externalKey));
@@ -1054,8 +1280,12 @@
     root.querySelector("[data-jhbf-apply-representatives]")?.addEventListener("click", () => handleApplyRepresentatives());
     root.querySelector("[data-jhbf-fetch-start-rounds]")?.addEventListener("click", () => handleFetchStartRounds(root));
     root.querySelector("[data-jhbf-apply-start-rounds]")?.addEventListener("click", () => handleApplyStartRounds());
+    root.querySelector("[data-jhbf-apply-official-matches]")?.addEventListener("click", () => handleApplyOfficialFirstRoundMatches());
     root.querySelector("[data-jhbf-fetch]")?.addEventListener("click", () => handleFetch(root));
     root.querySelector("[data-jhbf-apply]")?.addEventListener("click", () => handleApply(root));
+    root.querySelectorAll("[data-jhbf-prefill]").forEach((button) => {
+      button.addEventListener("click", () => handlePrefill(button));
+    });
     root.querySelectorAll("[data-jhbf-save-alias]").forEach((button) => {
       button.addEventListener("click", () => handleAlias(button));
     });
@@ -1145,9 +1375,12 @@
     buildImportPreview,
     buildRepresentativePreview,
     buildStartRoundPreview,
+    buildOfficialFirstRoundPreview,
     canConfirmStartRounds,
     confirmStartRoundsOnline,
     representativeKeyFor,
+    prefillOfficialResult,
+    recordPendingImportForMatch,
     sameCompletedMatch,
     installBrowser,
   });

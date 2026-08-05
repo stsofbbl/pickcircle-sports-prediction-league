@@ -730,6 +730,27 @@
     return data;
   }
 
+  async function registerOfficialFirstRoundMatches({ eventId, matches, sourceUrl, fetchedAt } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedMatches = (Array.isArray(matches) ? matches : []).map((match) => ({
+      round_key: String(match?.roundKey || ""),
+      match_no: Number(match?.matchNo),
+      team1_id: String(match?.team1Id || ""),
+      team2_id: String(match?.team2Id || ""),
+    }));
+    if (!normalizedEventId) throw new Error("公式組み合わせを反映するevent_idが必要です。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc("register_koshien_official_first_round_matches", {
+      p_event_id: normalizedEventId,
+      p_matches: normalizedMatches,
+      p_source_url: String(sourceUrl || "").trim(),
+      p_fetched_at: String(fetchedAt || "").trim(),
+    });
+    if (error) throw koshienSaveError("matches", error, "公式組み合わせを試合カードへ反映できませんでした。");
+    return data;
+  }
+
   async function updateKoshienOdds({ eventId, rows } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -1144,6 +1165,7 @@
       { data: teams, error: teamsError },
       { data: structuredTeams, error: structuredTeamsError },
       { data: results, error: resultsError },
+      { data: matches, error: matchesError },
       { data: members, error: membersError },
       { data: players, error: playersError },
       { data: scores, error: scoresError },
@@ -1155,13 +1177,17 @@
         .order("seed", { ascending: true }),
       supabase
         .from("teams")
-        .select("name, game_multiplier, metadata")
+        .select("id, name, start_round, game_multiplier, metadata")
         .eq("event_id", event.id),
       supabase
         .from("results")
         .select("payload, updated_at")
         .eq("event_id", event.id)
         .maybeSingle(),
+      supabase
+        .from("matches")
+        .select("id, round_key, match_no, team1_id, team2_id, team1_score, team2_score, winner_team_id, loser_team_id, status, metadata")
+        .eq("event_id", event.id),
       supabase
         .from("league_members")
         .select("user_id, role, membership_status, profiles(display_name)")
@@ -1179,6 +1205,7 @@
     if (teamsError) throw teamsError;
     if (structuredTeamsError) throw structuredTeamsError;
     if (resultsError) throw resultsError;
+    if (matchesError) throw matchesError;
     if (membersError) throw membersError;
     if (playersError) throw playersError;
     if (scoresError) throw scoresError;
@@ -1225,6 +1252,17 @@
     const { data: predictions, error: predictionError } = await predictionSelect;
     if (predictionError) throw predictionError;
 
+    const mergedResults = results?.payload
+      ? {
+        ...results,
+        payload: window.YosoKoshienResults.mergeStructuredMatchesIntoResults(
+          results.payload,
+          matches || [],
+          structuredTeams || [],
+        ),
+      }
+      : results;
+
     return {
       ok: true,
       league,
@@ -1239,7 +1277,7 @@
       players: players || [],
       scores: scores || [],
       predictions: predictions || [],
-      results: results || null,
+      results: mergedResults || null,
       predictionsPublic: isPredictionPublic(event),
     };
   }
@@ -1288,6 +1326,7 @@
       loadSnapshot: loadKoshienSnapshot,
       replaceRepresentatives: replaceKoshienRepresentatives,
       updateStartRounds: updateKoshienStartRounds,
+      registerOfficialFirstRoundMatches,
       updateOdds: updateKoshienOdds,
       updateGameMultipliers: updateKoshienGameMultipliers,
       deleteEvent: deleteKoshienEvent,

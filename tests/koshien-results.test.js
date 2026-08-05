@@ -142,6 +142,7 @@ test("completed match payload includes loser_team_id and normalizes final to com
       winner_id: "Team A",
       loser_id: "Team B",
       status: "final",
+      metadata: { source: "jhbf", source_version: "fetch-1" },
     }],
     teams: [
       { id: "team-a-id", name: "Team A" },
@@ -161,6 +162,8 @@ test("completed match payload includes loser_team_id and normalizes final to com
     loser_team_id: "team-b-id",
     status: "completed",
     metadata: {
+      source: "jhbf",
+      source_version: "fetch-1",
       match_id: "R1-1",
       team_a_name: "Team A",
       team_b_name: "Team B",
@@ -170,6 +173,41 @@ test("completed match payload includes loser_team_id and normalizes final to com
       app_status: "final",
     },
   });
+});
+
+test("public matches override the matching results payload slots without rebuilding later rounds", () => {
+  const payload = {
+    matches: [
+      { match_id: "R1-1", round: "R1", match_no: 1, team_a_id: "", team_b_id: "", score_a: "", score_b: "", winner_id: "", loser_id: "", status: "scheduled" },
+      { match_id: "R2-1", round: "R2", match_no: 1, team_a_id: "", team_b_id: "", score_a: "", score_b: "", winner_id: "", loser_id: "", status: "scheduled" },
+    ],
+    finishes: {},
+  };
+  const merged = koshien.mergeStructuredMatchesIntoResults(payload, [{
+    id: "db-match-1",
+    round_key: "R1",
+    match_no: 1,
+    team1_id: "team-sapporo",
+    team2_id: "team-sendai",
+    team1_score: 1,
+    team2_score: 3,
+    winner_team_id: "team-sendai",
+    loser_team_id: "team-sapporo",
+    status: "completed",
+    metadata: { source: "jhbf", source_version: "2026-08-05T00:00:00Z" },
+  }], [
+    { id: "team-sapporo", name: "札幌日大" },
+    { id: "team-sendai", name: "仙台育英" },
+  ]);
+
+  assert.deepEqual(merged.matches[0], {
+    match_id: "R1-1", round: "R1", match_no: 1,
+    team_a_id: "札幌日大", team_b_id: "仙台育英", score_a: 1, score_b: 3,
+    winner_id: "仙台育英", loser_id: "札幌日大", status: "completed",
+    metadata: { source: "jhbf", source_version: "2026-08-05T00:00:00Z" },
+  });
+  assert.deepEqual(merged.matches[1], payload.matches[1]);
+  assert.deepEqual(payload.matches[0].team_a_id, "");
 });
 
 test("phase-one scoring applies the 1.2 captain multiplier", () => {

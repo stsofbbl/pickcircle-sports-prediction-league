@@ -224,3 +224,113 @@ test("official start-round confirmation reloads online state after the existing 
   assert.deepEqual(calls, [["update", "event-id", 49], ["reload"]]);
   assert.equal(saved.invalidPredictionCount, 2);
 });
+
+function officialFirstRoundInputs(matchCount = 17) {
+  const sourceMatches = Array.from({ length: matchCount }, (_, index) => ({
+    roundKey: "R1",
+    matchNo: index + 1,
+    gameLabel: `第${index + 1}日 第1試合`,
+    teamA: { schoolName: `School ${index * 2 + 1}`, districtName: `District ${index * 2 + 1}` },
+    teamB: { schoolName: `School ${index * 2 + 2}`, districtName: `District ${index * 2 + 2}` },
+  }));
+  const teams = Array.from({ length: 49 }, (_, index) => ({
+    teamId: `team-${index + 1}`,
+    name: `School ${index + 1}`,
+    startRound: index < 34 ? 1 : 2,
+  }));
+  return { sourceMatches, context: { teams, aliases: [], matches: [] } };
+}
+
+test("official first-round preview keeps all 17 ordered cards and maps 34 unique starters", () => {
+  const { sourceMatches, context } = officialFirstRoundInputs();
+  const preview = api.buildOfficialFirstRoundPreview(sourceMatches, context);
+
+  assert.equal(preview.valid, true);
+  assert.equal(preview.rows.length, 17);
+  assert.deepEqual(preview.rows[0], {
+    roundKey: "R1",
+    matchNo: 1,
+    team1Id: "team-1",
+    team2Id: "team-2",
+    team1Name: "School 1",
+    team2Name: "School 2",
+  });
+  assert.deepEqual(preview.unresolvedTeams, []);
+  assert.deepEqual(preview.duplicateTeams, []);
+});
+
+test("official first-round preview rejects 16/18 cards, duplicate, outside-event, and round-two schools", () => {
+  const sixteen = officialFirstRoundInputs(16);
+  assert.equal(api.buildOfficialFirstRoundPreview(sixteen.sourceMatches, sixteen.context).valid, false);
+  const eighteen = officialFirstRoundInputs(18);
+  assert.equal(api.buildOfficialFirstRoundPreview(eighteen.sourceMatches, eighteen.context).valid, false);
+
+  const duplicate = officialFirstRoundInputs();
+  duplicate.sourceMatches[1].teamA.schoolName = "School 1";
+  assert.equal(api.buildOfficialFirstRoundPreview(duplicate.sourceMatches, duplicate.context).valid, false);
+
+  const outside = officialFirstRoundInputs();
+  outside.sourceMatches[0].teamA.schoolName = "Outside School";
+  assert.equal(api.buildOfficialFirstRoundPreview(outside.sourceMatches, outside.context).valid, false);
+
+  const roundTwo = officialFirstRoundInputs();
+  roundTwo.context.teams.find((team) => team.teamId === "team-1").startRound = 2;
+  assert.equal(api.buildOfficialFirstRoundPreview(roundTwo.sourceMatches, roundTwo.context).valid, false);
+});
+
+test("official first-round preview is idempotent but blocks completed or conflicting saved cards", () => {
+  const { sourceMatches, context } = officialFirstRoundInputs();
+  context.matches = api.buildOfficialFirstRoundPreview(sourceMatches, context).rows.map((row, index) => ({
+    matchId: `match-${index + 1}`,
+    matchNo: row.matchNo,
+    roundKey: row.roundKey,
+    team1Id: row.team1Id,
+    team2Id: row.team2Id,
+    status: "scheduled",
+  }));
+  const repeated = api.buildOfficialFirstRoundPreview(sourceMatches, context);
+  assert.equal(repeated.valid, true);
+  assert.equal(repeated.idempotent, true);
+
+  context.matches[0].status = "completed";
+  assert.equal(api.buildOfficialFirstRoundPreview(sourceMatches, context).valid, false);
+  context.matches[0].status = "scheduled";
+  context.matches[0].team2Id = "team-3";
+  assert.equal(api.buildOfficialFirstRoundPreview(sourceMatches, context).valid, false);
+});
+
+test("札幌日大1-3仙台育英 is copied into the existing editor without saving it", () => {
+  const r1Context = {
+    teams: [
+      { teamId: "sapporo", name: "札幌日大" },
+      { teamId: "sendai", name: "仙台育英" },
+    ],
+    aliases: [],
+    imports: [],
+    matches: [{
+      matchId: "db-match-1", roundKey: "R1", matchNo: 1,
+      team1Id: "sapporo", team2Id: "sendai", status: "scheduled",
+    }],
+  };
+  const [official] = api.buildImportPreview([row({
+    roundLabel: "1回戦", roundKey: "R1",
+    teamANameRaw: "札幌日大", teamBNameRaw: "仙台育英",
+    teamAScore: 1, teamBScore: 3,
+  })], r1Context);
+  assert.equal(official.status, "ready");
+  assert.equal(official.match.matchNo, 1);
+  const localMatch = {
+    match_id: "R1-1", round: "R1", match_no: 1,
+    team_a_id: "", team_b_id: "", score_a: "", score_b: "",
+    winner_id: "", loser_id: "", status: "scheduled",
+  };
+  api.prefillOfficialResult(official, localMatch, new Map([
+    ["sapporo", "札幌日大"], ["sendai", "仙台育英"],
+  ]));
+
+  assert.deepEqual(localMatch, {
+    match_id: "R1-1", round: "R1", match_no: 1,
+    team_a_id: "札幌日大", team_b_id: "仙台育英", score_a: 1, score_b: 3,
+    winner_id: "仙台育英", loser_id: "", status: "scheduled",
+  });
+});

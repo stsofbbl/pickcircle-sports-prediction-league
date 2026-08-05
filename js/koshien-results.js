@@ -168,6 +168,7 @@
           loser_team_id: loser?.id || null,
           status: completed ? "completed" : "scheduled",
           metadata: {
+            ...(match.metadata && typeof match.metadata === "object" ? match.metadata : {}),
             match_id: match.match_id || null,
             team_a_name: match.team_a_id || "",
             team_b_name: match.team_b_id || "",
@@ -178,6 +179,43 @@
           },
         };
       });
+  }
+
+  function mergeStructuredMatchesIntoResults(resultsPayload = {}, structuredMatches = [], teams = []) {
+    const next = JSON.parse(JSON.stringify(resultsPayload || {}));
+    if (!Array.isArray(next.matches) || !Array.isArray(structuredMatches) || !structuredMatches.length) return next;
+    const teamNameById = new Map(teams.map((team) => [String(team.id || team.team_id || ""), String(team.name || "")]));
+    const slotByKey = new Map(next.matches.map((match, index) => [`${match.round}:${Number(match.match_no)}`, index]));
+
+    structuredMatches.forEach((stored) => {
+      const round = String(stored.round_key || stored.roundKey || "");
+      const matchNo = Number(stored.match_no ?? stored.matchNo);
+      const slot = slotByKey.get(`${round}:${matchNo}`);
+      const teamA = teamNameById.get(String(stored.team1_id || stored.team1Id || ""));
+      const teamB = teamNameById.get(String(stored.team2_id || stored.team2Id || ""));
+      if (slot === undefined || !teamA || !teamB) return;
+      const completed = String(stored.status || "") === "completed";
+      const winner = completed ? teamNameById.get(String(stored.winner_team_id || stored.winnerTeamId || "")) || "" : "";
+      const loser = completed ? teamNameById.get(String(stored.loser_team_id || stored.loserTeamId || "")) || "" : "";
+      next.matches[slot] = {
+        ...next.matches[slot],
+        match_id: next.matches[slot].match_id || `${round}-${matchNo}`,
+        round,
+        match_no: matchNo,
+        team_a_id: teamA,
+        team_b_id: teamB,
+        score_a: completed ? Number(stored.team1_score ?? stored.team1Score) : "",
+        score_b: completed ? Number(stored.team2_score ?? stored.team2Score) : "",
+        winner_id: winner,
+        loser_id: loser,
+        status: completed ? "completed" : "scheduled",
+        metadata: {
+          ...(next.matches[slot].metadata && typeof next.matches[slot].metadata === "object" ? next.matches[slot].metadata : {}),
+          ...(stored.metadata && typeof stored.metadata === "object" ? stored.metadata : {}),
+        },
+      };
+    });
+    return next;
   }
 
   function normalizeFinish(finish) {
@@ -302,6 +340,7 @@
   return {
     OFFICIAL_PHASE1_POINTS,
     buildMatchRows,
+    mergeStructuredMatchesIntoResults,
     buildOfficialScoreRows,
     buildScoreRows,
     calculatePhase1Breakdown,

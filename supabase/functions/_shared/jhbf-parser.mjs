@@ -247,7 +247,7 @@ export function parseJhbfStartRoundsHtml(html, options = {}) {
       String(match[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || "",
     ));
   if (!tournamentTables.length) {
-    return { rows: [], warnings: ["tournament_table_not_found"], textSample: htmlToStructuredText(html).slice(0, 300) };
+    return { rows: [], matches: [], warnings: ["tournament_table_not_found"], textSample: htmlToStructuredText(html).slice(0, 300) };
   }
 
   const tableRows = tournamentTables.flatMap((table) => (
@@ -266,6 +266,7 @@ export function parseJhbfStartRoundsHtml(html, options = {}) {
   });
 
   const rows = [];
+  const matches = [];
   let firstRoundGameCount = 0;
   tableRows.forEach((row, index) => {
     if (row.gameCellIndex !== 1 || !/^第\d+日\s*第\d+試合$/u.test(row.gameLabel)) return;
@@ -273,6 +274,13 @@ export function parseJhbfStartRoundsHtml(html, options = {}) {
     const teamB = tableRows.slice(index + 1).find((candidate) => candidate.team)?.team;
     if (!teamA || !teamB) return;
     firstRoundGameCount += 1;
+    matches.push({
+      roundKey: "R1",
+      matchNo: firstRoundGameCount,
+      gameLabel: row.gameLabel,
+      teamA,
+      teamB,
+    });
     [teamA, teamB].forEach((team) => rows.push({
       source: "jhbf",
       sourceUrl,
@@ -291,7 +299,7 @@ export function parseJhbfStartRoundsHtml(html, options = {}) {
   if (firstRoundGameCount !== 17) warnings.push(`first_round_game_count:${firstRoundGameCount}`);
   if (rows.length !== 34) warnings.push(`first_round_team_count:${rows.length}`);
   duplicateKeys.forEach((key) => warnings.push(`duplicate_first_round_team:${key}`));
-  return { rows, warnings, textSample: warnings.length ? htmlToStructuredText(tournamentTables.map((table) => table[0]).join("\n")).slice(0, 300) : "" };
+  return { rows, matches, warnings, textSample: warnings.length ? htmlToStructuredText(tournamentTables.map((table) => table[0]).join("\n")).slice(0, 300) : "" };
 }
 
 export { normalizeSchoolName, roundKeyFor };

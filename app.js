@@ -4807,6 +4807,7 @@ function normalizeKoshienMatch(match = {}, round = "R1", matchNo = 1, teams = []
     winner_id: teamSet.has(winner) ? winner : winner,
     loser_id: teamSet.has(loser) ? loser : loser,
     status,
+    metadata: match.metadata && typeof match.metadata === "object" ? { ...match.metadata } : {},
   };
 }
 
@@ -4890,6 +4891,16 @@ async function saveKoshienMatchResult(matchId) {
       refreshKoshienPhase2DraftState({ renderAfter: false }),
       refreshKoshienLaterPhaseState({ renderAfter: false }),
     ]);
+    if (window.YosoJhbfResults?.recordPendingImportForMatch) {
+      try {
+        await window.YosoJhbfResults.recordPendingImportForMatch(matchId);
+      } catch (auditError) {
+        console.warn("JHBF import audit failed", auditError);
+        setKoshienMatchMessage("試合結果は保存されましたが、公式取得履歴を記録できませんでした。再取得して状態を確認してください。", "error");
+        renderScoresOnly();
+        return false;
+      }
+    }
     setKoshienMatchMessage(koshienSaveOutcomeMessage(result, "Supabaseへ結果を保存しました。"), result?.skipped || result?.partial ? "error" : "success");
     renderScoresOnly();
     return !(result?.skipped || result?.partial);

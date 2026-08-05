@@ -20,6 +20,8 @@ function createSupabaseMock({
   existingEventTeams = null,
   existingEventRules = {},
   structuredTeamRows = null,
+  resultPayload = null,
+  matchRows = null,
 } = {}) {
   const calls = [];
   const queries = [];
@@ -173,6 +175,11 @@ function createSupabaseMock({
       };
       if (this.table === "scores") return { data: scoreRows || [], error: null };
       if (this.table === "predictions") return { data: predictionRows || [], error: null };
+      if (this.table === "results") return {
+        data: resultPayload ? { payload: resultPayload, updated_at: "2026-08-05T00:00:00Z" } : null,
+        error: null,
+      };
+      if (this.table === "matches") return { data: matchRows || [], error: null };
       if (this.table === "teams") return { data: teamRows, error: teamError };
       return { data: null, error: null };
     }
@@ -807,6 +814,37 @@ test("loadSnapshot uses the currently selected event id", async () => {
   assert.equal(eventQuery?.filters?.id, "selected-event-id");
 });
 
+test("loadSnapshot projects canonical public matches into the result editor payload", async () => {
+  const resultPayload = {
+    matches: [{
+      match_id: "R1-1", round: "R1", match_no: 1,
+      team_a_id: "", team_b_id: "", score_a: "", score_b: "",
+      winner_id: "", loser_id: "", status: "scheduled",
+    }],
+    finishes: {},
+  };
+  const supabase = createSupabaseMock({
+    resultPayload,
+    structuredTeamRows: [
+      { id: "team-sapporo", name: "札幌日大", game_multiplier: 2, metadata: {} },
+      { id: "team-sendai", name: "仙台育英", game_multiplier: 2, metadata: {} },
+    ],
+    matchRows: [{
+      id: "db-match-1", round_key: "R1", match_no: 1,
+      team1_id: "team-sapporo", team2_id: "team-sendai",
+      team1_score: null, team2_score: null,
+      winner_team_id: null, loser_team_id: null, status: "scheduled", metadata: {},
+    }],
+  });
+  const service = loadDataService(supabase.client);
+
+  const snapshot = await service.koshien.loadSnapshot();
+
+  assert.equal(snapshot.results.payload.matches[0].team_a_id, "札幌日大");
+  assert.equal(snapshot.results.payload.matches[0].team_b_id, "仙台育英");
+  assert.ok(supabase.queries.some((query) => query.table === "matches" && query.filters.event_id === "event-id"));
+});
+
 test("loadSnapshot falls back to the league event when the local selected id is stale", async () => {
   const supabase = createSupabaseMock({ missingEventId: "stale-local-event-id" });
   const service = loadDataService(supabase.client);
@@ -860,6 +898,33 @@ test("start rounds are confirmed through one event-scoped 49-school RPC", async 
           representative_key: row.representativeKey,
           start_round: row.startRound,
         })),
+      },
+    },
+  );
+});
+
+test("official first-round cards use one admin RPC without touching start-round confirmation", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+  const matches = [{ roundKey: "R1", matchNo: 1, team1Id: "team-a", team2Id: "team-b" }];
+
+  await service.koshien.registerOfficialFirstRoundMatches({
+    eventId: "event-id",
+    matches,
+    sourceUrl: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
+    fetchedAt: "2026-08-05T00:00:00Z",
+  });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(supabase.calls.find((call) => call.name === "register_koshien_official_first_round_matches"))),
+    {
+      operation: "rpc",
+      name: "register_koshien_official_first_round_matches",
+      args: {
+        p_event_id: "event-id",
+        p_matches: [{ round_key: "R1", match_no: 1, team1_id: "team-a", team2_id: "team-b" }],
+        p_source_url: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
+        p_fetched_at: "2026-08-05T00:00:00Z",
       },
     },
   );
