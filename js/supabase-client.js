@@ -147,35 +147,25 @@
     const modeObserver = new MutationObserver(syncRegisterFields);
     modeObserver.observe(authScreen, { attributes: true, attributeFilter: ["data-mode"] });
 
-    const overlay = document.createElement("div");
-    overlay.id = "authBootOverlay";
-    overlay.setAttribute("role", "status");
-    overlay.setAttribute("aria-live", "polite");
-    overlay.textContent = "YOSOを起動しています…";
-    Object.assign(overlay.style, {
-      position: "fixed",
-      inset: "0",
-      zIndex: "9999",
-      display: "grid",
-      placeItems: "center",
-      padding: "24px",
-      background: "#050507",
-      color: "#f3a7bd",
-      font: "600 14px/1.5 system-ui, -apple-system, sans-serif",
-      letterSpacing: "0.04em",
-    });
+    const overlay = document.querySelector("#startupSplash");
+    if (!overlay) return;
+    const splashImage = overlay.querySelector("img");
 
     authScreen.style.visibility = "hidden";
     appShell.style.visibility = "hidden";
-    document.body.append(overlay);
-
     let released = false;
+    let releaseRequested = false;
+    let releaseMessage = "";
+    let imageSettled = !splashImage;
+    let minimumTimerId = 0;
     let timeoutId = 0;
     let stateObserver = null;
+    const splashStartedAt = performance.now();
 
-    const release = (message = "") => {
+    const finishRelease = (message = "") => {
       if (released) return;
       released = true;
+      if (minimumTimerId) window.clearTimeout(minimumTimerId);
       if (timeoutId) window.clearTimeout(timeoutId);
       stateObserver?.disconnect();
 
@@ -195,6 +185,40 @@
       }
     };
 
+    const release = (message = "", { force = false } = {}) => {
+      if (released) return;
+      releaseRequested = true;
+      if (message && !releaseMessage) releaseMessage = message;
+      if (!force && !imageSettled) return;
+      const remaining = force ? 0 : Math.max(0, 850 - (performance.now() - splashStartedAt));
+      if (!remaining) {
+        finishRelease(releaseMessage);
+        return;
+      }
+      if (!minimumTimerId) minimumTimerId = window.setTimeout(() => finishRelease(releaseMessage), remaining);
+    };
+
+    const settleImage = () => {
+      imageSettled = true;
+      if (releaseRequested) release(releaseMessage);
+    };
+
+    if (splashImage) {
+      const decodeImage = () => {
+        if (typeof splashImage.decode !== "function") {
+          settleImage();
+          return;
+        }
+        splashImage.decode().then(settleImage, settleImage);
+      };
+      if (splashImage.complete) {
+        decodeImage();
+      } else {
+        splashImage.addEventListener("load", decodeImage, { once: true });
+        splashImage.addEventListener("error", settleImage, { once: true });
+      }
+    }
+
     stateObserver = new MutationObserver(() => {
       const accountChip = document.querySelector("#accountChip");
       if (authScreen.hidden || (accountChip && !accountChip.hidden)) release();
@@ -204,7 +228,7 @@
     if (accountChip) stateObserver.observe(accountChip, { attributes: true, attributeFilter: ["hidden"] });
 
     timeoutId = window.setTimeout(() => {
-      release("セッション確認に時間がかかりました。必要に応じて再度ログインしてください。");
+      release("セッション確認に時間がかかりました。必要に応じて再度ログインしてください。", { force: true });
     }, 12000);
 
     Promise.resolve()
