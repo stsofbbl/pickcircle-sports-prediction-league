@@ -14,12 +14,107 @@
   let predictionRuleGuideObserver = null;
 
   const KOSHIEN_PREDICTION_NOTICE = "この画面は予想入力専用です";
+  const PICKER_STYLE_ID = "yoso-koshien-match-picker-style";
 
   function activeKoshienDeadlineMs() {
     if (typeof state !== "object" || !state?.event) return Number.NaN;
     const event = state.event;
     if (!String(event.templateId || "").includes("koshien")) return Number.NaN;
     return Date.parse(event.deadline || "");
+  }
+
+  function phase1PicksArePublic(event) {
+    if (["resultWait", "finalized", "archive"].includes(String(event?.status || ""))) return true;
+    const deadlineMs = Date.parse(event?.deadline || "");
+    return Number.isFinite(deadlineMs) && Date.now() >= deadlineMs;
+  }
+
+  function phase1PickersForTeam(team) {
+    if (!team || !phase1PicksArePublic(state?.event)) return [];
+    const predictions = state?.event?.predictions || {};
+    const participantNames = Array.isArray(state?.participants) ? state.participants : [];
+    const orderedNames = [...new Set([...participantNames, ...Object.keys(predictions)])];
+    return orderedNames.filter((name) => {
+      const picks = predictions?.[name]?.teams;
+      return Array.isArray(picks) && picks.includes(team);
+    });
+  }
+
+  function installMatchPickerStyles() {
+    if (root.document?.getElementById(PICKER_STYLE_ID)) return;
+    const style = root.document?.createElement("style");
+    if (!style) return;
+    style.id = PICKER_STYLE_ID;
+    style.textContent = `
+      .koshien-match-row-main .koshien-match-row-matchup {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: start;
+        gap: 8px;
+        overflow: visible;
+        white-space: normal;
+      }
+      .koshien-match-row-main .koshien-match-row-team {
+        display: grid;
+        min-width: 0;
+        gap: 2px;
+        overflow: visible;
+        white-space: normal;
+      }
+      .koshien-match-row-main .koshien-match-row-team-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .koshien-match-row-main .koshien-match-row-pickers {
+        min-height: 15px;
+        color: var(--soap-pink);
+        font-size: 11px;
+        font-weight: 900;
+        line-height: 1.35;
+        white-space: normal;
+      }
+      .koshien-match-row-main .koshien-match-row-vs {
+        color: var(--muted);
+        white-space: nowrap;
+      }
+    `;
+    root.document.head?.appendChild(style);
+  }
+
+  function installMatchPickerLabels() {
+    if (root.__yosoKoshienMatchPickerLabelsInstalled) return;
+    if (typeof koshienMatchListRow !== "function") return;
+    root.__yosoKoshienMatchPickerLabelsInstalled = true;
+    installMatchPickerStyles();
+
+    koshienMatchListRow = function koshienMatchListRowWithPickers(match, disabledResults) {
+      const completed = match.status === "completed";
+      const matchLabel = `${koshienRoundLabel(match.round)}-${match.match_no}`;
+      const teamA = match.team_a_id || "高校未定";
+      const teamB = match.team_b_id || "高校未定";
+      const pickersA = match.team_a_id ? phase1PickersForTeam(match.team_a_id).join("・") : "";
+      const pickersB = match.team_b_id ? phase1PickersForTeam(match.team_b_id).join("・") : "";
+      const result = completed ? `${match.score_a}-${match.score_b}（保存済）` : "未入力";
+      return `
+        <button class="koshien-match-row" type="button" data-koshien-match-open="${escapeAttr(match.match_id)}" ${disabledResults}>
+          <span class="koshien-match-row-main">
+            <strong>${escapeHtml(matchLabel)}</strong>
+            <span class="koshien-match-row-matchup">
+              <span class="koshien-match-row-team">
+                <span class="koshien-match-row-team-name">${escapeHtml(teamA)}</span>
+                <small class="koshien-match-row-pickers">${escapeHtml(pickersA)}</small>
+              </span>
+              <span class="koshien-match-row-vs">vs</span>
+              <span class="koshien-match-row-team">
+                <span class="koshien-match-row-team-name">${escapeHtml(teamB)}</span>
+                <small class="koshien-match-row-pickers">${escapeHtml(pickersB)}</small>
+              </span>
+            </span>
+          </span>
+          <span class="koshien-match-row-result ${completed ? "is-saved" : ""}">${escapeHtml(result)}</span>
+        </button>`;
+    };
   }
 
   async function forceKoshienRefresh() {
@@ -111,6 +206,7 @@
       };
     }
 
+    installMatchPickerLabels();
     observeKoshienPredictionRuleGuide();
     scheduleKoshienDeadlineRefresh();
     if (activeKoshienDeadlineMs() <= Date.now()) void forceKoshienRefresh();
