@@ -63,7 +63,7 @@ export function parseJhbfScheduleHtml(html, options = {}) {
     if (!cells.length) continue;
     const rowText = cells.join(" ");
     const dateMatch = rowText.match(/(\d{1,2})月(\d{1,2})日/u);
-    const dayMatch = rowText.match(/[（(]第\s*(\d+)\s*日[）)]/u);
+    const dayMatch = rowText.match(/[（(]\s*第\s*(\d+)\s*日\s*[）)]/u);
     if (dateMatch) currentDate = { month: Number(dateMatch[1]), day: Number(dateMatch[2]) };
     if (dayMatch) currentDayNo = Number(dayMatch[1]);
     if (!currentDate || !currentDayNo) continue;
