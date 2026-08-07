@@ -27,9 +27,20 @@
     root.document.head?.appendChild(script);
   }
 
+  function loadKoshienScheduleSync() {
+    if (root.YosoKoshienScheduleSync || root.document?.querySelector('script[data-yoso-koshien-schedule-sync]')) return;
+    const script = root.document?.createElement("script");
+    if (!script) return;
+    script.src = "./js/koshien-schedule-sync.js?v=20260808-1";
+    script.dataset.yosoKoshienScheduleSync = "true";
+    script.defer = true;
+    root.document.head?.appendChild(script);
+  }
+
   function installBrowserExtensions() {
     install();
     loadHomeDashboard();
+    loadKoshienScheduleSync();
   }
 
   if (!root || typeof root.addEventListener !== "function") return;

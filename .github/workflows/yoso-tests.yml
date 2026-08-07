@@ -25,6 +25,16 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Run schedule integration tests
+        run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js
+      - name: Check JavaScript syntax
+        run: |
+          node --check app.js
+          find js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Check Edge Functions
+        run: |
+          deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
+          deno check --config supabase/functions/jhbf-schedule/deno.json supabase/functions/jhbf-schedule/index.ts
       - name: Run all Node tests
         id: node-tests
         shell: bash
@@ -42,12 +52,6 @@ jobs:
           path: test-output.txt
           if-no-files-found: error
           retention-days: 7
-      - name: Check JavaScript syntax
-        run: |
-          node --check app.js
-          find js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
-      - name: Check Edge Function
-        run: deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
       - name: Check whitespace errors
         if: github.event_name == 'pull_request'
         run: git diff --check origin/${{ github.base_ref }}...HEAD
