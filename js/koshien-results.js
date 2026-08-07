@@ -191,9 +191,12 @@
       const round = String(stored.round_key || stored.roundKey || "");
       const matchNo = Number(stored.match_no ?? stored.matchNo);
       const slot = slotByKey.get(`${round}:${matchNo}`);
-      const teamA = teamNameById.get(String(stored.team1_id || stored.team1Id || ""));
-      const teamB = teamNameById.get(String(stored.team2_id || stored.team2Id || ""));
-      if (slot === undefined || !teamA || !teamB) return;
+      const teamAId = String(stored.team1_id || stored.team1Id || "");
+      const teamBId = String(stored.team2_id || stored.team2Id || "");
+      const teamA = teamAId ? teamNameById.get(teamAId) : "";
+      const teamB = teamBId ? teamNameById.get(teamBId) : "";
+      if (slot === undefined || (teamAId && !teamA) || (teamBId && !teamB)) return;
+      if ((!teamAId || !teamBId) && round !== "R2") return;
       const completed = String(stored.status || "") === "completed";
       const winner = completed ? teamNameById.get(String(stored.winner_team_id || stored.winnerTeamId || "")) || "" : "";
       const loser = completed ? teamNameById.get(String(stored.loser_team_id || stored.loserTeamId || "")) || "" : "";
@@ -216,6 +219,71 @@
       };
     });
     return next;
+  }
+
+  function advanceOfficialWinner(matches = [], completedMatch = {}) {
+    if (completedMatch?.round !== "R1"
+      || completedMatch?.status !== "completed"
+      || !completedMatch?.winner_id) {
+      return { ok: true, advanced: false };
+    }
+    const sourceMatchNo = Number(completedMatch.match_no);
+    const targets = [];
+    (Array.isArray(matches) ? matches : []).forEach((match) => {
+      if (match?.round !== "R2") return;
+      const metadata = match.metadata && typeof match.metadata === "object" ? match.metadata : {};
+      if (metadata.team1_source_round_key === "R1" && Number(metadata.team1_source_match_no) === sourceMatchNo) {
+        targets.push({ match, side: "a" });
+      }
+      if (metadata.team2_source_round_key === "R1" && Number(metadata.team2_source_match_no) === sourceMatchNo) {
+        targets.push({ match, side: "b" });
+      }
+    });
+    if (!targets.length) return { ok: true, advanced: false };
+    if (targets.length !== 1) return { ok: false, error: "duplicate_official_feeder" };
+    const target = targets[0];
+    if (target.match.status === "completed") return { ok: false, error: "completed_downstream_match" };
+    const currentTeam = target.side === "a" ? target.match.team_a_id : target.match.team_b_id;
+    if (currentTeam && currentTeam !== completedMatch.winner_id) {
+      return { ok: false, error: "conflicting_official_feeder" };
+    }
+    if (target.side === "a") target.match.team_a_id = completedMatch.winner_id;
+    else target.match.team_b_id = completedMatch.winner_id;
+    return {
+      ok: true,
+      advanced: true,
+      advancedMatchId: target.match.match_id,
+      side: target.side,
+    };
+  }
+
+  function clearOfficialAdvancement(matches = [], canceledMatch = {}) {
+    if (canceledMatch?.round !== "R1" || !canceledMatch?.winner_id) {
+      return { ok: true, cleared: false };
+    }
+    const sourceMatchNo = Number(canceledMatch.match_no);
+    const targets = [];
+    (Array.isArray(matches) ? matches : []).forEach((match) => {
+      if (match?.round !== "R2") return;
+      const metadata = match.metadata && typeof match.metadata === "object" ? match.metadata : {};
+      if (metadata.team1_source_round_key === "R1" && Number(metadata.team1_source_match_no) === sourceMatchNo) {
+        targets.push({ match, side: "a" });
+      }
+      if (metadata.team2_source_round_key === "R1" && Number(metadata.team2_source_match_no) === sourceMatchNo) {
+        targets.push({ match, side: "b" });
+      }
+    });
+    if (!targets.length) return { ok: true, cleared: false };
+    if (targets.length !== 1) return { ok: false, error: "duplicate_official_feeder" };
+    const target = targets[0];
+    if (target.match.status === "completed") return { ok: false, error: "completed_downstream_match" };
+    const currentTeam = target.side === "a" ? target.match.team_a_id : target.match.team_b_id;
+    if (currentTeam && currentTeam !== canceledMatch.winner_id) {
+      return { ok: false, error: "conflicting_official_feeder" };
+    }
+    if (target.side === "a") target.match.team_a_id = "";
+    else target.match.team_b_id = "";
+    return { ok: true, cleared: Boolean(currentTeam), clearedMatchId: target.match.match_id, side: target.side };
   }
 
   function normalizeFinish(finish) {
@@ -339,6 +407,8 @@
 
   return {
     OFFICIAL_PHASE1_POINTS,
+    advanceOfficialWinner,
+    clearOfficialAdvancement,
     buildMatchRows,
     mergeStructuredMatchesIntoResults,
     buildOfficialScoreRows,

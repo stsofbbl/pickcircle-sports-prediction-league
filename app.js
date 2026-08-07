@@ -4871,7 +4871,15 @@ async function saveKoshienMatchResult(matchId) {
     return false;
   }
   const completed = window.YosoKoshienResults.completeMatch(match);
+  const previousMatch = { ...match };
   Object.assign(match, completed.match);
+  const advancement = window.YosoKoshienResults.advanceOfficialWinner(state.event.results.matches, match);
+  if (!advancement.ok) {
+    Object.assign(match, previousMatch);
+    setKoshienMatchMessage("進出先の2回戦カードと矛盾しています。公式組み合わせを確認してください。", "error");
+    renderActiveEventManager();
+    return false;
+  }
   applyKoshienMatchFinishes();
   if (koshienLaterPhaseView.eventId === String(state.event.id)) koshienLaterPhaseView.official_scores = [];
   saveLocalStateOnly();
@@ -4939,6 +4947,12 @@ async function cancelKoshienMatchResult(matchId) {
   if (!window.confirm(`${koshienRoundLabel(match.round)} ${match.match_no} の確定結果を取り消しますか？得点とランキングも再計算されます。`)) return;
 
   const previousResults = JSON.parse(JSON.stringify(state.event.results));
+  const clearedAdvancement = window.YosoKoshienResults.clearOfficialAdvancement(state.event.results.matches, match);
+  if (!clearedAdvancement.ok) {
+    setKoshienMatchMessage("進出先の2回戦カードと矛盾しています。先に公式組み合わせを確認してください。", "error");
+    renderActiveEventManager();
+    return;
+  }
   match.score_a = "";
   match.score_b = "";
   match.winner_id = "";

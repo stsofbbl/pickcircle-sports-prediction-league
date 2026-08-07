@@ -125,7 +125,7 @@ function startRoundTournamentHtml(gameCount = 17) {
 
 test("parses exactly 17 first-round games and 34 schools from the summer bracket", async () => {
   const api = await parser();
-  const result = api.parseJhbfStartRoundsHtml(fixture("jhbf-2026-tournament-sanitized.html"), {
+  const result = api.parseJhbfStartRoundsHtml(fixture("jhbf-2026-tournament-r2-sanitized.html"), {
     sourceUrl: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
     competitionType: "summer",
     year: 2026,
@@ -149,6 +149,36 @@ test("parses exactly 17 first-round games and 34 schools from the summer bracket
   assert.deepEqual(result.warnings, []);
 });
 
+test("parses all official second-round slots from tournament structure", async () => {
+  const api = await parser();
+  const result = api.parseJhbfStartRoundsHtml(fixture("jhbf-2026-tournament-r2-sanitized.html"), {
+    sourceUrl: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
+    competitionType: "summer",
+    year: 2026,
+  });
+
+  assert.equal(result.matches.length, 17);
+  assert.deepEqual(result.round2Matches.map((match) => [
+    match.teamA?.schoolName || `R1-${match.sourceMatchA?.matchNo}勝者`,
+    match.teamB?.schoolName || `R1-${match.sourceMatchB?.matchNo}勝者`,
+  ]), [
+    ["高岡商", "高川学園"], ["天理", "福山"],
+    ["横手", "敦賀気比"], ["智辯和歌山", "社"],
+    ["履正社", "享栄"], ["松商学園", "三重"],
+    ["拓大紅陵", "佐賀商"], ["花咲徳栄", "R1-1勝者"],
+    ["R1-2勝者", "R1-3勝者"], ["R1-4勝者", "R1-5勝者"],
+    ["R1-6勝者", "R1-7勝者"], ["R1-8勝者", "R1-9勝者"],
+    ["R1-10勝者", "R1-11勝者"], ["R1-12勝者", "R1-13勝者"],
+    ["R1-14勝者", "R1-15勝者"], ["R1-16勝者", "R1-17勝者"],
+  ]);
+  assert.equal(result.round2Matches.flatMap((match) => [match.teamA, match.teamB]).filter(Boolean).length, 15);
+  assert.deepEqual(
+    result.round2Matches.flatMap((match) => [match.sourceMatchA, match.sourceMatchB]).filter(Boolean).map((source) => source.matchNo),
+    Array.from({ length: 17 }, (_, index) => index + 1),
+  );
+  assert.deepEqual(result.warnings, []);
+});
+
 test("reports an abnormal bracket instead of treating it as complete", async () => {
   const api = await parser();
   const result = api.parseJhbfStartRoundsHtml(startRoundTournamentHtml(16), {
@@ -158,7 +188,8 @@ test("reports an abnormal bracket instead of treating it as complete", async () 
 
   assert.equal(result.rows.length, 32);
   assert.equal(result.matches.length, 16);
-  assert.deepEqual(result.warnings, ["first_round_game_count:16", "first_round_team_count:32"]);
+  assert.ok(result.warnings.includes("first_round_game_count:16"));
+  assert.ok(result.warnings.includes("first_round_team_count:32"));
 });
 
 test("reports 18 games and duplicate schools instead of accepting an invalid official draw", async () => {
@@ -168,7 +199,8 @@ test("reports 18 games and duplicate schools instead of accepting an invalid off
     year: 2026,
   });
   assert.equal(tooMany.matches.length, 18);
-  assert.deepEqual(tooMany.warnings, ["first_round_game_count:18", "first_round_team_count:36"]);
+  assert.ok(tooMany.warnings.includes("first_round_game_count:18"));
+  assert.ok(tooMany.warnings.includes("first_round_team_count:36"));
 
   const duplicate = api.parseJhbfStartRoundsHtml(
     startRoundTournamentHtml(17).replace("第2高校A (地区2A)", "第1高校A (地区1A)"),

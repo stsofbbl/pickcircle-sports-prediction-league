@@ -32,13 +32,51 @@ test("match results use a compact round list and BottomSheet editor", () => {
   assert.doesNotMatch(body, /<select[^>]*data-koshien-match-winner=/);
 });
 
+test("R2 match rows render a known starter and keep the official feeder undecided", () => {
+  const source = fs.readFileSync(APP_PATH, "utf8");
+  const start = source.indexOf("function koshienMatchListRow");
+  const end = source.indexOf("\nfunction koshienMatchBottomSheet", start);
+  const body = source.slice(start, end);
+  const render = Function(
+    "escapeHtml",
+    "escapeAttr",
+    "koshienRoundLabel",
+    `${body}; return koshienMatchListRow;`,
+  )((value) => String(value), (value) => String(value), (round) => round);
+
+  const html = render({
+    match_id: "R2-8",
+    round: "R2",
+    match_no: 8,
+    team_a_id: "花咲徳栄",
+    team_b_id: "",
+    score_a: "",
+    score_b: "",
+    status: "scheduled",
+  }, "");
+
+  assert.match(html, /R2-8/);
+  assert.match(html, /花咲徳栄 vs 高校未定/);
+});
+
 test("saving a match infers the winner, advances, and preserves list scroll", () => {
   const source = fs.readFileSync(APP_PATH, "utf8");
 
   assert.match(source, /inferMatchWinner\(match\)/);
+  assert.match(source, /advanceOfficialWinner\(state\.event\.results\.matches,\s*match\)/);
   assert.match(source, /nextUnenteredMatchId\(state\.event\.results\.matches,\s*matchId\)/);
   assert.match(source, /koshienMatchEditorState\.listScrollTop/);
   assert.match(source, /data-koshien-match-list[\s\S]*scrollTop/);
+});
+
+test("canceling an R1 result clears its official R2 feeder before saving", () => {
+  const source = fs.readFileSync(APP_PATH, "utf8");
+  const start = source.indexOf("async function cancelKoshienMatchResult(matchId)");
+  const end = source.indexOf("\nfunction setKoshienMatchMessage", start);
+  const body = source.slice(start, end);
+
+  assert.match(body, /clearOfficialAdvancement\(state\.event\.results\.matches,\s*match\)/);
+  assert.ok(body.indexOf("clearOfficialAdvancement") < body.indexOf('match.winner_id = ""'));
 });
 
 test("match editor uses round-qualified candidates for each school selector", () => {

@@ -194,7 +194,7 @@ Deno.serve(async (req: Request) => {
         competitionType: request.competitionType,
         year: request.year,
       });
-      return jsonResponse({ source: SOURCE, rows: parsed.rows, matches: parsed.matches, warnings: parsed.warnings, sourceUrls: [fetched.url], fetchedAt });
+      return jsonResponse({ source: SOURCE, rows: parsed.rows, matches: parsed.matches, round2Matches: parsed.round2Matches, warnings: parsed.warnings, sourceUrls: [fetched.url], fetchedAt });
     } catch (error) {
       console.error("JHBF start-round fetch failed", errorMessage(error));
       return jsonResponse({ error: "jhbf_fetch_failed", message: "日本高野連公式の組み合わせ表を取得できませんでした。既存データは変更していません。" }, 502);

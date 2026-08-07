@@ -210,6 +210,110 @@ test("public matches override the matching results payload slots without rebuild
   assert.deepEqual(payload.matches[0].team_a_id, "");
 });
 
+test("partial official R2 cards project the known starter and keep the feeder side undecided", () => {
+  const payload = {
+    matches: [{
+      match_id: "R2-8", round: "R2", match_no: 8,
+      team_a_id: "", team_b_id: "", score_a: "", score_b: "",
+      winner_id: "", loser_id: "", status: "scheduled",
+    }],
+  };
+  const merged = koshien.mergeStructuredMatchesIntoResults(payload, [{
+    round_key: "R2", match_no: 8,
+    team1_id: "team-hanasaki", team2_id: null,
+    status: "scheduled",
+    metadata: { team2_source_round_key: "R1", team2_source_match_no: 1 },
+  }], [{ id: "team-hanasaki", name: "花咲徳栄" }]);
+
+  assert.equal(merged.matches[0].team_a_id, "花咲徳栄");
+  assert.equal(merged.matches[0].team_b_id, "");
+  assert.equal(merged.matches[0].metadata.team2_source_match_no, 1);
+});
+
+test("partial structured cards outside R2 do not clear later-round payload slots", () => {
+  const payload = {
+    matches: [{
+      match_id: "R3-1", round: "R3", match_no: 1,
+      team_a_id: "既存校A", team_b_id: "既存校B",
+      score_a: "", score_b: "", winner_id: "", loser_id: "", status: "scheduled",
+    }],
+  };
+
+  const merged = koshien.mergeStructuredMatchesIntoResults(payload, [{
+    round_key: "R3", match_no: 1, team1_id: "team-a", team2_id: null, status: "scheduled",
+  }], [{ id: "team-a", name: "新規校A" }]);
+
+  assert.deepEqual(merged.matches[0], payload.matches[0]);
+});
+
+test("a completed R1 winner advances only into its official R2 side", () => {
+  const matches = [
+    { match_id: "R1-1", round: "R1", match_no: 1, winner_id: "仙台育英", status: "completed" },
+    {
+      match_id: "R2-8", round: "R2", match_no: 8,
+      team_a_id: "花咲徳栄", team_b_id: "", status: "scheduled",
+      metadata: { team2_source_round_key: "R1", team2_source_match_no: 1 },
+    },
+  ];
+
+  const result = koshien.advanceOfficialWinner(matches, matches[0]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.advancedMatchId, "R2-8");
+  assert.equal(result.side, "b");
+  assert.equal(matches[1].team_a_id, "花咲徳栄");
+  assert.equal(matches[1].team_b_id, "仙台育英");
+});
+
+test("official advancement never overwrites a conflicting saved R2 side", () => {
+  const matches = [{
+    match_id: "R2-8",
+    round: "R2",
+    match_no: 8,
+    team_a_id: "花咲徳栄",
+    team_b_id: "別の高校",
+    status: "scheduled",
+    metadata: { team2_source_round_key: "R1", team2_source_match_no: 1 },
+  }];
+
+  const result = koshien.advanceOfficialWinner(matches, {
+    match_id: "R1-1",
+    round: "R1",
+    match_no: 1,
+    winner_id: "仙台育英",
+    status: "completed",
+  });
+
+  assert.deepEqual(result, { ok: false, error: "conflicting_official_feeder" });
+  assert.equal(matches[0].team_b_id, "別の高校");
+});
+
+test("canceling an R1 result clears only its official R2 feeder side", () => {
+  const matches = [{
+    match_id: "R2-8",
+    round: "R2",
+    match_no: 8,
+    team_a_id: "花咲徳栄",
+    team_b_id: "仙台育英",
+    status: "scheduled",
+    metadata: { team2_source_round_key: "R1", team2_source_match_no: 1 },
+  }];
+
+  const result = koshien.clearOfficialAdvancement(matches, {
+    match_id: "R1-1",
+    round: "R1",
+    match_no: 1,
+    winner_id: "仙台育英",
+    status: "completed",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.cleared, true);
+  assert.equal(result.side, "b");
+  assert.equal(matches[0].team_a_id, "花咲徳栄");
+  assert.equal(matches[0].team_b_id, "");
+});
+
 test("phase-one scoring applies the 1.2 captain multiplier", () => {
   const result = koshien.calculatePhase1Breakdown({
     picks: ["Team A"],

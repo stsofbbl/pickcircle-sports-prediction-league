@@ -751,6 +751,29 @@
     return data;
   }
 
+  async function registerOfficialSecondRoundSlots({ eventId, matches, sourceUrl, fetchedAt } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    const normalizedMatches = (Array.isArray(matches) ? matches : []).map((match) => ({
+      round_key: String(match?.roundKey || ""),
+      match_no: Number(match?.matchNo),
+      team1_id: match?.team1Id ? String(match.team1Id) : null,
+      team2_id: match?.team2Id ? String(match.team2Id) : null,
+      team1_source_match_no: match?.team1SourceMatchNo ? Number(match.team1SourceMatchNo) : null,
+      team2_source_match_no: match?.team2SourceMatchNo ? Number(match.team2SourceMatchNo) : null,
+    }));
+    if (!normalizedEventId) throw new Error("公式2回戦配置を反映するevent_idが必要です。");
+    const supabase = await supabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured");
+    const { data, error } = await supabase.rpc("register_koshien_official_second_round_slots", {
+      p_event_id: normalizedEventId,
+      p_matches: normalizedMatches,
+      p_source_url: String(sourceUrl || "").trim(),
+      p_fetched_at: String(fetchedAt || "").trim(),
+    });
+    if (error) throw koshienSaveError("matches", error, "公式2回戦配置を試合カードへ反映できませんでした。");
+    return data;
+  }
+
   async function updateKoshienOdds({ eventId, rows } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -1327,6 +1350,7 @@
       replaceRepresentatives: replaceKoshienRepresentatives,
       updateStartRounds: updateKoshienStartRounds,
       registerOfficialFirstRoundMatches,
+      registerOfficialSecondRoundSlots,
       updateOdds: updateKoshienOdds,
       updateGameMultipliers: updateKoshienGameMultipliers,
       deleteEvent: deleteKoshienEvent,

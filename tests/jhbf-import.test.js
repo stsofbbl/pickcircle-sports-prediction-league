@@ -299,6 +299,106 @@ test("official first-round preview is idempotent but blocks completed or conflic
   assert.equal(api.buildOfficialFirstRoundPreview(sourceMatches, context).valid, false);
 });
 
+function officialSecondRoundInputs() {
+  const starters = Array.from({ length: 15 }, (_, index) => ({
+    teamId: `starter-${index + 1}`,
+    name: `Starter ${index + 1}`,
+    startRound: 2,
+  }));
+  const sourceMatches = [];
+  for (let index = 0; index < 7; index += 1) {
+    sourceMatches.push({
+      roundKey: "R2", matchNo: index + 1,
+      teamA: { schoolName: `Starter ${index * 2 + 1}` },
+      teamB: { schoolName: `Starter ${index * 2 + 2}` },
+      sourceMatchA: null, sourceMatchB: null,
+    });
+  }
+  sourceMatches.push({
+    roundKey: "R2", matchNo: 8,
+    teamA: { schoolName: "Starter 15" }, teamB: null,
+    sourceMatchA: null, sourceMatchB: { roundKey: "R1", matchNo: 1 },
+  });
+  for (let index = 0; index < 8; index += 1) {
+    sourceMatches.push({
+      roundKey: "R2", matchNo: index + 9,
+      teamA: null, teamB: null,
+      sourceMatchA: { roundKey: "R1", matchNo: index * 2 + 2 },
+      sourceMatchB: { roundKey: "R1", matchNo: index * 2 + 3 },
+    });
+  }
+  const context = {
+    teams: starters,
+    aliases: [],
+    matches: Array.from({ length: 17 }, (_, index) => ({
+      matchId: `r1-${index + 1}`, roundKey: "R1", matchNo: index + 1, status: "scheduled",
+    })),
+  };
+  return { sourceMatches, context };
+}
+
+test("official second-round preview preserves all 32 left/right slots", () => {
+  const { sourceMatches, context } = officialSecondRoundInputs();
+  const preview = api.buildOfficialSecondRoundPreview(sourceMatches, context);
+
+  assert.equal(preview.valid, true);
+  assert.equal(preview.rows.length, 16);
+  assert.deepEqual(preview.rows[7], {
+    roundKey: "R2", matchNo: 8,
+    team1Id: "starter-15", team2Id: null,
+    team1Name: "Starter 15", team2Name: "",
+    team1SourceMatchNo: null, team2SourceMatchNo: 1,
+  });
+  assert.deepEqual(preview.rows[15], {
+    roundKey: "R2", matchNo: 16,
+    team1Id: null, team2Id: null,
+    team1Name: "", team2Name: "",
+    team1SourceMatchNo: 16, team2SourceMatchNo: 17,
+  });
+});
+
+test("official second-round preview rejects duplicate, missing, foreign, and completed slots", () => {
+  const duplicateStarter = officialSecondRoundInputs();
+  duplicateStarter.sourceMatches[1].teamA.schoolName = "Starter 1";
+  assert.equal(api.buildOfficialSecondRoundPreview(duplicateStarter.sourceMatches, duplicateStarter.context).valid, false);
+
+  const duplicateSource = officialSecondRoundInputs();
+  duplicateSource.sourceMatches[8].sourceMatchA.matchNo = 1;
+  assert.equal(api.buildOfficialSecondRoundPreview(duplicateSource.sourceMatches, duplicateSource.context).valid, false);
+
+  const missing = officialSecondRoundInputs();
+  assert.equal(api.buildOfficialSecondRoundPreview(missing.sourceMatches.slice(0, 15), missing.context).valid, false);
+
+  const foreign = officialSecondRoundInputs();
+  foreign.sourceMatches[0].teamA.schoolName = "Outside School";
+  assert.equal(api.buildOfficialSecondRoundPreview(foreign.sourceMatches, foreign.context).valid, false);
+
+  const completed = officialSecondRoundInputs();
+  completed.context.matches.push({ roundKey: "R2", matchNo: 1, status: "completed" });
+  assert.equal(api.buildOfficialSecondRoundPreview(completed.sourceMatches, completed.context).valid, false);
+});
+
+test("official second-round preview treats an identical completed card as an idempotent no-op", () => {
+  const { sourceMatches, context } = officialSecondRoundInputs();
+  const first = api.buildOfficialSecondRoundPreview(sourceMatches, context);
+  context.matches.push(...first.rows.map((row) => ({
+    roundKey: "R2",
+    matchNo: row.matchNo,
+    team1Id: row.team1Id || `winner-${row.team1SourceMatchNo}`,
+    team2Id: row.team2Id || `winner-${row.team2SourceMatchNo}`,
+    status: "completed",
+    metadata: {
+      team1_source_match_no: row.team1SourceMatchNo,
+      team2_source_match_no: row.team2SourceMatchNo,
+    },
+  })));
+
+  const repeated = api.buildOfficialSecondRoundPreview(sourceMatches, context);
+  assert.equal(repeated.valid, true);
+  assert.equal(repeated.idempotent, true);
+  assert.deepEqual(repeated.completedMatches, []);
+});
+
 test("札幌日大1-3仙台育英 is copied into the existing editor without saving it", () => {
   const r1Context = {
     teams: [

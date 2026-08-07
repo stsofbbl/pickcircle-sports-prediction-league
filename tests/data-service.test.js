@@ -930,6 +930,40 @@ test("official first-round cards use one admin RPC without touching start-round 
   );
 });
 
+test("official second-round slots use one dedicated admin RPC", async () => {
+  const supabase = createSupabaseMock();
+  const service = loadDataService(supabase.client);
+
+  await service.koshien.registerOfficialSecondRoundSlots({
+    eventId: "event-id",
+    matches: [{
+      roundKey: "R2", matchNo: 8,
+      team1Id: "starter-15", team2Id: null,
+      team1SourceMatchNo: null, team2SourceMatchNo: 1,
+    }],
+    sourceUrl: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
+    fetchedAt: "2026-08-07T00:00:00Z",
+  });
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(supabase.calls.find((call) => call.name === "register_koshien_official_second_round_slots"))),
+    {
+      operation: "rpc",
+      name: "register_koshien_official_second_round_slots",
+      args: {
+        p_event_id: "event-id",
+        p_matches: [{
+          round_key: "R2", match_no: 8,
+          team1_id: "starter-15", team2_id: null,
+          team1_source_match_no: null, team2_source_match_no: 1,
+        }],
+        p_source_url: "https://www.jhbf.or.jp/sensyuken/2026/tournament/",
+        p_fetched_at: "2026-08-07T00:00:00Z",
+      },
+    },
+  );
+});
+
 test("one edited school's odds use the event-scoped RPC without resending stale peers", async () => {
   const supabase = createSupabaseMock();
   const service = loadDataService(supabase.client);

@@ -42,8 +42,16 @@ test("browser integration invokes only fixed Edge Function and audited RPCs", ()
   assert.match(moduleSource, /save_koshien_external_team_alias/);
   assert.match(moduleSource, /record_koshien_external_imports/);
   assert.match(moduleSource, /updateStartRounds/);
+  assert.match(moduleSource, /registerOfficialSecondRoundSlots/);
   assert.match(moduleSource, /loadKoshienOnlineState\(\{ force: true \}\)/);
   assert.doesNotMatch(moduleSource, /fetch\s*\(\s*["'`]https:\/\/www\.jhbf/);
+});
+
+test("admin reviews and applies the official R2 slot mapping separately from completed R1 cards", () => {
+  assert.match(edgeSource, /round2Matches/);
+  assert.match(moduleSource, /buildOfficialSecondRoundPreview/);
+  assert.match(moduleSource, /公式2回戦配置/);
+  assert.match(moduleSource, /data-jhbf-apply-official-second-round/);
 });
 
 test("admin confirms start rounds only after reviewing a complete safe preview", () => {
