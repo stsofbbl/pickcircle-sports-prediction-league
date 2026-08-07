@@ -15,6 +15,18 @@ test("schedule sync runs when the official R1/R2 schedule is still missing", asy
   });
 });
 
+test("missing schedules do not poll the official site overnight", async () => {
+  const { scheduleDecision } = await corePromise;
+  const matches = [
+    ...Array.from({ length: 17 }, (_, index) => ({ round_key: "R1", match_no: index + 1, starts_at: null })),
+    ...Array.from({ length: 16 }, (_, index) => ({ round_key: "R2", match_no: index + 1, starts_at: null })),
+  ];
+  assert.deepEqual(scheduleDecision(matches, {}, new Date("2026-08-08T02:00:00+09:00")), {
+    due: false,
+    reason: "schedule_window_closed",
+  });
+});
+
 test("schedule sync uses morning and pregame checks without polling all day", async () => {
   const { scheduleDecision } = await corePromise;
   const matches = [
@@ -43,6 +55,19 @@ test("result polling starts only after the expected finish window", async () => 
   assert.equal(pendingDueMatches(matches, new Date("2026-08-08T09:30:00+09:00")).length, 0);
   assert.deepEqual(pendingDueMatches(matches, new Date("2026-08-08T09:45:00+09:00")).map((match) => match.id), ["a"]);
   assert.deepEqual(dueResultDates(matches, new Date("2026-08-08T09:45:00+09:00")), ["2026-08-08"]);
+});
+
+test("overdue matches do not fetch official results during deep night", async () => {
+  const { pendingDueMatches } = await corePromise;
+  const matches = [{
+    id: "late",
+    status: "scheduled",
+    team1_id: "t1",
+    team2_id: "t2",
+    starts_at: "2026-08-07T18:30:00+09:00",
+  }];
+  assert.deepEqual(pendingDueMatches(matches, new Date("2026-08-08T02:00:00+09:00")), []);
+  assert.deepEqual(pendingDueMatches(matches, new Date("2026-08-08T07:00:00+09:00")).map((match) => match.id), ["late"]);
 });
 
 test("automatic result mapping accepts exact matches and blocks manual cancellations", async () => {
