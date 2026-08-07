@@ -21,6 +21,9 @@
 
   const STYLE_ID = "yoso-home-dashboard-polish-style";
   const INSTALL_FLAG = "__yosoHomeDashboardPolishInstalled";
+  const REFRESH_COOLDOWN_MS = 2000;
+  let onlineHomeRefreshPromise = null;
+  let lastOnlineHomeRefreshAt = 0;
 
   function stripSectionNumberText(value) {
     return String(value ?? "").replace(/^[1-5][\s\u3000]+/, "");
@@ -208,6 +211,37 @@
     totalEl.textContent = scoreText;
   }
 
+  function isVisibleHome(root) {
+    if (!root?.document || root.document.hidden) return false;
+    const pageId = typeof currentPageId === "function"
+      ? currentPageId()
+      : String(root.location?.hash || "#home").replace(/^#/, "") || "home";
+    return pageId === "home";
+  }
+
+  function refreshOnlineHome(root, { force = false } = {}) {
+    if (!isVisibleHome(root)) return Promise.resolve(false);
+    const loader = typeof root.loadKoshienOnlineState === "function"
+      ? root.loadKoshienOnlineState
+      : (typeof loadKoshienOnlineState === "function" ? loadKoshienOnlineState : null);
+    if (!loader) return Promise.resolve(false);
+
+    const now = Date.now();
+    if (onlineHomeRefreshPromise) return onlineHomeRefreshPromise;
+    if (!force && now - lastOnlineHomeRefreshAt < REFRESH_COOLDOWN_MS) return Promise.resolve(false);
+    lastOnlineHomeRefreshAt = now;
+    onlineHomeRefreshPromise = Promise.resolve(loader({ force: true }))
+      .then(() => true)
+      .catch((error) => {
+        root.console?.warn?.("My Page online refresh failed", error);
+        return false;
+      })
+      .finally(() => {
+        onlineHomeRefreshPromise = null;
+      });
+    return onlineHomeRefreshPromise;
+  }
+
   function polishHome(root) {
     root.document.querySelectorAll("#home .home-event-inner h4, #home .home-virtual-link strong").forEach((node) => {
       const next = stripSectionNumberText(node.textContent);
@@ -241,7 +275,10 @@
         return result;
       };
     }
-    root.addEventListener("hashchange", () => root.setTimeout(() => syncHeaderPageState(root), 0));
+    root.addEventListener("hashchange", () => root.setTimeout(() => {
+      syncHeaderPageState(root);
+      refreshOnlineHome(root);
+    }, 0));
 
     const home = root.document.querySelector("#home");
     if (home && typeof root.MutationObserver === "function") {
@@ -250,10 +287,15 @@
     }
 
     root.document.addEventListener("visibilitychange", () => {
-      if (!root.document.hidden) updateHeaderStats(root);
+      if (!root.document.hidden) {
+        updateHeaderStats(root);
+        refreshOnlineHome(root);
+      }
     });
+    root.addEventListener("pageshow", () => refreshOnlineHome(root));
+    root.setTimeout(() => refreshOnlineHome(root), 0);
     return true;
   }
 
-  return Object.freeze({ stripSectionNumberText, installBrowser });
+  return Object.freeze({ stripSectionNumberText, refreshOnlineHome, installBrowser });
 });
