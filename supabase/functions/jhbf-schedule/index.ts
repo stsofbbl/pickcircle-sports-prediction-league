@@ -1,7 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
-import { parseJhbfStartRoundsHtml } from "../_shared/jhbf-parser.mjs";
-import { attachStartsAt, parseJhbfScheduleHtml } from "../_shared/jhbf-schedule-parser.mjs";
+import { attachStartsAt, parseJhbfScheduleHtml, parseJhbfTournamentScheduleSlots } from "../_shared/jhbf-schedule-parser.mjs";
 
 const CORS_HEADERS = Object.freeze({
   "Access-Control-Allow-Origin": "*",
@@ -114,16 +113,10 @@ Deno.serve(async (req: Request) => {
       fetchAllowedHtml(scheduleUrl, year),
     ]);
     const fetchedAt = new Date().toISOString();
-    const tournament = parseJhbfStartRoundsHtml(tournamentFetched.html, {
-      sourceUrl: tournamentFetched.url,
-      fetchedAt,
-      competitionType: "summer",
-      year,
-    });
+    const tournament = parseJhbfTournamentScheduleSlots(tournamentFetched.html);
     const schedule = parseJhbfScheduleHtml(scheduleFetched.html, { year });
-    const firstRound = attachStartsAt(tournament.matches || [], schedule.rows || []);
-    const secondRound = attachStartsAt(tournament.round2Matches || [], schedule.rows || []);
-    const rows = [...firstRound.rows, ...secondRound.rows].map((match) => ({
+    const attached = attachStartsAt(tournament.matches || [], schedule.rows || []);
+    const rows = attached.rows.map((match) => ({
       roundKey: String(match.roundKey || ""),
       matchNo: Number(match.matchNo),
       gameLabel: String(match.gameLabel || ""),
@@ -135,8 +128,7 @@ Deno.serve(async (req: Request) => {
     const warnings = [
       ...(tournament.warnings || []),
       ...(schedule.warnings || []),
-      ...firstRound.warnings,
-      ...secondRound.warnings,
+      ...attached.warnings,
     ];
     if (rows.length !== 33 || rows.some((row) => !row.startsAt)) {
       warnings.push(`scheduled_match_count:${rows.filter((row) => row.startsAt).length}/33`);
