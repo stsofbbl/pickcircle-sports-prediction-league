@@ -117,7 +117,7 @@ function pairMatches(leftA, leftB, rightA, rightB) {
   return (leftA === rightA && leftB === rightB) || (leftA === rightB && leftB === rightA);
 }
 
-export function buildCanonicalResultRows(sourceRows = [], context = {}, allowedMatchIds = null) {
+export function buildCanonicalResultRows(sourceRows = [], context = {}, allowedMatchIds = new Set()) {
   const teams = Array.isArray(context?.teams) ? context.teams : [];
   const aliases = Array.isArray(context?.aliases) ? context.aliases : [];
   const matches = Array.isArray(context?.matches) ? context.matches : [];
@@ -128,7 +128,7 @@ export function buildCanonicalResultRows(sourceRows = [], context = {}, allowedM
     String(alias.team_id || alias.teamId || ""),
   ]));
   const importByKey = new Map(imports.map((item) => [String(item.external_key || item.externalKey || ""), item]));
-  const allowed = allowedMatchIds instanceof Set ? allowedMatchIds : null;
+  const allowed = allowedMatchIds instanceof Set && allowedMatchIds.size ? allowedMatchIds : null;
   const ready = [];
   const skipped = [];
   const conflicts = [];
