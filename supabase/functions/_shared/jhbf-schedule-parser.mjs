@@ -37,58 +37,70 @@ function startsAtFor({ year, month, day, hour, minute }) {
   return `${Number(year)}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}:00+09:00`;
 }
 
+function parseClock(value) {
+  const match = normalizeLabel(value).match(/(?:^|\s)(\d{1,2})(?:時|:)(\d{2})(?:分)?(?:\s|$)/u);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
 export function parseJhbfScheduleHtml(html, options = {}) {
   const year = Number(options.year);
   if (!Number.isInteger(year)) throw new Error("year is required");
 
-  const text = htmlToStructuredText(html);
-  const dayPattern = /(\d{1,2})月(\d{1,2})日[\s\S]{0,80}?[（(]第\s*(\d+)\s*日[）)]/gu;
-  const headings = [...text.matchAll(dayPattern)];
   const rows = [];
   const warnings = [];
+  const seen = new Set();
+  let currentDate = null;
+  let currentDayNo = null;
 
-  headings.forEach((heading, index) => {
-    const month = Number(heading[1]);
-    const day = Number(heading[2]);
-    const dayNo = Number(heading[3]);
-    const start = (heading.index || 0) + heading[0].length;
-    const end = index + 1 < headings.length ? headings[index + 1].index : text.length;
-    const segment = text.slice(start, end).replace(/\n+/g, " ");
+  const tableRows = [...String(html || "").matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
+  for (const rowMatch of tableRows) {
+    const cells = [...rowMatch[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)]
+      .map((cell) => normalizeLabel(htmlToStructuredText(cell[1])));
+    if (!cells.length) continue;
+    const rowText = cells.join(" ");
+    const dateMatch = rowText.match(/(\d{1,2})月(\d{1,2})日/u);
+    const dayMatch = rowText.match(/[（(]第\s*(\d+)\s*日[）)]/u);
+    if (dateMatch) currentDate = { month: Number(dateMatch[1]), day: Number(dateMatch[2]) };
+    if (dayMatch) currentDayNo = Number(dayMatch[1]);
+    if (!currentDate || !currentDayNo) continue;
 
-    const seenMatchNos = new Set();
-    const matchPattern = /(\d{1,2})(?:時|:)(\d{2})(?:分)?\s*第\s*(\d+)\s*試合(?:\s*[（(]([^）)]*)[）)])?/gu;
-    for (const match of segment.matchAll(matchPattern)) {
-      const hour = Number(match[1]);
-      const minute = Number(match[2]);
-      const dailyMatchNo = Number(match[3]);
-      if (seenMatchNos.has(dailyMatchNo)) continue;
-      if (hour > 23 || minute > 59 || dailyMatchNo < 1 || dailyMatchNo > 4) continue;
-      seenMatchNos.add(dailyMatchNo);
+    cells.forEach((cell, cellIndex) => {
+      const matchLabel = cell.match(/第\s*(\d+)\s*試合\s*[（(]([^）)]*)[）)]/u);
+      if (!matchLabel) return;
+      const dailyMatchNo = Number(matchLabel[1]);
+      if (dailyMatchNo < 1 || dailyMatchNo > 4) return;
+      let clock = null;
+      for (let index = cellIndex - 1; index >= 0 && !clock; index -= 1) clock = parseClock(cells[index]);
+      if (!clock) clock = parseClock(cell);
+      if (!clock) {
+        warnings.push(`schedule_time_not_found:${currentDayNo}:${dailyMatchNo}`);
+        return;
+      }
+      const key = `${currentDayNo}:${dailyMatchNo}`;
+      if (seen.has(key)) {
+        warnings.push(`duplicate_schedule_slot:${key}`);
+        return;
+      }
+      seen.add(key);
       rows.push({
-        dayNo,
+        dayNo: currentDayNo,
         dailyMatchNo,
-        month,
-        day,
-        scheduledTime: `${pad2(hour)}:${pad2(minute)}`,
-        startsAt: startsAtFor({ year, month, day, hour, minute }),
-        roundLabel: String(match[4] || "").trim(),
+        month: currentDate.month,
+        day: currentDate.day,
+        scheduledTime: `${pad2(clock.hour)}:${pad2(clock.minute)}`,
+        startsAt: startsAtFor({ year, month: currentDate.month, day: currentDate.day, hour: clock.hour, minute: clock.minute }),
+        roundLabel: String(matchLabel[2] || "").trim(),
       });
-    }
+    });
+  }
 
-    if (!seenMatchNos.size && /第\s*\d+\s*試合/u.test(segment)) {
-      warnings.push(`schedule_times_not_found:day_${dayNo}`);
-    }
-  });
-
-  if (!headings.length) warnings.push("schedule_day_headings_not_found");
+  if (!tableRows.length) warnings.push("schedule_table_rows_not_found");
   if (!rows.length) warnings.push("schedule_match_times_not_found");
-
-  const duplicateKeys = rows
-    .map((row) => `${row.dayNo}:${row.dailyMatchNo}`)
-    .filter((key, index, keys) => keys.indexOf(key) !== index);
-  [...new Set(duplicateKeys)].forEach((key) => warnings.push(`duplicate_schedule_slot:${key}`));
-
-  return { rows, warnings, textSample: rows.length ? "" : text.slice(0, 300) };
+  return { rows, warnings: [...new Set(warnings)], textSample: rows.length ? "" : htmlToStructuredText(html).slice(0, 300) };
 }
 
 export function parseJhbfTournamentScheduleSlots(html) {
