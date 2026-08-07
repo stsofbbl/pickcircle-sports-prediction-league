@@ -27,6 +27,38 @@ test("JHBF schedule parser reads split date/day cells and Japanese start times",
   assert.equal(parsed.rows[2].startsAt, "2026-08-09T08:00:00+09:00");
 });
 
+test("JHBF schedule parser keeps day context across linked completed rows", async () => {
+  const { parseJhbfScheduleHtml } = await parserPromise;
+  const html = `
+    <table>
+      <tr>
+        <td rowspan="2"><a href="schedule_20260805.html">8月5日(水)</a><br>（<a href="schedule_20260805.html">第1日</a>）</td>
+        <td rowspan="2">15:00</td><td>16時00分</td><td>開会式</td>
+      </tr>
+      <tr><td>17時39分</td><td>第1試合(1回戦)</td></tr>
+      <tr>
+        <td rowspan="2"><a href="schedule_20260806.html">8月6日(木)</a><br>（<a href="schedule_20260806.html">第2日</a>）</td>
+        <td rowspan="2">15:00</td><td>16時02分</td><td>第1試合(1回戦)</td>
+      </tr>
+      <tr><td>18時43分</td><td>第2試合(1回戦)</td></tr>
+      <tr>
+        <td rowspan="4"><a href="schedule_20260807.html">8月7日(金)</a><br>（<a href="schedule_20260807.html">第3日</a>）</td>
+        <td rowspan="4">7:00</td><td>8時02分</td><td>第1試合(1回戦)</td>
+      </tr>
+      <tr><td>13時32分</td><td>第2試合(1回戦)</td></tr>
+      <tr><td>16時15分</td><td>第3試合(1回戦)</td></tr>
+      <tr><td>18時58分</td><td>第4試合(1回戦)</td></tr>
+    </table>`;
+  const parsed = parseJhbfScheduleHtml(html, { year: 2026 });
+  assert.deepEqual(parsed.warnings, []);
+  assert.equal(parsed.rows.length, 7);
+  assert.deepEqual(parsed.rows.map((row) => [row.dayNo, row.dailyMatchNo, row.scheduledTime]), [
+    [1, 1, "17:39"],
+    [2, 1, "16:02"], [2, 2, "18:43"],
+    [3, 1, "08:02"], [3, 2, "13:32"], [3, 3, "16:15"], [3, 4, "18:58"],
+  ]);
+});
+
 test("tournament schedule slot parser reads exactly the R1 and R2 game-day columns", async () => {
   const { parseJhbfTournamentScheduleSlots } = await parserPromise;
   const r1 = Array.from({ length: 17 }, (_, index) => `<tr><td></td><td class="gameDay">第${Math.floor(index / 4) + 1}日 第${(index % 4) + 1}試合</td></tr>`).join("");

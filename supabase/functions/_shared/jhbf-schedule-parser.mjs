@@ -42,7 +42,7 @@ export function parseJhbfScheduleHtml(html, options = {}) {
   if (!Number.isInteger(year)) throw new Error("year is required");
 
   const text = htmlToStructuredText(html);
-  const dayPattern = /(\d{1,2})月(\d{1,2})日[\s\S]{0,80}?[（(]第\s*(\d+)\s*日[）)]/gu;
+  const dayPattern = /(\d{1,2})月(\d{1,2})日[\s\S]{0,80}?[（(]\s*第\s*(\d+)\s*日\s*[）)]/gu;
   const headings = [...text.matchAll(dayPattern)];
   const rows = [];
   const warnings = [];
