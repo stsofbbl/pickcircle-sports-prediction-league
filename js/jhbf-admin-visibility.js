@@ -17,13 +17,26 @@
     return true;
   }
 
+  function loadHomeDashboardPolish() {
+    if (root.YosoHomeDashboardPolish || root.document?.querySelector('script[data-yoso-home-dashboard-polish]')) return;
+    const script = root.document?.createElement("script");
+    if (!script) return;
+    script.src = "./js/home-dashboard-polish.js?v=20260808-1";
+    script.dataset.yosoHomeDashboardPolish = "true";
+    root.document.head?.appendChild(script);
+  }
+
   function loadHomeDashboard() {
-    if (root.YosoHomeDashboard || root.document?.querySelector('script[data-yoso-home-dashboard]')) return;
+    if (root.YosoHomeDashboard) {
+      loadHomeDashboardPolish();
+      return;
+    }
+    if (root.document?.querySelector('script[data-yoso-home-dashboard]')) return;
     const script = root.document?.createElement("script");
     if (!script) return;
     script.src = "./js/home-dashboard.js?v=20260807-1";
     script.dataset.yosoHomeDashboard = "true";
-    script.defer = true;
+    script.onload = loadHomeDashboardPolish;
     root.document.head?.appendChild(script);
   }
 
