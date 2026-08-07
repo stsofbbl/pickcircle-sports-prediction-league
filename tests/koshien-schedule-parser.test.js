@@ -27,6 +27,18 @@ test("JHBF schedule parser reads split date/day cells and Japanese start times",
   assert.equal(parsed.rows[2].startsAt, "2026-08-09T08:00:00+09:00");
 });
 
+test("tournament schedule slot parser reads exactly the R1 and R2 game-day columns", async () => {
+  const { parseJhbfTournamentScheduleSlots } = await parserPromise;
+  const r1 = Array.from({ length: 17 }, (_, index) => `<tr><td></td><td class="gameDay">第${Math.floor(index / 4) + 1}日 第${(index % 4) + 1}試合</td></tr>`).join("");
+  const r2 = Array.from({ length: 16 }, (_, index) => `<tr><td></td><td></td><td></td><td class="gameDay">第${Math.floor(index / 4) + 6}日 第${(index % 4) + 1}試合</td></tr>`).join("");
+  const parsed = parseJhbfTournamentScheduleSlots(`<table class="tournamentTable">${r1}${r2}</table>`);
+  assert.deepEqual(parsed.warnings, []);
+  assert.equal(parsed.matches.length, 33);
+  assert.deepEqual(parsed.matches[0], { roundKey: "R1", matchNo: 1, gameLabel: "第1日 第1試合" });
+  assert.deepEqual(parsed.matches[17], { roundKey: "R2", matchNo: 1, gameLabel: "第6日 第1試合" });
+  assert.deepEqual(parsed.matches.at(-1), { roundKey: "R2", matchNo: 16, gameLabel: "第9日 第4試合" });
+});
+
 test("attachStartsAt maps tournament game labels without guessing", async () => {
   const { attachStartsAt } = await parserPromise;
   const result = attachStartsAt([
