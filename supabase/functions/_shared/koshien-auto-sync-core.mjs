@@ -1,6 +1,10 @@
 const RESULT_FIRST_CHECK_MINUTES = 105;
 const SCHEDULE_RETRY_MINUTES = 30;
 const DELAY_REFRESH_MINUTES = 180;
+const SCHEDULE_FETCH_START_MINUTES = 5 * 60;
+const SCHEDULE_FETCH_END_MINUTES = 22 * 60 + 30;
+const RESULT_POLL_START_MINUTES = 7 * 60;
+const RESULT_POLL_END_MINUTES = 23 * 60 + 30;
 
 function parseDate(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -40,12 +44,18 @@ export function jstMinutesOfDay(value) {
   return Number(map.hour) * 60 + Number(map.minute);
 }
 
+function withinMinutes(minutes, start, end) {
+  return minutes >= start && minutes <= end;
+}
+
 function matchStartsAt(match) {
   return match?.starts_at || match?.startsAt || "";
 }
 
 export function pendingDueMatches(matches = [], now = new Date()) {
   const nowDate = parseDate(now) || new Date();
+  const currentMinutes = jstMinutesOfDay(nowDate);
+  if (!withinMinutes(currentMinutes, RESULT_POLL_START_MINUTES, RESULT_POLL_END_MINUTES)) return [];
   const firstCheckMs = RESULT_FIRST_CHECK_MINUTES * 60 * 1000;
   return (Array.isArray(matches) ? matches : [])
     .filter((match) => String(match?.status || "") !== "completed")
@@ -65,11 +75,16 @@ export function dueResultDates(matches = [], now = new Date()) {
 
 export function scheduleDecision(matches = [], state = {}, now = new Date()) {
   const nowDate = parseDate(now) || new Date();
+  const minutes = jstMinutesOfDay(nowDate);
+  const scheduleWindowOpen = withinMinutes(minutes, SCHEDULE_FETCH_START_MINUTES, SCHEDULE_FETCH_END_MINUTES);
   const relevant = (Array.isArray(matches) ? matches : [])
     .filter((match) => ["R1", "R2"].includes(String(match?.round_key || match?.roundKey || "")));
   const lastAttempt = parseDate(state?.last_schedule_attempt_at);
   const retryReady = !lastAttempt || nowDate.getTime() - lastAttempt.getTime() >= SCHEDULE_RETRY_MINUTES * 60 * 1000;
-  if (relevant.length === 33 && relevant.some((match) => !matchStartsAt(match)) && retryReady) {
+  const scheduleMissing = relevant.length === 33 && relevant.some((match) => !matchStartsAt(match));
+  if (scheduleMissing) {
+    if (!scheduleWindowOpen) return { due: false, reason: "schedule_window_closed" };
+    if (!retryReady) return { due: false, reason: "schedule_retry_wait" };
     return { due: true, reason: "missing_schedule" };
   }
 
@@ -78,8 +93,8 @@ export function scheduleDecision(matches = [], state = {}, now = new Date()) {
     .filter((match) => matchStartsAt(match) && jstDateKey(matchStartsAt(match)) === today)
     .sort((left, right) => new Date(matchStartsAt(left)) - new Date(matchStartsAt(right)));
   if (!todayMatches.length) return { due: false, reason: "no_match_today" };
+  if (!scheduleWindowOpen) return { due: false, reason: "schedule_window_closed" };
 
-  const minutes = jstMinutesOfDay(nowDate);
   if (minutes >= 5 * 60 && String(state?.schedule_morning_date || "") !== today && retryReady) {
     return { due: true, reason: "matchday_morning" };
   }
@@ -224,4 +239,8 @@ export const AUTO_SYNC_LIMITS = Object.freeze({
   resultFirstCheckMinutes: RESULT_FIRST_CHECK_MINUTES,
   scheduleRetryMinutes: SCHEDULE_RETRY_MINUTES,
   delayRefreshMinutes: DELAY_REFRESH_MINUTES,
+  scheduleFetchStartMinutes: SCHEDULE_FETCH_START_MINUTES,
+  scheduleFetchEndMinutes: SCHEDULE_FETCH_END_MINUTES,
+  resultPollStartMinutes: RESULT_POLL_START_MINUTES,
+  resultPollEndMinutes: RESULT_POLL_END_MINUTES,
 });
