@@ -25,6 +25,10 @@ function htmlToStructuredText(html) {
     .join("\n");
 }
 
+function normalizeLabel(value) {
+  return String(value || "").normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -85,6 +89,32 @@ export function parseJhbfScheduleHtml(html, options = {}) {
   [...new Set(duplicateKeys)].forEach((key) => warnings.push(`duplicate_schedule_slot:${key}`));
 
   return { rows, warnings, textSample: rows.length ? "" : text.slice(0, 300) };
+}
+
+export function parseJhbfTournamentScheduleSlots(html) {
+  const tables = [...String(html || "").matchAll(/<table\b([^>]*)>([\s\S]*?)<\/table>/gi)]
+    .filter((match) => /(?:^|\s)tournamentTable(?:\s|$)/i.test(
+      String(match[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || "",
+    ));
+  const r1 = [];
+  const r2 = [];
+  for (const table of tables) {
+    for (const row of table[2].matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const cells = [...row[1].matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)];
+      const gameCellIndex = cells.findIndex((cell) => /(?:^|\s)gameDay(?:\s|$)/i.test(
+        String(cell[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || "",
+      ));
+      if (gameCellIndex !== 1 && gameCellIndex !== 3) continue;
+      const gameLabel = normalizeLabel(htmlToStructuredText(cells[gameCellIndex][2]));
+      if (!/^第\d+日\s*第\d+試合$/u.test(gameLabel)) continue;
+      const target = gameCellIndex === 1 ? r1 : r2;
+      target.push({ roundKey: gameCellIndex === 1 ? "R1" : "R2", matchNo: target.length + 1, gameLabel });
+    }
+  }
+  const warnings = [];
+  if (r1.length !== 17) warnings.push(`first_round_game_count:${r1.length}`);
+  if (r2.length !== 16) warnings.push(`second_round_game_count:${r2.length}`);
+  return { matches: [...r1, ...r2], warnings };
 }
 
 export function gameLabelSlot(value) {
