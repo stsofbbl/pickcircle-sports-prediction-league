@@ -21,7 +21,7 @@
     if (root.YosoHomeDashboardPolish || root.document?.querySelector('script[data-yoso-home-dashboard-polish]')) return;
     const script = root.document?.createElement("script");
     if (!script) return;
-    script.src = "./js/home-dashboard-polish.js?v=20260808-1";
+    script.src = "./js/home-dashboard-polish.js?v=20260808-2";
     script.dataset.yosoHomeDashboardPolish = "true";
     root.document.head?.appendChild(script);
   }
