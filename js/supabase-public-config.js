@@ -24,7 +24,7 @@ window.YOSO_SUPABASE_CONFIG = {
 
 (() => {
   const script = document.createElement("script");
-  script.src = "./js/koshien-start-time-bridge.js?v=20260809-1";
+  script.src = "./js/koshien-start-time-bridge.js?v=20260809-2";
   script.async = false;
   document.head.appendChild(script);
 })();

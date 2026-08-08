@@ -11,20 +11,32 @@
     return round && Number.isInteger(matchNo) && matchNo > 0 ? `${round}:${matchNo}` : "";
   }
 
-  function hasStartTime(match) {
-    return Boolean(
-      match?.starts_at
+  function matchStartTime(match, fallback = "") {
+    return match?.starts_at
       || match?.startsAt
       || match?.metadata?.starts_at
-      || match?.metadata?.scheduled_at,
-    );
+      || match?.metadata?.scheduled_at
+      || fallback
+      || "";
+  }
+
+  function preserveStartTime(match, fallback = "") {
+    const startsAt = matchStartTime(match, fallback);
+    if (!startsAt) return match;
+    return {
+      ...match,
+      starts_at: startsAt,
+      metadata: {
+        ...(match?.metadata && typeof match.metadata === "object" ? match.metadata : {}),
+        starts_at: startsAt,
+      },
+    };
   }
 
   async function enrichSnapshotStartsAt(snapshot) {
     const matches = snapshot?.results?.payload?.matches;
     const eventId = String(snapshot?.event?.id || "").trim();
     if (!snapshot?.ok || !eventId || !Array.isArray(matches) || !matches.length) return snapshot;
-    if (matches.every(hasStartTime)) return snapshot;
 
     try {
       const supabase = await window.YosoSupabase?.client?.();
@@ -40,16 +52,12 @@
           .filter((row) => row?.starts_at)
           .map((row) => [`${String(row.round_key || "")}:${Number(row.match_no)}`, row.starts_at]),
       );
-      if (!startsAtByMatch.size) return snapshot;
 
       snapshot.results = {
         ...snapshot.results,
         payload: {
           ...snapshot.results.payload,
-          matches: matches.map((match) => {
-            const startsAt = startsAtByMatch.get(matchKey(match));
-            return startsAt && !hasStartTime(match) ? { ...match, starts_at: startsAt } : match;
-          }),
+          matches: matches.map((match) => preserveStartTime(match, startsAtByMatch.get(matchKey(match)))),
         },
       };
     } catch (error) {
