@@ -29,6 +29,21 @@
       .map((row) => [`${String(row.round_key || "")}:${Number(row.match_no)}`, String(row.starts_at)]));
   }
 
+  function preserveEmbeddedStartTimes(snapshot) {
+    const matches = snapshot?.results?.payload?.matches;
+    if (!Array.isArray(matches) || !matches.length) return snapshot;
+
+    matches.forEach((match) => {
+      const startsAt = match?.starts_at || match?.startsAt || match?.metadata?.starts_at || match?.metadata?.scheduled_at || "";
+      if (!startsAt) return;
+      match.metadata = {
+        ...(match.metadata && typeof match.metadata === "object" ? match.metadata : {}),
+        starts_at: String(startsAt),
+      };
+    });
+    return snapshot;
+  }
+
   function mergeStartTimesIntoSnapshot(snapshot, rows = []) {
     const matches = snapshot?.results?.payload?.matches;
     if (!Array.isArray(matches) || !matches.length) return snapshot;
@@ -51,16 +66,14 @@
   function snapshotHasStartTimes(snapshot) {
     const matches = snapshot?.results?.payload?.matches;
     if (!Array.isArray(matches) || !matches.length) return false;
-    return matches.some((match) => (
-      match?.starts_at
-      || match?.startsAt
-      || match?.metadata?.starts_at
-      || match?.metadata?.scheduled_at
-    ));
+    return matches.some((match) => Boolean(match?.metadata?.starts_at || match?.metadata?.scheduled_at));
   }
 
   async function enrichSnapshot(root, snapshot, args = {}) {
-    if (!snapshot || snapshot.skipped || snapshotHasStartTimes(snapshot)) return snapshot;
+    if (!snapshot || snapshot.skipped) return snapshot;
+
+    preserveEmbeddedStartTimes(snapshot);
+
     const eventId = String(args?.eventId || snapshot?.event?.id || snapshot?.eventId || "").trim();
     if (!eventId) return snapshot;
 
@@ -105,6 +118,7 @@
   return Object.freeze({
     installBrowser,
     mergeStartTimesIntoSnapshot,
+    preserveEmbeddedStartTimes,
     snapshotHasStartTimes,
     startTimeByMatchKey,
   });

@@ -6,7 +6,36 @@ const test = require("node:test");
 const bridge = require("../js/koshien-start-time-bridge.js");
 const homeDashboard = require("../js/home-dashboard.js");
 
-test("structured match starts_at is bridged into preserved metadata and renders in JST", () => {
+test("embedded starts_at is copied into metadata before app normalization and renders in JST", () => {
+  const startsAt = "2026-08-09T09:30:00+00:00";
+  const snapshot = {
+    results: {
+      payload: {
+        matches: [{
+          match_id: "R1-15",
+          round: "R1",
+          match_no: 15,
+          team_a_id: "中京",
+          team_b_id: "霞ケ浦",
+          status: "scheduled",
+          starts_at: startsAt,
+          metadata: {},
+        }],
+      },
+    },
+  };
+
+  bridge.preserveEmbeddedStartTimes(snapshot);
+
+  assert.equal(snapshot.results.payload.matches[0].metadata.starts_at, startsAt);
+  assert.equal(homeDashboard.teamStatus({
+    matches: snapshot.results.payload.matches,
+    team: "霞ケ浦",
+    now: Date.parse("2026-08-09T01:00:00+00:00"),
+  }).text, "本日 18:30");
+});
+
+test("DB starts_at fallback is bridged into metadata when payload has no embedded time", () => {
   const startsAt = "2026-08-09T09:30:00+00:00";
   const snapshot = {
     results: {
@@ -31,11 +60,6 @@ test("structured match starts_at is bridged into preserved metadata and renders 
   }]);
 
   assert.equal(snapshot.results.payload.matches[0].metadata.starts_at, startsAt);
-  assert.equal(homeDashboard.teamStatus({
-    matches: snapshot.results.payload.matches,
-    team: "霞ケ浦",
-    now: Date.parse("2026-08-09T01:00:00+00:00"),
-  }).text, "本日 18:30");
 });
 
 test("bridge loader is wired into the browser extension bootstrap", () => {
