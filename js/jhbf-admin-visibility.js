@@ -40,6 +40,15 @@
     root.document.head?.appendChild(script);
   }
 
+  function loadKoshienStartTimeBridge() {
+    if (root.YosoKoshienStartTimeBridge || root.document?.querySelector('script[data-yoso-koshien-start-time-bridge]')) return;
+    const script = root.document?.createElement("script");
+    if (!script) return;
+    script.src = "./js/koshien-start-time-bridge.js?v=20260809-1";
+    script.dataset.yosoKoshienStartTimeBridge = "true";
+    root.document.head?.appendChild(script);
+  }
+
   function loadKoshienScheduleSync() {
     if (root.YosoKoshienScheduleSync || root.document?.querySelector('script[data-yoso-koshien-schedule-sync]')) return;
     const script = root.document?.createElement("script");
@@ -52,6 +61,7 @@
 
   function installBrowserExtensions() {
     install();
+    loadKoshienStartTimeBridge();
     loadHomeDashboard();
     loadKoshienScheduleSync();
   }
