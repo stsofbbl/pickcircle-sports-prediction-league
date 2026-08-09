@@ -4807,6 +4807,7 @@ function normalizeKoshienMatch(match = {}, round = "R1", matchNo = 1, teams = []
     winner_id: teamSet.has(winner) ? winner : winner,
     loser_id: teamSet.has(loser) ? loser : loser,
     status,
+    starts_at: match.starts_at || "",
     metadata: match.metadata && typeof match.metadata === "object" ? { ...match.metadata } : {},
   };
 }
