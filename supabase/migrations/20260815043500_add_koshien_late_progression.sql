@@ -1,3 +1,30 @@
+create or replace function public.protect_koshien_opened_later_results()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if (
+    (old.winner_team_id, old.loser_team_id) is distinct from (new.winner_team_id, new.loser_team_id)
+    or (
+      (old.team1_id, old.team2_id) is distinct from (new.team1_id, new.team2_id)
+      and not (
+        old.status = 'scheduled' and new.status = 'scheduled'
+        and old.winner_team_id is null and new.winner_team_id is null
+        and old.loser_team_id is null and new.loser_team_id is null
+      )
+    )
+  ) and (
+    exists (select 1 from public.koshien_later_rounds r where r.event_id = old.event_id and r.status in ('open','locked','completed'))
+    or exists (select 1 from public.phase2_drafts d where d.event_id = old.event_id and d.status in ('drafting','completed','locked'))
+  ) then
+    raise exception 'winner-changing result corrections are locked after a later phase opens' using errcode = '55000';
+  end if;
+  return new;
+end;
+$$;
+
 create or replace function public.sync_koshien_late_round_advancement()
 returns trigger
 language plpgsql
