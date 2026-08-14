@@ -82,4 +82,27 @@ assert.match(markup, /拓大紅陵/);
 const guard = today.guardSignature(phase2View, "50銭", event, now);
 assert.match(guard, /敦賀気比\|R3\|2\|2026-08-15T01:30:00Z$/);
 
+const normalizedEvent = JSON.parse(JSON.stringify(event));
+normalizedEvent.results.matches.forEach((match) => {
+  delete match.starts_at;
+  match.metadata = {};
+});
+assert.deepStrictEqual(
+  today.todayCandidatesForTeams(today.phase2ParticipantTeams(phase2View, "50銭"), normalizedEvent, now),
+  [],
+  "normalized browser state reproduces the production bug before DB start-time enrichment",
+);
+
+const scheduleRows = event.results.matches.map((match) => ({
+  round_key: match.round,
+  match_no: match.match_no,
+  starts_at: match.starts_at,
+}));
+const enrichedEvent = today.eventWithStartTimes(normalizedEvent, scheduleRows);
+const enrichedPhase1Rows = today.todayCandidatesForTeams(today.phase1ParticipantTeams(enrichedEvent, "50銭"), enrichedEvent, now);
+const enrichedPhase2Rows = today.todayCandidatesForTeams(today.phase2ParticipantTeams(phase2View, "50銭"), enrichedEvent, now);
+assert.deepStrictEqual(enrichedPhase1Rows.map((row) => row.team), ["天理", "三重"]);
+assert.deepStrictEqual(enrichedPhase2Rows.map((row) => row.team), ["敦賀気比", "三重", "拓大紅陵"]);
+assert.strictEqual(normalizedEvent.results.matches[0].starts_at, undefined, "enrichment must not mutate app state");
+
 console.log("home today all phases tests passed");
