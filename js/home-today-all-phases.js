@@ -21,6 +21,9 @@
 
   const STYLE_ID = "yoso-home-today-all-phases-style";
   const INSTALL_FLAG = "__yosoHomeTodayAllPhasesInstalled";
+  const START_TIME_CACHE_TTL_MS = 5 * 60 * 1000;
+  const startTimeCacheByEvent = new Map();
+  const startTimeLoadByEvent = new Map();
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -79,6 +82,69 @@
 
   function matchCompleted(match) {
     return ["completed", "final"].includes(String(match?.status || ""));
+  }
+
+  function startTimeKey(round, number) {
+    return `${String(round || "")}:${Number(number || 0)}`;
+  }
+
+  function eventWithStartTimes(event, rows = []) {
+    const matches = Array.isArray(event?.results?.matches) ? event.results.matches : [];
+    if (!matches.length || !Array.isArray(rows) || !rows.length) return event;
+    const startTimes = new Map(rows
+      .filter((row) => row?.starts_at)
+      .map((row) => [startTimeKey(row.round_key || row.round, row.match_no), String(row.starts_at)]));
+    if (!startTimes.size) return event;
+    const enrichedMatches = matches.map((match) => {
+      const startsAt = startTimes.get(startTimeKey(matchRound(match), matchNo(match)));
+      if (!startsAt) return match;
+      return {
+        ...match,
+        starts_at: startsAt,
+        metadata: {
+          ...(match?.metadata && typeof match.metadata === "object" ? match.metadata : {}),
+          starts_at: startsAt,
+        },
+      };
+    });
+    return {
+      ...event,
+      results: {
+        ...(event?.results && typeof event.results === "object" ? event.results : {}),
+        matches: enrichedMatches,
+      },
+    };
+  }
+
+  function cachedStartTimeRows(eventId, now = Date.now()) {
+    const cached = startTimeCacheByEvent.get(String(eventId || ""));
+    if (!cached || now - cached.loadedAt > START_TIME_CACHE_TTL_MS) return [];
+    return cached.rows;
+  }
+
+  async function loadStartTimeRows(root, eventId, { force = false } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) return [];
+    const cached = startTimeCacheByEvent.get(normalizedEventId);
+    if (!force && cached && Date.now() - cached.loadedAt <= START_TIME_CACHE_TTL_MS) return cached.rows;
+    if (startTimeLoadByEvent.has(normalizedEventId)) return startTimeLoadByEvent.get(normalizedEventId);
+
+    const promise = (async () => {
+      const supabase = await root.YosoSupabase?.client?.();
+      if (!supabase) return cached?.rows || [];
+      const { data, error } = await supabase
+        .from("matches")
+        .select("round_key, match_no, starts_at")
+        .eq("event_id", normalizedEventId);
+      if (error) throw error;
+      const rows = (Array.isArray(data) ? data : []).filter((row) => row?.starts_at);
+      startTimeCacheByEvent.set(normalizedEventId, { loadedAt: Date.now(), rows });
+      return rows;
+    })().finally(() => {
+      startTimeLoadByEvent.delete(normalizedEventId);
+    });
+    startTimeLoadByEvent.set(normalizedEventId, promise);
+    return promise;
   }
 
   function japanDateKey(value) {
@@ -238,8 +304,10 @@
     const event = resolveEvent(view);
     if (!participant || !event) return false;
 
-    const phase1Rows = todayCandidatesForTeams(phase1ParticipantTeams(event, participant), event, now);
-    const phase2Rows = todayCandidatesForTeams(phase2ParticipantTeams(view, participant), event, now);
+    const eventId = String(event?.id || view.eventId || "");
+    const displayEvent = eventWithStartTimes(event, cachedStartTimeRows(eventId, now));
+    const phase1Rows = todayCandidatesForTeams(phase1ParticipantTeams(displayEvent, participant), displayEvent, now);
+    const phase2Rows = todayCandidatesForTeams(phase2ParticipantTeams(view, participant), displayEvent, now);
     const card = root.document.querySelector("#home .home-today-card");
     if (!card) return false;
 
@@ -266,17 +334,36 @@
     return true;
   }
 
+  async function refreshStartTimes(root, { force = false } = {}) {
+    const view = typeof koshienPhase2DraftView === "object" && koshienPhase2DraftView
+      ? koshienPhase2DraftView
+      : null;
+    const event = resolveEvent(view);
+    const eventId = String(event?.id || view?.eventId || "");
+    if (!eventId) return false;
+    try {
+      await loadStartTimeRows(root, eventId, { force });
+      patchCard(root);
+      return true;
+    } catch (error) {
+      root.console?.warn?.("Today YOSO start-time lookup failed", error);
+      return false;
+    }
+  }
+
   function installBrowser(root) {
     if (!root?.document || root[INSTALL_FLAG]) return false;
     root[INSTALL_FLAG] = true;
     installStyles(root);
     patchCard(root);
+    root.setTimeout(() => refreshStartTimes(root), 0);
 
     if (typeof renderDashboard === "function") {
       const originalRenderDashboard = renderDashboard;
       renderDashboard = function renderDashboardWithAllTodayYoso() {
         const result = originalRenderDashboard.apply(this, arguments);
         patchCard(root);
+        refreshStartTimes(root);
         return result;
       };
     }
@@ -288,20 +375,29 @@
     }
 
     root.document.addEventListener("visibilitychange", () => {
-      if (!root.document.hidden) patchCard(root);
+      if (!root.document.hidden) {
+        patchCard(root);
+        refreshStartTimes(root);
+      }
     });
-    root.addEventListener("pageshow", () => patchCard(root));
+    root.addEventListener("pageshow", () => {
+      patchCard(root);
+      refreshStartTimes(root);
+    });
     return true;
   }
 
   return Object.freeze({
     phase1ParticipantTeams,
     phase2ParticipantTeams,
+    eventWithStartTimes,
     todayCandidatesForTeams,
     phase2GuardCandidate,
     guardSignature,
     todaysYosoMarkup,
     patchCard,
+    loadStartTimeRows,
+    refreshStartTimes,
     installBrowser,
   });
 });
