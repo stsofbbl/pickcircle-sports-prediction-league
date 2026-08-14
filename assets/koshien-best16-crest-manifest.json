@@ -1,0 +1,122 @@
+{
+  "eventId": "2930e8b6-0fe7-45c4-bcf6-edeb8b1407f0",
+  "verifiedAt": "2026-08-14",
+  "representativeSchoolSource": "https://www.jhbf.or.jp/sensyuken/2026/team/",
+  "assetDirectory": "assets/koshien-school-crests",
+  "assetSha256ByTeamId": {
+    "070a2cb8-136f-47b6-8e4d-e83667cd6efe": "a32887262658b3cea6921f9e973f822a988f7b5b010ec7cd172a938a382e23e8",
+    "0b645447-54e8-4213-8ebd-1f4f05e2a548": "c4873b64372d31f9be14c3249e89bc89d7b0b84c6644500caead83b2e6e9629b",
+    "292de464-4aa7-498a-b6cc-5245aa9e401b": "66ed630b7f95ca5ccb412fc7ea682bfaffa66aeb17b2a229c4dd5683c8583668",
+    "3e7df73e-b221-437e-b46c-90f500956ec4": "0909de53942809a22cbf2d24c119727819880c3d42ed83f882ba9341ac8e077c",
+    "54ecca41-4992-4b3a-bca9-666030b5eac2": "767448a78a6a29622c6c0fd16427132464b5e9d15577148ee957a232f1076332",
+    "5c3e7cb4-a041-42e8-9f68-42a52dab0b35": "49e0fed02bb9cd30c7edbf692fe6de6f02addb6741ddadcbc9c5413bcaf41df0",
+    "613a1b38-fd9c-491c-a5fa-accef2d8efae": "3d8bf6dce7bfce2bdfee3d0414aa707af3a3a82430d9824c4a3f45fd09be0154",
+    "64cc20de-1fa2-4a19-8bf8-b0ea6ea9354c": "bc63055154d91b8400516770b94a728a754a0025511fc74b2c3098e83cf9bdde",
+    "85d303e6-684d-4487-a6f1-8667b3393934": "cd30b00e8c8b029311f297f02f32b514728befb8e8a50592689be464da17246f",
+    "8c337c9d-b9d9-4800-8a4f-1c6e60c38d3c": "04543fbfc810546608cc7ba8bfc9fadbbb3b5a45687ec76ffb81f1631bfddfa8",
+    "8ccbfc92-1142-4f9c-8b7f-7bc8fbf9ef80": "da1490017d3c14d87434bbe13222dd30f26bdc57e6ed6ad2bb326f75ca2b0a56",
+    "9f370b4e-6694-4b8d-bc1a-af9ac8ec0fb2": "8899db43ca17f33383d2852528c5f55057a052d7fde1f96541d99d021b1089d1",
+    "baa54a67-0f78-41ad-b267-88efc8d2ec1f": "a78665845a340fa4ceb5f2bed7faaf32700f3b3182ebee1a0928ebe5e252408e",
+    "c3d699b6-f1a8-4dea-859b-1a990db5caf4": "6539f05674cdecdbbc655ce102b6f30d9042ef778d6f4975c08c8eb086e052f7",
+    "d8e87a0c-1edc-4717-a885-30ebb4ea713c": "f02ff4e5c226239dae00255a838614bfbb5b1aac0641469ca2b36ae4ae302c42",
+    "f554fb57-61a0-4af3-8a0b-198ff56ebded": "3fe5f5ec944aff72ba6dac59cf8ac0ba1873dbfd7aad12cdec24e041546dc21b"
+  },
+  "teams": [
+    {
+      "teamId": "613a1b38-fd9c-491c-a5fa-accef2d8efae",
+      "name": "横浜",
+      "schoolPage": "https://www.yokohama-jsh.ac.jp/intro/mark/",
+      "sourceAsset": "https://www.yokohama-jsh.ac.jp/contents/wp-content/uploads/2018/10/slice_64.png"
+    },
+    {
+      "teamId": "070a2cb8-136f-47b6-8e4d-e83667cd6efe",
+      "name": "智辯和歌山",
+      "schoolPage": "https://www.chiben.ac.jp/wakayama/",
+      "sourceAsset": "https://www.chiben.ac.jp/wakayama/wp-content/uploads/sites/3/2018/10/1872b6e5465534ea5c8ac9d17ddf79d6.png"
+    },
+    {
+      "teamId": "8c337c9d-b9d9-4800-8a4f-1c6e60c38d3c",
+      "name": "履正社",
+      "schoolPage": "https://riseisha.ed.jp/",
+      "sourceAsset": "https://riseisha.ed.jp/assets/img/common/logo/logo.svg"
+    },
+    {
+      "teamId": "5c3e7cb4-a041-42e8-9f68-42a52dab0b35",
+      "name": "花巻東",
+      "schoolPage": "https://www.hanamakihigashi-h.jp/about/symbol.html",
+      "sourceAsset": "https://www.hanamakihigashi-h.jp/about/images/symbol_img_02.png"
+    },
+    {
+      "teamId": "8ccbfc92-1142-4f9c-8b7f-7bc8fbf9ef80",
+      "name": "三重",
+      "schoolPage": "https://www.mie-mie-h.ed.jp/",
+      "sourceAsset": "https://www.mie-mie-h.ed.jp/images/logo_footer.png"
+    },
+    {
+      "teamId": "0b645447-54e8-4213-8ebd-1f4f05e2a548",
+      "name": "健大高崎",
+      "schoolPage": "https://www.tuhw-h.ed.jp/",
+      "sourceAsset": "https://www.tuhw-h.ed.jp/wp-content/themes/wp-theme/assets/images/title.png"
+    },
+    {
+      "teamId": "292de464-4aa7-498a-b6cc-5245aa9e401b",
+      "name": "英明",
+      "schoolPage": "https://www.eimei.ed.jp/",
+      "sourceAsset": "https://www.eimei.ed.jp/images/gakkousyokai_07.png"
+    },
+    {
+      "teamId": "9f370b4e-6694-4b8d-bc1a-af9ac8ec0fb2",
+      "name": "天理",
+      "schoolPage": "https://www.tenri-h.ed.jp/1bu/school-guide/school-emblem/",
+      "sourceAsset": "https://www.tenri-h.ed.jp/1bu/wp-content/uploads/kousho-300x300-1.jpg"
+    },
+    {
+      "teamId": "baa54a67-0f78-41ad-b267-88efc8d2ec1f",
+      "name": "佐野日大",
+      "schoolPage": "https://high.sano-nichidai.jp/",
+      "sourceAsset": "https://high.sano-nichidai.jp/wp-content/uploads/2021/03/cropped-small_emblem_high-192x192.png"
+    },
+    {
+      "teamId": "c3d699b6-f1a8-4dea-859b-1a990db5caf4",
+      "name": "仙台育英",
+      "schoolPage": "https://www.sendaiikuei.ed.jp/hs/intro/badge.html",
+      "sourceAsset": "https://www.sendaiikuei.ed.jp/media/images/hs/intro/badge/school_badge.png"
+    },
+    {
+      "teamId": "d8e87a0c-1edc-4717-a885-30ebb4ea713c",
+      "name": "有明",
+      "schoolPage": "https://ariake-hs.ed.jp/",
+      "sourceAsset": "https://ariake-hs.ed.jp/wp-content/themes/ariake-theme/assets/img/header_logo.png"
+    },
+    {
+      "teamId": "85d303e6-684d-4487-a6f1-8667b3393934",
+      "name": "拓大紅陵",
+      "schoolPage": "https://www.koryo.ed.jp/school/greeting/",
+      "sourceAsset": "https://www.koryo.ed.jp/contents/wp-content/uploads/2020/11/school-mark-1.png"
+    },
+    {
+      "teamId": "54ecca41-4992-4b3a-bca9-666030b5eac2",
+      "name": "敦賀気比",
+      "schoolPage": "https://tsurugakehi.ed.jp/about",
+      "sourceAsset": "https://tsurugakehi.ed.jp/wp/wp-content/uploads/2021/10/schoolbadge-1.png"
+    },
+    {
+      "teamId": "64cc20de-1fa2-4a19-8bf8-b0ea6ea9354c",
+      "name": "東日大昌平",
+      "schoolPage": "https://shohei-chukou.ac.jp/",
+      "sourceAsset": "https://shohei-chukou.ac.jp/wp-content/uploads/2024/08/kousyou2024_02.png"
+    },
+    {
+      "teamId": "3e7df73e-b221-437e-b46c-90f500956ec4",
+      "name": "高川学園",
+      "schoolPage": "https://takagawagakuen.com/about/#badge",
+      "sourceAsset": "https://takagawagakuen.com/wp-content/themes/re-takagawagakuen/assets/img/about_badge_image.jpg"
+    },
+    {
+      "teamId": "f554fb57-61a0-4af3-8a0b-198ff56ebded",
+      "name": "霞ケ浦",
+      "schoolPage": "https://www.kasumi.ed.jp/",
+      "sourceAsset": "https://www.kasumi.ed.jp/wp-content/uploads/2020/10/cropped-Kマーク-1-180x180.jpg"
+    }
+  ]
+}

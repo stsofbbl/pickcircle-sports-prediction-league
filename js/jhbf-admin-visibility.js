@@ -34,7 +34,7 @@
     if (root.document?.querySelector('script[data-yoso-home-dashboard]')) return;
     const script = root.document?.createElement("script");
     if (!script) return;
-    script.src = "./js/home-dashboard.js?v=20260807-1";
+    script.src = "./js/home-dashboard.js?v=20260814-1";
     script.dataset.yosoHomeDashboard = "true";
     script.onload = loadHomeDashboardPolish;
     root.document.head?.appendChild(script);

@@ -57,7 +57,7 @@ test("formal DB draft scores its ID-owned picks and never scores stale local pic
   assert.doesNotMatch(app, /displayName === name/);
   assert.doesNotMatch(app, /results\.finishes\[team\.name\]/);
   assert.doesNotMatch(app.slice(app.indexOf("function koshienScoreRows"), app.indexOf("function koshienPhase3Score")), /phase2DraftPicks/);
-  assert.match(app, /if \(koshienScorable\) return window\.YosoKoshienResults\.rankScoreRows\(koshienRows\)/);
+  assert.match(app, /if \(koshienScorable \|\| hasOfficialKoshienScores\) return window\.YosoKoshienResults\.rankScoreRows\(koshienRows\)/);
   assert.doesNotMatch(app, /koshienRows\.find\(\(item\) => item\.name === name\)/);
 });
 
@@ -86,7 +86,7 @@ test("formal phase 2 is refreshed after the atomic official result transaction",
 
 test("scoreboard displays competition rank supplied by the score rows", () => {
   assert.match(app, /rankLabel\(row\.rank \?\? index \+ 1\)/);
-  assert.match(app, /if \(koshienScorable\) return window\.YosoKoshienResults\.rankScoreRows\(koshienRows\)/);
+  assert.match(app, /if \(koshienScorable \|\| hasOfficialKoshienScores\) return window\.YosoKoshienResults\.rankScoreRows\(koshienRows\)/);
 });
 
 test("failed conflict reload does not claim that formal state was restored", () => {

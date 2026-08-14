@@ -380,6 +380,137 @@
         gap: 10px;
         margin-top: 10px;
       }
+      #home .home-phase2-card {
+        margin-top: 10px;
+        border-color: color-mix(in srgb, var(--soap-pink) 66%, transparent);
+        background:
+          radial-gradient(circle at 94% 4%, rgba(255, 96, 165, .13), transparent 30%),
+          linear-gradient(155deg, rgba(53, 31, 45, .84), rgba(19, 18, 22, .92));
+      }
+      #home .home-phase2-head,
+      #home .home-phase2-summary,
+      #home .home-phase2-total {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      #home .home-phase2-head h4 { margin-bottom: 0; font-size: 17px; }
+      #home .home-phase2-badge {
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        border: 1px solid rgba(255, 132, 187, .38);
+        border-radius: 999px;
+        background: rgba(255, 105, 170, .12);
+        color: var(--soap-pink);
+        font-size: 11px;
+        font-weight: 950;
+      }
+      #home .home-phase2-summary {
+        justify-content: flex-start;
+        margin: 8px 0 10px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 850;
+      }
+      #home .home-phase2-summary strong { color: var(--soap-pink); }
+      #home .home-phase2-list {
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 13px;
+        background: rgba(7, 7, 10, .22);
+      }
+      #home .home-phase2-row {
+        display: grid;
+        grid-template-columns: 48px 58px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        min-height: 66px;
+        padding: 8px 11px;
+        border-bottom: 1px solid rgba(255,255,255,.09);
+      }
+      #home .home-phase2-row:last-child { border-bottom: 0; }
+      #home .home-phase2-crest {
+        display: grid;
+        place-items: center;
+        width: 46px;
+        height: 46px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        background: rgba(255,255,255,.06);
+      }
+      #home .home-phase2-crest > * { grid-area: 1 / 1; }
+      #home .home-phase2-crest span {
+        color: rgba(255,255,255,.46);
+        font-size: 18px;
+        font-weight: 950;
+      }
+      #home .home-phase2-crest img {
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        padding: 3px;
+        object-fit: contain;
+        background: rgba(250, 250, 252, .96);
+      }
+      #home .home-phase2-round {
+        padding: 5px 7px;
+        border: 1px solid rgba(255, 147, 194, .28);
+        border-radius: 999px;
+        background: rgba(255, 117, 177, .1);
+        color: var(--soap-pink);
+        font-size: 11px;
+        font-weight: 950;
+        text-align: center;
+        white-space: nowrap;
+      }
+      #home .home-phase2-team {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        min-width: 0;
+      }
+      #home .home-phase2-team strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+      }
+      #home .home-phase2-team small {
+        flex: 0 0 auto;
+        color: var(--soap-pink);
+        font-size: 11px;
+        font-weight: 900;
+      }
+      #home .home-phase2-points {
+        min-width: 44px;
+        font-size: 15px;
+        font-weight: 950;
+        text-align: right;
+        white-space: nowrap;
+      }
+      #home .home-phase2-total {
+        margin-top: 9px;
+        padding: 11px 13px;
+        border: 1px solid rgba(255, 132, 187, .3);
+        border-radius: 12px;
+        background: rgba(255, 112, 177, .08);
+        font-size: 14px;
+        font-weight: 900;
+      }
+      #home .home-phase2-total strong { color: var(--soap-pink); font-size: 21px; }
+      #home .home-phase2-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px 7px;
+        margin-top: 9px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 800;
+      }
+      #home .home-phase2-legend span:not(:last-child)::after { content: " /"; }
       #home .home-pick-list { display: grid; gap: 4px; }
       #home .home-pick-row {
         display: grid;
@@ -474,12 +605,22 @@
       @media (max-width: 619px) {
         #home .home-event-detail-grid { grid-template-columns: 1fr; }
         #home .home-readonly-matches { max-height: 390px; }
+        #home .home-phase2-card { padding: 12px 10px; }
+        #home .home-phase2-row { grid-template-columns: 42px 54px minmax(0, 1fr) auto; gap: 7px; padding: 7px 8px; }
+        #home .home-phase2-crest { width: 40px; height: 40px; }
+        #home .home-phase2-team { align-items: flex-start; flex-direction: column; gap: 2px; }
+        #home .home-phase2-team strong { max-width: 100%; font-size: 14px; }
+        #home .home-phase2-points { min-width: 39px; font-size: 14px; }
       }
       @media (max-width: 380px) {
         #home .home-global-grid,
         #home .home-event-top-grid { grid-template-columns: 1fr; }
         #home .home-user-card { min-height: 110px; }
         #home .home-match-row { grid-template-columns: 34px minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px; padding: 6px; }
+        #home .home-phase2-head h4 { font-size: 15px; }
+        #home .home-phase2-row { grid-template-columns: 38px 50px minmax(0, 1fr) auto; gap: 5px; padding-inline: 6px; }
+        #home .home-phase2-crest { width: 36px; height: 36px; }
+        #home .home-phase2-round { padding-inline: 5px; font-size: 10px; }
       }
     `;
     root.document.head.appendChild(style);
@@ -491,6 +632,13 @@
 
   function browserEscapeAttr(value) {
     return typeof escapeAttr === "function" ? escapeAttr(value) : escapeLocal(value);
+  }
+
+  function installPhase2CrestFallback(root) {
+    root.document.addEventListener("error", (event) => {
+      const image = event.target;
+      if (image?.matches?.("img[data-phase2-crest]")) image.remove();
+    }, true);
   }
 
   function currentClubName() {
@@ -672,6 +820,58 @@
     }).join("")}</div>`;
   }
 
+  function phase2DraftMarkup(event) {
+    const helper = typeof window !== "undefined" ? window.YosoKoshienPhase2Home : null;
+    const scorer = typeof window !== "undefined" ? window.YosoKoshienPhase2Draft : null;
+    const draftView = typeof koshienPhase2DraftView === "undefined" ? null : koshienPhase2DraftView;
+    const laterView = typeof koshienLaterPhaseView === "undefined" ? null : koshienLaterPhaseView;
+    const eventId = String(event?.id || "");
+    if (!helper
+      || !scorer
+      || String(draftView?.eventId || "") !== eventId
+      || String(laterView?.eventId || "") !== eventId
+      || laterView?.loadedFromDb !== true) return "";
+
+    const summary = helper.buildViewerPhase2Summary({
+      draftView,
+      officialScores: laterView.official_scores,
+      officialPoints: scorer.OFFICIAL_PHASE2_POINTS,
+      calculateFormalPhase2Scores: scorer.calculateFormalPhase2Scores,
+    });
+    if (!summary) return "";
+
+    const teamRows = summary.selectedTeams.map((team) => `
+      <div class="home-phase2-row" data-phase2-team-id="${browserEscapeAttr(team.teamId)}">
+        <span class="home-phase2-crest" role="img" aria-label="${browserEscapeAttr(team.teamName)} 校章">
+          <span aria-hidden="true">校</span>
+          <img data-phase2-crest src="${browserEscapeAttr(team.crestSrc)}" alt="" aria-hidden="true" loading="lazy">
+        </span>
+        <span class="home-phase2-round">${browserEscape(team.draftRound)}巡目</span>
+        <span class="home-phase2-team">
+          <strong>${browserEscape(team.teamName)}</strong>
+          <small>${browserEscape(team.finishLabel)}</small>
+        </span>
+        <strong class="home-phase2-points">${browserEscape(scoreText(team.score))}pt</strong>
+      </div>`).join("");
+    const legend = summary.pointLegend
+      .filter((item) => item.score > 0)
+      .map((item) => `<span>${browserEscape(item.label)} +${browserEscape(scoreText(item.score))}pt</span>`)
+      .join("");
+    return `
+      <section class="home-event-inner home-phase2-card" aria-label="フェーズ2指名結果">
+        <div class="home-phase2-head">
+          <h4>4　フェーズ2・ベスト16ドラフト</h4>
+          <span class="home-phase2-badge">反映済み</span>
+        </div>
+        <div class="home-phase2-summary">
+          <span>あなたの4校</span><span>/</span><span>暫定 <strong>${browserEscape(scoreText(summary.totalScore))}pt</strong></span>
+        </div>
+        <div class="home-phase2-list">${teamRows}</div>
+        <div class="home-phase2-total"><span>フェーズ2合計</span><strong>${browserEscape(scoreText(summary.totalScore))}pt</strong></div>
+        <div class="home-phase2-legend">${legend}</div>
+      </section>`;
+  }
+
   function koshienDashboardMarkup(event) {
     const participant = participantNameForEvent(event);
     const score = eventScoreSummary(event, participant);
@@ -698,13 +898,14 @@
           <strong>3　バーチャル高校野球 ↗</strong>
           <span>ライブ配信・日程・試合詳細を見る</span>
         </a>
+        ${phase2DraftMarkup(event)}
         <div class="home-event-detail-grid">
           <section class="home-event-inner">
-            <h4>4　あなたの8校</h4>
+            <h4>5　あなたの8校</h4>
             ${picksMarkup(event, participant)}
           </section>
           <section class="home-event-inner">
-            <h4>5　試合結果・組み合わせ</h4>
+            <h4>6　試合結果・組み合わせ</h4>
             ${readOnlyMatchesMarkup(event)}
           </section>
         </div>
@@ -788,6 +989,7 @@
     if (typeof renderDashboard !== "function" || typeof state === "undefined" || typeof els !== "object") return false;
     root[INSTALLED_FLAG] = true;
     installStyles(root);
+    installPhase2CrestFallback(root);
     ensureHomeShell();
     renderDashboard = renderDashboardV2;
     renderDashboardV2();
