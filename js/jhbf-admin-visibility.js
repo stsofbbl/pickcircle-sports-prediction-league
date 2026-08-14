@@ -19,12 +19,30 @@
     return true;
   }
 
+  function loadHomeTodayAllPhases() {
+    if (root.YosoHomeTodayAllPhases || root.document?.querySelector('script[data-yoso-home-today-all-phases]')) return;
+    const script = root.document?.createElement("script");
+    if (!script) return;
+    script.src = "./js/home-today-all-phases.js?v=20260815-1";
+    script.dataset.yosoHomeTodayAllPhases = "true";
+    root.document.head?.appendChild(script);
+  }
+
   function loadHomeDashboardPolish() {
-    if (root.YosoHomeDashboardPolish || root.document?.querySelector('script[data-yoso-home-dashboard-polish]')) return;
+    if (root.YosoHomeDashboardPolish) {
+      loadHomeTodayAllPhases();
+      return;
+    }
+    const existing = root.document?.querySelector('script[data-yoso-home-dashboard-polish]');
+    if (existing) {
+      existing.addEventListener("load", loadHomeTodayAllPhases, { once: true });
+      return;
+    }
     const script = root.document?.createElement("script");
     if (!script) return;
     script.src = "./js/home-dashboard-polish.js?v=20260808-2";
     script.dataset.yosoHomeDashboardPolish = "true";
+    script.onload = loadHomeTodayAllPhases;
     root.document.head?.appendChild(script);
   }
 
