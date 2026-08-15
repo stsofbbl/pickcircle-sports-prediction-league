@@ -4,7 +4,6 @@ import { parseJhbfScheduleHtml } from "../_shared/jhbf-schedule-parser.mjs";
 import {
   buildLateScheduleRows,
   normalizeName,
-  pairRoundTeams,
   parseJhbfFinalSchedule,
   parseJhbfRedrawTeams,
   pendingRedrawRound,
@@ -128,6 +127,20 @@ function mapOfficialTeamNames(names: string[], teams: DbRow[], aliases: DbRow[])
   return names.map((name) => exact.get(normalizeName(name)) || alias.get(normalizeName(name)) || "");
 }
 
+function buildPartialRedrawRows(roundKey: string, cards: DbRow[], teams: DbRow[], aliases: DbRow[]) {
+  const names = cards.flatMap((card) => [String(card.team1Name || ""), String(card.team2Name || "")]);
+  const ids = mapOfficialTeamNames(names, teams, aliases);
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    throw new Error(`${roundKey} official draw contains an unmapped or duplicate team`);
+  }
+  return cards.map((card, index) => ({
+    round_key: roundKey,
+    match_no: Number(card.matchNo),
+    team1_id: ids[index * 2],
+    team2_id: ids[index * 2 + 1],
+  }));
+}
+
 function hasLateScheduleGap(matches: DbRow[]): boolean {
   return matches.some((match) => ["R3", "QF", "SF", "F"].includes(String(match.round_key || "")) && !match.starts_at);
 }
@@ -151,14 +164,9 @@ async function syncEvent(supabase: DbClient, event: DbRow) {
 
   if (pendingRound) {
     const parsed = parseJhbfRedrawTeams(tournamentFetched.html);
-    const names = pendingRound === "QF" ? parsed.qf : parsed.sf;
-    const expected = pendingRound === "QF" ? 8 : 4;
-    if (names.length === expected) {
-      const ids = mapOfficialTeamNames(names, data.teams, data.aliases);
-      if (ids.some((id) => !id) || new Set(ids).size !== expected) {
-        throw new Error(`${pendingRound} official draw contains an unmapped or duplicate team`);
-      }
-      const rows = pairRoundTeams(pendingRound, ids);
+    const cards = pendingRound === "QF" ? parsed.qfMatches : parsed.sfMatches;
+    if (cards.length) {
+      const rows = buildPartialRedrawRows(pendingRound, cards, data.teams, data.aliases);
       const { data: saved, error } = await supabase.rpc("register_koshien_official_redraw_slots", {
         p_event_id: eventId,
         p_round_key: pendingRound,
@@ -169,6 +177,7 @@ async function syncEvent(supabase: DbClient, event: DbRow) {
       if (error) throw error;
       summary.drawSaved = true;
       summary.draw = saved;
+      summary.officialCardsFound = cards.length;
       data = await loadBracketData(supabase, eventId);
     } else {
       summary.drawWaiting = true;

@@ -39,15 +39,44 @@ function section(html, startPattern, endPattern = null) {
   return endMatch ? source.slice(start, start + startMatch[0].length + endMatch.index) : source.slice(start);
 }
 
-function teamNamesInSection(sectionHtml) {
-  const names = [];
-  for (const match of String(sectionHtml || "").matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)) {
+function teamSlotFromRow(rowHtml) {
+  for (const match of String(rowHtml || "").matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)) {
     const className = String(match[1] || "").match(/class\s*=\s*["']([^"']*)["']/i)?.[1] || "";
     if (!/(?:^|\s)teamName(?:\s|$)/i.test(className)) continue;
-    const name = schoolFromTeamCell(match[2]);
-    if (name) names.push(name);
+    return { found: true, name: schoolFromTeamCell(match[2]) };
   }
-  return names;
+  return { found: false, name: "" };
+}
+
+function redrawMatchesInSection(sectionHtml, expectedMatches) {
+  const rows = [...String(sectionHtml || "").matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi)].map((match) => match[0]);
+  const matches = [];
+  const usedMatchNos = new Set();
+
+  rows.forEach((rowHtml, rowIndex) => {
+    const label = stripTags(rowHtml);
+    const marker = label.match(/第\s*\d+\s*日\s*第\s*([1-9][0-9]*)\s*試合/u);
+    if (!marker) return;
+    const matchNo = Number(marker[1]);
+    if (!Number.isInteger(matchNo) || matchNo < 1 || matchNo > expectedMatches || usedMatchNos.has(matchNo)) return;
+
+    let above = { found: false, name: "" };
+    for (let index = rowIndex - 1; index >= 0; index -= 1) {
+      above = teamSlotFromRow(rows[index]);
+      if (above.found) break;
+    }
+    let below = { found: false, name: "" };
+    for (let index = rowIndex + 1; index < rows.length; index += 1) {
+      below = teamSlotFromRow(rows[index]);
+      if (below.found) break;
+    }
+
+    if (!above.found || !below.found || !above.name || !below.name || above.name === below.name) return;
+    usedMatchNos.add(matchNo);
+    matches.push({ matchNo, team1Name: above.name, team2Name: below.name });
+  });
+
+  return matches.sort((left, right) => left.matchNo - right.matchNo);
 }
 
 export function parseJhbfRedrawTeams(html) {
@@ -57,14 +86,15 @@ export function parseJhbfRedrawTeams(html) {
     /準決勝(?:以降|、決勝)?の組み合わせ/gu,
   );
   const sfSection = section(html, /準決勝(?:以降|、決勝)?の組み合わせ/gu);
-  const qf = teamNamesInSection(qfSection);
-  const sf = teamNamesInSection(sfSection);
+  const qfMatches = redrawMatchesInSection(qfSection, 4);
+  const sfMatches = redrawMatchesInSection(sfSection, 2);
   return {
-    qf: qf.length === 8 ? qf : [],
-    sf: sf.length === 4 ? sf : [],
+    qfMatches,
+    sfMatches,
+    qf: qfMatches.length === 4 ? qfMatches.flatMap((match) => [match.team1Name, match.team2Name]) : [],
+    sf: sfMatches.length === 2 ? sfMatches.flatMap((match) => [match.team1Name, match.team2Name]) : [],
   };
 }
-
 
 export function parseJhbfFinalSchedule(html, year) {
   const normalizedYear = Number(year);
@@ -105,12 +135,10 @@ export function pairRoundTeams(roundKey, teamIds = []) {
 export function pendingRedrawRound(matches = []) {
   const rows = Array.isArray(matches) ? matches : [];
   const byRound = (round) => rows.filter((match) => String(match?.round_key || match?.roundKey || "") === round);
-  const completed = (round, count) => {
-    const roundRows = byRound(round);
-    return roundRows.length === count && roundRows.every((match) => String(match.status || "") === "completed" && (match.winner_team_id || match.winnerTeamId));
-  };
-  if (completed("R3", 8) && byRound("QF").length === 0) return "QF";
-  if (completed("QF", 4) && byRound("SF").length === 0) return "SF";
+  const completedCount = (round) => byRound(round)
+    .filter((match) => String(match.status || "") === "completed" && (match.winner_team_id || match.winnerTeamId)).length;
+  if (completedCount("R3") > 0 && byRound("QF").length < 4) return "QF";
+  if (byRound("QF").length === 4 && completedCount("QF") > 0 && byRound("SF").length < 2) return "SF";
   return "";
 }
 
