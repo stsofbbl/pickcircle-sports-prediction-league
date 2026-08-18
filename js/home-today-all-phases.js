@@ -40,6 +40,10 @@
     return String(value.name || value.teamName || value.schoolName || value.team || "").trim();
   }
 
+  function normalizeComparable(value) {
+    return String(value || "").normalize("NFKC").replace(/[\s　]+/gu, "").trim();
+  }
+
   function phase1ParticipantTeams(event, participantName) {
     const prediction = event?.predictions?.[participantName] || null;
     const teams = Array.isArray(prediction?.teams) ? prediction.teams : [];
@@ -198,6 +202,21 @@
       });
   }
 
+  function tournamentRestDay(event, now = Date.now()) {
+    const matches = Array.isArray(event?.results?.matches) ? event.results.matches : [];
+    const todayKey = japanDateKey(now);
+    const hasTodayMatch = matches.some((match) => {
+      const startsAt = matchStartValue(match);
+      return startsAt && japanDateKey(startsAt) === todayKey;
+    });
+    if (hasTodayMatch) return false;
+    return matches.some((match) => {
+      const startsAt = matchStartValue(match);
+      const startMs = Date.parse(startsAt || "");
+      return !matchCompleted(match) && Number.isFinite(startMs) && startMs > now;
+    });
+  }
+
   function phase2GuardCandidate(view, participantName, event, now = Date.now()) {
     const teamSet = new Set(phase2ParticipantTeams(view, participantName));
     if (!teamSet.size) return null;
@@ -248,14 +267,118 @@
       </section>`;
   }
 
-  function todaysYosoMarkup({ eventName, phase1Rows, phase2Rows }) {
+  function todaysYosoMarkup({ eventName, phase1Rows, phase2Rows, restDay = false }) {
     return `
       <h3>◉ 本日のYOSO</h3>
       <span class="home-today-event">${escapeHtml(eventName || "夏の甲子園2026 YOSO")}</span>
-      <div class="home-today-phases">
-        ${phaseRowsMarkup("フェーズ1", phase1Rows || [])}
-        ${phaseRowsMarkup("フェーズ2", phase2Rows || [])}
+      ${restDay ? `
+        <div class="home-today-rest-day">
+          <strong>本日は休養日です</strong>
+          <span>試合はありません。次戦に備えてお待ちください。</span>
+        </div>` : `
+        <div class="home-today-phases">
+          ${phaseRowsMarkup("フェーズ1", phase1Rows || [])}
+          ${phaseRowsMarkup("フェーズ2", phase2Rows || [])}
+        </div>`}
+    `;
+  }
+
+  function zombieView() {
+    return typeof koshienLaterPhaseView === "object" && koshienLaterPhaseView ? koshienLaterPhaseView : null;
+  }
+
+  function zombieRoundOpen() {
+    return String(zombieView()?.rounds?.zombie?.status || "") === "open";
+  }
+
+  function zombiePublicPredictions() {
+    const rows = zombieView()?.zombie?.public_predictions;
+    return Array.isArray(rows) ? rows.filter((row) => row?.team_name) : [];
+  }
+
+  function zombieHeroMarkup(rows) {
+    const infections = rows.length
+      ? rows.map((row) => `
+          <div class="zombie-public-infection">
+            <span>🧟 ゾンビウイルス感染中</span>
+            <strong>${escapeHtml(row.team_name)}</strong>
+            <small>感染源：${escapeHtml(row.display_name || "参加者")}</small>
+          </div>`).join("")
+      : '<div class="zombie-public-waiting">ゾンビ指定の確定を待っています。</div>';
+    return `
+      <div class="zombie-home-hero-inner">
+        <span class="zombie-home-eyebrow">ZOMBIE MODE / 夏の甲子園2026 YOSO</span>
+        <strong>ゾンビモード発動</strong>
+        <span class="zombie-home-copy">敗者復活、最後の1枠。</span>
+        <div class="zombie-public-infections">${infections}</div>
       </div>`;
+  }
+
+  function patchZombieInfectionMarkers(root, rows) {
+    const teamNames = rows.map((row) => String(row.team_name || "")).filter(Boolean);
+    const candidates = root.document.querySelectorAll(
+      "#home .home-pick-row, #home .home-match-team, #home .home-phase2-team",
+    );
+    candidates.forEach((element) => {
+      const previous = element.querySelector(".zombie-infected-badge");
+      if (previous) previous.remove();
+      element.classList.remove("is-zombie-infected");
+      const text = normalizeComparable(element.textContent);
+      const infected = teamNames.find((name) => text.includes(normalizeComparable(name)));
+      if (!infected) return;
+      element.classList.add("is-zombie-infected");
+      const badge = root.document.createElement("span");
+      badge.className = "zombie-infected-badge";
+      badge.textContent = "🧟 感染中";
+      element.appendChild(badge);
+    });
+  }
+
+  function patchZombiePresentation(root) {
+    const active = zombieRoundOpen();
+    const home = root.document.querySelector("#home");
+    if (!home) return false;
+    const banner = home.querySelector("[data-zombie-home-banner]");
+    const existingStatus = home.querySelector("[data-zombie-public-status]");
+    if (!active) {
+      existingStatus?.remove();
+      patchZombieInfectionMarkers(root, []);
+      return false;
+    }
+
+    const rows = zombiePublicPredictions();
+    if (banner) {
+      const signature = rows.map((row) => `${row.player_id}:${row.team_id}:${row.updated_at || row.created_at || ""}`).join("|");
+      if (banner.dataset.zombiePublicSignature !== signature) {
+        banner.innerHTML = zombieHeroMarkup(rows);
+        banner.dataset.zombiePublicSignature = signature;
+      }
+    }
+
+    const tournament = home.querySelector(".home-event-dashboard.is-koshien");
+    if (tournament) {
+      let status = tournament.querySelector("[data-zombie-public-status]");
+      if (rows.length) {
+        if (!status) {
+          status = root.document.createElement("section");
+          status.className = "home-zombie-public-status";
+          status.dataset.zombiePublicStatus = "true";
+          const head = tournament.querySelector(".home-event-head");
+          if (head) head.insertAdjacentElement("afterend", status);
+          else tournament.prepend(status);
+        }
+        status.innerHTML = rows.map((row) => `
+          <div class="home-zombie-public-row">
+            <span>🧟 ゾンビウイルス感染中</span>
+            <strong>${escapeHtml(row.team_name)}</strong>
+            <small>感染源：${escapeHtml(row.display_name || "参加者")}</small>
+          </div>`).join("");
+      } else {
+        status?.remove();
+      }
+    }
+    patchZombieInfectionMarkers(root, rows);
+    return true;
   }
 
   function installStyles(root) {
@@ -281,6 +404,126 @@
       #home .home-today-phase-row strong { min-width: 0; font-size: 14px; line-height: 1.25; }
       #home .home-today-phase-row small { color: var(--muted); font-size: 10px; font-weight: 800; white-space: nowrap; }
       #home .home-today-phase-empty { color: var(--muted); font-size: 12px; font-weight: 750; }
+      #home .home-today-rest-day {
+        display: grid;
+        gap: 4px;
+        margin-top: 14px;
+        padding: 13px 14px;
+        border: 1px solid rgba(238, 232, 224, .12);
+        border-radius: 13px;
+        background: rgba(14, 13, 17, .24);
+      }
+      #home .home-today-rest-day strong { font-size: 15px; }
+      #home .home-today-rest-day span { color: var(--muted); font-size: 12px; }
+
+      /* Final zombie presentation: keep the existing YOSO glass UI dark and use
+         toxic green / purple only as event accents, matching the approved mock. */
+      body.is-zombie-mypage {
+        --zombie-accent: #b4d85a;
+        --zombie-purple-accent: #72477e;
+      }
+      body.is-zombie-mypage .app-shell {
+        background:
+          radial-gradient(circle at 10% 18%, rgba(180, 216, 90, .07), transparent 28%),
+          radial-gradient(circle at 90% 28%, rgba(114, 71, 126, .09), transparent 30%),
+          linear-gradient(180deg, rgba(13, 13, 15, .98), rgba(17, 16, 20, .98)) !important;
+      }
+      body.is-zombie-mypage #home.is-zombie-period .home-global-card,
+      body.is-zombie-mypage #home.is-zombie-period .home-event-dashboard,
+      body.is-zombie-mypage #home.is-zombie-period .home-event-inner,
+      body.is-zombie-mypage #home.is-zombie-period .entry-block,
+      body.is-zombie-mypage #home.is-zombie-period .koshien-phase2-public-player {
+        border-color: rgba(180, 216, 90, .20) !important;
+        background: linear-gradient(155deg, rgba(35, 33, 38, .94), rgba(22, 21, 25, .94)) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 28px rgba(0,0,0,.20) !important;
+      }
+      body.is-zombie-mypage #home.is-zombie-period .home-user-card,
+      body.is-zombie-mypage #home.is-zombie-period .home-today-card {
+        border-color: rgba(180, 216, 90, .28) !important;
+        background:
+          radial-gradient(circle at 100% 0%, rgba(114, 71, 126, .12), transparent 42%),
+          linear-gradient(150deg, rgba(39, 36, 42, .96), rgba(24, 24, 27, .96)) !important;
+      }
+      body.is-zombie-mypage #home.is-zombie-period .home-event-dashboard.is-koshien {
+        border-color: rgba(180, 216, 90, .36) !important;
+        background:
+          radial-gradient(circle at 92% 6%, rgba(114, 71, 126, .13), transparent 36%),
+          linear-gradient(155deg, rgba(34, 32, 37, .97), rgba(20, 21, 22, .97)) !important;
+        box-shadow: 0 18px 38px rgba(0,0,0,.26), inset 0 0 0 1px rgba(180,216,90,.045) !important;
+      }
+      body.is-zombie-mypage #home.is-zombie-period .home-global-card::after,
+      body.is-zombie-mypage #home.is-zombie-period .home-user-card::after,
+      body.is-zombie-mypage #home.is-zombie-period .home-today-card::after,
+      body.is-zombie-mypage #home.is-zombie-period .home-event-dashboard.is-koshien::after {
+        opacity: .18 !important;
+      }
+      body.is-zombie-mypage #home.is-zombie-period .zombie-home-banner {
+        min-height: 0 !important;
+        place-items: stretch !important;
+        padding: 20px !important;
+        border-color: rgba(180, 216, 90, .48) !important;
+        background:
+          radial-gradient(circle at 8% 80%, rgba(180, 216, 90, .19), transparent 37%),
+          radial-gradient(circle at 90% 10%, rgba(114, 71, 126, .25), transparent 40%),
+          linear-gradient(135deg, rgba(24, 24, 27, .98), rgba(31, 26, 34, .98)) !important;
+        box-shadow: 0 16px 34px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.025) !important;
+      }
+      body.is-zombie-mypage #home.is-zombie-period .zombie-home-banner::before { opacity: .12 !important; }
+      #home .zombie-home-hero-inner { position: relative; z-index: 1; display: grid; gap: 8px; }
+      #home .zombie-home-eyebrow { color: var(--zombie-accent); font-size: 10px; font-weight: 900; letter-spacing: .11em; }
+      body.is-zombie-mypage #home.is-zombie-period .zombie-home-banner .zombie-home-hero-inner > strong {
+        color: #f2a7c1 !important;
+        font-size: clamp(23px, 6vw, 30px) !important;
+        text-align: left !important;
+        text-shadow: none !important;
+      }
+      #home .zombie-home-copy { color: rgba(244,240,243,.82); font-size: 13px; font-weight: 800; }
+      #home .zombie-public-infections { display: grid; gap: 8px; margin-top: 4px; }
+      #home .zombie-public-infection,
+      #home .home-zombie-public-row {
+        display: grid;
+        grid-template-columns: auto minmax(0,1fr) auto;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid rgba(180,216,90,.28);
+        border-radius: 13px;
+        background: rgba(12,14,12,.48);
+      }
+      #home .zombie-public-infection > span,
+      #home .home-zombie-public-row > span { color: var(--zombie-accent); font-size: 11px; font-weight: 900; }
+      #home .zombie-public-infection > strong,
+      #home .home-zombie-public-row > strong { color: #fff; font-size: 16px; }
+      #home .zombie-public-infection > small,
+      #home .home-zombie-public-row > small { color: #f2a7c1; font-size: 10px; font-weight: 850; white-space: nowrap; }
+      #home .zombie-public-waiting { color: var(--muted); font-size: 12px; }
+      #home .home-zombie-public-status { display: grid; gap: 8px; margin: 10px 0 14px; }
+      #home .zombie-infected-badge {
+        display: inline-flex;
+        width: max-content;
+        align-items: center;
+        margin-top: 4px;
+        padding: 3px 7px;
+        border: 1px solid rgba(180,216,90,.34);
+        border-radius: 999px;
+        background: rgba(180,216,90,.10);
+        color: var(--zombie-accent);
+        font-size: 9px;
+        font-weight: 950;
+        line-height: 1.2;
+      }
+      #home .is-zombie-infected { border-color: rgba(180,216,90,.28) !important; }
+      body.is-zombie-mypage .bottom-nav {
+        border-color: rgba(180,216,90,.20) !important;
+        background: rgba(24,23,27,.96) !important;
+        box-shadow: 0 -10px 28px rgba(0,0,0,.22) !important;
+      }
+      @media (max-width: 420px) {
+        #home .zombie-public-infection,
+        #home .home-zombie-public-row { grid-template-columns: 1fr auto; }
+        #home .zombie-public-infection > span,
+        #home .home-zombie-public-row > span { grid-column: 1 / -1; }
+      }
     `;
     root.document.head.appendChild(style);
   }
@@ -299,27 +542,39 @@
       ? koshienPhase2DraftView
       : null;
     if (!view?.available || !["locked", "completed"].includes(String(view.status || ""))
-      || !Array.isArray(view.picks) || view.picks.length !== 16) return false;
+      || !Array.isArray(view.picks) || view.picks.length !== 16) {
+      patchZombiePresentation(root);
+      return false;
+    }
     const participant = typeof currentParticipantName === "function" ? currentParticipantName() : "";
     const event = resolveEvent(view);
-    if (!participant || !event) return false;
+    if (!participant || !event) {
+      patchZombiePresentation(root);
+      return false;
+    }
 
     const eventId = String(event?.id || view.eventId || "");
     const displayEvent = eventWithStartTimes(event, cachedStartTimeRows(eventId, now));
     const phase1Rows = todayCandidatesForTeams(phase1ParticipantTeams(displayEvent, participant), displayEvent, now);
     const phase2Rows = todayCandidatesForTeams(phase2ParticipantTeams(view, participant), displayEvent, now);
+    const restDay = tournamentRestDay(displayEvent, now);
     const card = root.document.querySelector("#home .home-today-card");
-    if (!card) return false;
+    if (!card) {
+      patchZombiePresentation(root);
+      return false;
+    }
 
     const ownSignature = [
       participant,
       String(view.eventId || ""),
+      `rest:${restDay}`,
       ...phase1Rows.map((row) => `p1:${row.team}:${row.startsAt}:${row.completed}`),
       ...phase2Rows.map((row) => `p2:${row.team}:${row.startsAt}:${row.completed}`),
     ].join("|");
     if (card.dataset.todayAllPhasesSignature === ownSignature) {
-      const oldGuard = guardSignature(view, participant, event, now);
+      const oldGuard = guardSignature(view, participant, displayEvent, now);
       if (oldGuard) card.dataset.phase2TodaySignature = oldGuard;
+      patchZombiePresentation(root);
       return true;
     }
 
@@ -327,10 +582,12 @@
       eventName: event?.name || "夏の甲子園2026 YOSO",
       phase1Rows,
       phase2Rows,
+      restDay,
     });
     card.dataset.todayAllPhasesSignature = ownSignature;
-    const oldGuard = guardSignature(view, participant, event, now);
+    const oldGuard = guardSignature(view, participant, displayEvent, now);
     if (oldGuard) card.dataset.phase2TodaySignature = oldGuard;
+    patchZombiePresentation(root);
     return true;
   }
 
@@ -377,13 +634,14 @@
     root.document.addEventListener("visibilitychange", () => {
       if (!root.document.hidden) {
         patchCard(root);
-        refreshStartTimes(root);
+        refreshStartTimes(root, { force: true });
       }
     });
     root.addEventListener("pageshow", () => {
       patchCard(root);
-      refreshStartTimes(root);
+      refreshStartTimes(root, { force: true });
     });
+    root.setInterval?.(() => patchZombiePresentation(root), 5000);
     return true;
   }
 
@@ -392,9 +650,13 @@
     phase2ParticipantTeams,
     eventWithStartTimes,
     todayCandidatesForTeams,
+    tournamentRestDay,
     phase2GuardCandidate,
     guardSignature,
     todaysYosoMarkup,
+    zombiePublicPredictions,
+    zombieHeroMarkup,
+    patchZombiePresentation,
     patchCard,
     loadStartTimeRows,
     refreshStartTimes,
