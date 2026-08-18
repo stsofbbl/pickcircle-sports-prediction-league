@@ -99,25 +99,35 @@ export function parseJhbfRedrawTeams(html) {
 export function parseJhbfFinalSchedule(html, year) {
   const normalizedYear = Number(year);
   if (!Number.isInteger(normalizedYear)) return null;
-  const text = stripTags(html);
-  const match = text.match(/(\d{1,2})月(\d{1,2})日[\s\S]{0,120}?[（(]\s*第\s*(\d+)\s*日\s*[）)][\s\S]{0,180}?(\d{1,2})時(\d{2})分\s*決勝/u);
-  if (!match) return null;
-  const month = Number(match[1]);
-  const day = Number(match[2]);
-  const dayNo = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  if (!month || !day || !dayNo || hour > 23 || minute > 59) return null;
-  const pad2 = (value) => String(value).padStart(2, "0");
-  return {
-    dayNo,
-    dailyMatchNo: 1,
-    month,
-    day,
-    scheduledTime: `${pad2(hour)}:${pad2(minute)}`,
-    startsAt: `${normalizedYear}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}:00+09:00`,
-    roundLabel: "決勝",
-  };
+
+  // Read the final from one table row only. This prevents a rest-day row such as
+  // 8/21 from borrowing the 「第15日」 marker and final time from 8/22.
+  for (const row of String(html || "").matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const text = stripTags(row[1]);
+    if (!/決勝/u.test(text)) continue;
+    const date = text.match(/(\d{1,2})月(\d{1,2})日/u);
+    const dayMarker = text.match(/[（(]\s*第\s*(\d+)\s*日\s*[）)]/u);
+    const time = text.match(/(\d{1,2})時(\d{2})分\s*決勝/u);
+    if (!date || !dayMarker || !time) continue;
+
+    const month = Number(date[1]);
+    const day = Number(date[2]);
+    const dayNo = Number(dayMarker[1]);
+    const hour = Number(time[1]);
+    const minute = Number(time[2]);
+    if (!month || !day || !dayNo || hour > 23 || minute > 59) return null;
+    const pad2 = (value) => String(value).padStart(2, "0");
+    return {
+      dayNo,
+      dailyMatchNo: 1,
+      month,
+      day,
+      scheduledTime: `${pad2(hour)}:${pad2(minute)}`,
+      startsAt: `${normalizedYear}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}:00+09:00`,
+      roundLabel: "決勝",
+    };
+  }
+  return null;
 }
 
 export function pairRoundTeams(roundKey, teamIds = []) {
