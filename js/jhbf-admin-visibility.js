@@ -151,24 +151,39 @@
     `;
   }
 
-  function completedLoserTeamIds(event) {
+  function normalizedPhase2TeamName(value) {
+    return String(value || "").normalize("NFKC").replace(/[\s　]+/gu, "").trim();
+  }
+
+  function completedLoserTeamIds(event, view) {
     const losers = [];
+    const teams = Array.isArray(view?.eligibleTeams) ? view.eligibleTeams : [];
+    const formalTeamIds = new Set(teams.map((team) => String(team.teamId || "")).filter(Boolean));
+    const teamIdByName = new Map(teams.map((team) => [
+      normalizedPhase2TeamName(team.name),
+      String(team.teamId || ""),
+    ]).filter(([name, teamId]) => name && teamId));
     const matches = Array.isArray(event?.results?.matches) ? event.results.matches : [];
     matches.forEach((match) => {
       if (String(match?.status || "") !== "completed") return;
-      const team1Id = String(match?.team1_id || match?.team1Id || "");
-      const team2Id = String(match?.team2_id || match?.team2Id || "");
-      if (!team1Id || !team2Id) return;
-      let winnerId = String(match?.winner_team_id || match?.winnerTeamId || "");
-      if (!winnerId) {
-        const score1 = Number(match?.team1_score ?? match?.team1Score);
-        const score2 = Number(match?.team2_score ?? match?.team2Score);
-        if (Number.isFinite(score1) && Number.isFinite(score2) && score1 !== score2) {
-          winnerId = score1 > score2 ? team1Id : team2Id;
-        }
+      const directLoserId = String(
+        match?.metadata?.loser_team_id
+        || match?.loser_team_id
+        || match?.loserTeamId
+        || "",
+      );
+      if (directLoserId && formalTeamIds.has(directLoserId)) {
+        losers.push(directLoserId);
+        return;
       }
-      if (winnerId === team1Id) losers.push(team2Id);
-      else if (winnerId === team2Id) losers.push(team1Id);
+      const loserName = normalizedPhase2TeamName(
+        match?.metadata?.loser_name
+        || match?.loser_id
+        || match?.loserName
+        || "",
+      );
+      const mappedId = teamIdByName.get(loserName);
+      if (mappedId) losers.push(mappedId);
     });
     return [...new Set(losers)];
   }
@@ -188,7 +203,7 @@
     return root.YosoKoshienLaterPhases.deriveZombiePreEligibility({
       playerId,
       formalPicks: view.picks,
-      eliminatedTeamIds: completedLoserTeamIds(event),
+      eliminatedTeamIds: completedLoserTeamIds(event, view),
     });
   }
 
