@@ -5,7 +5,7 @@ create or replace function public.prepare_koshien_zombie_phase_internal(
   p_opens_at timestamptz,
   p_deadline_at timestamptz
 )
-returns jsonb
+returns void
 language plpgsql
 security definer
 set search_path = ''
@@ -96,8 +96,6 @@ begin
       v_result_version
     );
   end loop;
-
-  return public.get_koshien_later_phase_state(p_event_id);
 end;
 $$;
 
@@ -125,7 +123,8 @@ begin
     raise exception 'league admin permission is required' using errcode = '42501';
   end if;
 
-  return public.prepare_koshien_zombie_phase_internal(p_event_id, p_opens_at, p_deadline_at);
+  perform public.prepare_koshien_zombie_phase_internal(p_event_id, p_opens_at, p_deadline_at);
+  return public.get_koshien_later_phase_state(p_event_id);
 end;
 $$;
 
