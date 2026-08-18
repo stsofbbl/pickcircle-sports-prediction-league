@@ -34,6 +34,33 @@ test("revenge is unavailable when one phase 1 school reaches best 16", () => {
   assert.equal(result.eligible, false);
 });
 
+test("zombie is confirmed early once all four formal phase 2 schools are eliminated", () => {
+  const formalPicks = [
+    ...["a", "b", "c", "d"].map((teamId) => ({ playerId: "zombie", teamId })),
+    { playerId: "other", teamId: "alive" },
+  ];
+  assert.deepEqual(later.deriveZombiePreEligibility({
+    playerId: "zombie",
+    formalPicks,
+    eliminatedTeamIds: ["a", "b", "c", "d"],
+  }), {
+    confirmed: true,
+    ownTeamIds: ["a", "b", "c", "d"],
+    remainingTeamIds: [],
+  });
+});
+
+test("zombie is not confirmed early while one formal phase 2 school remains alive", () => {
+  const formalPicks = ["a", "b", "c", "d"].map((teamId) => ({ playerId: "zombie", teamId }));
+  const result = later.deriveZombiePreEligibility({
+    playerId: "zombie",
+    formalPicks,
+    eliminatedTeamIds: ["a", "b", "c"],
+  });
+  assert.equal(result.confirmed, false);
+  assert.deepEqual(result.remainingTeamIds, ["d"]);
+});
+
 test("zombie eligibility uses four formal picks and only other owners best 4 schools", () => {
   const formalPicks = [
     ...["a", "b", "c", "d"].map((teamId) => ({ playerId: "zombie", teamId })),

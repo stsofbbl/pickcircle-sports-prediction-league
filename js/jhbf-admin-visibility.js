@@ -151,6 +151,94 @@
     `;
   }
 
+  function normalizedPhase2TeamName(value) {
+    return String(value || "").normalize("NFKC").replace(/[\s　]+/gu, "").trim();
+  }
+
+  function completedLoserTeamIds(event, view) {
+    const losers = [];
+    const teams = Array.isArray(view?.eligibleTeams) ? view.eligibleTeams : [];
+    const formalTeamIds = new Set(teams.map((team) => String(team.teamId || "")).filter(Boolean));
+    const teamIdByName = new Map(teams.map((team) => [
+      normalizedPhase2TeamName(team.name),
+      String(team.teamId || ""),
+    ]).filter(([name, teamId]) => name && teamId));
+    const matches = Array.isArray(event?.results?.matches) ? event.results.matches : [];
+    matches.forEach((match) => {
+      if (String(match?.status || "") !== "completed") return;
+      const directLoserId = String(
+        match?.metadata?.loser_team_id
+        || match?.loser_team_id
+        || match?.loserTeamId
+        || "",
+      );
+      if (directLoserId && formalTeamIds.has(directLoserId)) {
+        losers.push(directLoserId);
+        return;
+      }
+      const loserName = normalizedPhase2TeamName(
+        match?.metadata?.loser_name
+        || match?.loser_id
+        || match?.loserName
+        || "",
+      );
+      const mappedId = teamIdByName.get(loserName);
+      if (mappedId) losers.push(mappedId);
+    });
+    return [...new Set(losers)];
+  }
+
+  function currentPhase2PlayerId(view) {
+    const participantName = typeof currentParticipantName === "function" ? currentParticipantName() : "";
+    if (!participantName) return "";
+    const player = (Array.isArray(view?.players) ? view.players : [])
+      .find((candidate) => String(candidate?.displayName || "") === String(participantName));
+    return String(player?.playerId || "");
+  }
+
+  function zombiePreEligibility(view, event) {
+    if (!shouldPublishPhase2Draft(view)) return null;
+    const playerId = currentPhase2PlayerId(view);
+    if (!playerId || !root.YosoKoshienLaterPhases?.deriveZombiePreEligibility) return null;
+    return root.YosoKoshienLaterPhases.deriveZombiePreEligibility({
+      playerId,
+      formalPicks: view.picks,
+      eliminatedTeamIds: completedLoserTeamIds(event, view),
+    });
+  }
+
+  function zombieConfirmedWaitingHtml() {
+    return `
+      <div class="entry-block koshien-later-participant" data-koshien-zombie-preconfirmed>
+        <div class="wc-participant-head">
+          <h3>ゾンビモード</h3>
+          <span>対象確定</span>
+        </div>
+        <p class="wc-phase-intro">フェーズ2で保有した4校がすべて敗退したため、ゾンビ対象が確定しました。</p>
+        <p class="koshien-later-reception-message">ベスト4が4校出揃い次第、準決勝で敗退すると予想する高校を1校選べます。</p>
+      </div>
+    `;
+  }
+
+  function installZombieEarlyConfirmation() {
+    if (root.__yosoZombieEarlyConfirmationInstalled) return true;
+    if (typeof koshienZombieBlock !== "function") return false;
+    const originalZombieBlock = koshienZombieBlock;
+    koshienZombieBlock = function koshienZombieBlockWithEarlyConfirmation() {
+      const round = typeof koshienLaterPhaseView === "object" ? koshienLaterPhaseView?.rounds?.zombie : null;
+      if (round) return originalZombieBlock();
+      const view = typeof koshienPhase2DraftView === "object" && koshienPhase2DraftView
+        ? koshienPhase2DraftView
+        : null;
+      const event = typeof state === "object" ? state?.event : null;
+      const preEligibility = zombiePreEligibility(view, event);
+      if (preEligibility?.confirmed) return zombieConfirmedWaitingHtml();
+      return originalZombieBlock();
+    };
+    root.__yosoZombieEarlyConfirmationInstalled = true;
+    return true;
+  }
+
   function installPhase2PublicStyles() {
     if (root.document?.getElementById(PHASE2_PUBLIC_STYLE_ID)) return;
     const style = root.document?.createElement("style");
@@ -275,12 +363,14 @@
   function installBrowserExtensions() {
     install();
     installPhase2PublicDraft();
+    installZombieEarlyConfirmation();
     loadHomeDashboard();
     loadKoshienScheduleSync();
   }
 
   if (!root || typeof root.addEventListener !== "function") return;
   installPhase2PublicDraft();
+  installZombieEarlyConfirmation();
   if (root.document?.readyState === "complete") root.setTimeout(installBrowserExtensions, 0);
   else root.addEventListener("load", installBrowserExtensions, { once: true });
 })(typeof globalThis !== "undefined" ? globalThis : this);
