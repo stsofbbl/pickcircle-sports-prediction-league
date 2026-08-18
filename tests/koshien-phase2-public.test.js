@@ -48,6 +48,7 @@ function runWithView(view) {
     addEventListener() {},
     document: {
       readyState: "loading",
+      addEventListener() {},
       getElementById() { return null; },
       querySelector() { return null; },
       createElement(tag) {
