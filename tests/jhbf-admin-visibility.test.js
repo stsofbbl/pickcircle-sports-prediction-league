@@ -35,18 +35,8 @@ test("eligible zombie input is also rendered on the Phase 2 screen", () => {
   assert.match(guardSource, /return `\$\{koshienZombieBlock\(\)\}\$\{draftHtml\}`/);
 });
 
-test("all users receive the zombie My Page theme only while the zombie round is open", () => {
-  assert.match(guardSource, /function zombieRoundIsOpen/);
-  assert.match(guardSource, /rounds\?\.zombie\?\.status \|\| ""\) === "open"/);
-  assert.match(guardSource, /classList\.toggle\("is-zombie-mypage", active\)/);
-  assert.match(guardSource, /classList\.toggle\("is-zombie-period", active\)/);
-  assert.doesNotMatch(guardSource.match(/function applyZombieHomeTheme\(\)[\s\S]*?return active;/)?.[0] || "", /eligibility/);
-});
-
-test("zombie My Page keeps the requested corrupted YOSO palette and exact banner text", () => {
-  assert.match(guardSource, /--zombie-dirty-green/);
-  assert.match(guardSource, /--zombie-purple/);
-  assert.match(guardSource, /50銭ゾンビモード発動/);
-  assert.match(guardSource, /dataZombieHomeBanner|zombieHomeBanner/);
-  assert.match(guardSource, /installZombieHomeTheme\(\)/);
+test("zombie My Page is delegated to the public-state home module without a hardcoded banner", () => {
+  assert.match(guardSource, /home-today-all-phases\.js\?v=20260819-1/);
+  assert.doesNotMatch(guardSource, /50銭ゾンビモード発動/);
+  assert.doesNotMatch(guardSource, /installZombieHomeTheme|zombie-home-banner/);
 });

@@ -280,41 +280,74 @@
 
   function zombiePublicPredictions() {
     const view = typeof koshienLaterPhaseView === "object" && koshienLaterPhaseView ? koshienLaterPhaseView : null;
+    if (!zombieRoundIsActive(view)) return [];
     const rows = view?.zombie?.public_predictions;
     return Array.isArray(rows) ? rows.filter((row) => row?.team_name) : [];
   }
 
-  function zombieHeroMarkup(rows = []) {
+  function zombieHeroMarkup(rows = [], eventName = "夏の甲子園2026 YOSO") {
+    const lead = rows[0] || {};
+    const leadSource = lead.display_name || "参加者";
     const infections = rows.map((row) => `
-      <div class="home-zombie-public-row">
-        <span>🧟 ゾンビウイルス感染中</span>
-        <strong>${escapeHtml(row.team_name)}</strong>
-        <small>感染源：${escapeHtml(row.display_name || "参加者")}</small>
+      <div class="home-zombie-public-row" data-zombie-team="${escapeHtml(row.team_name)}" data-zombie-source="${escapeHtml(row.display_name || "参加者")}">
+        <span class="home-zombie-infection-label">🧟 ZOMBIE INFECTION</span>
+        <span class="home-zombie-infection-copy">ゾンビウイルス感染中</span>
+        <span class="home-zombie-team-label">感染校</span>
+        <strong class="home-zombie-team-name">${escapeHtml(row.team_name)}</strong>
+        <span class="home-zombie-source-label">感染源</span>
+        <strong class="home-zombie-source-name">${escapeHtml(row.display_name || "参加者")}</strong>
+        <p>準決勝敗退校に${escapeHtml(row.team_name)}を指定済み<br>準決勝結果でゾンビ効果が確定します</p>
       </div>`).join("");
     return `
       <div class="home-zombie-public-inner">
-        <strong>ゾンビモード発動</strong>
+        <h3 class="home-zombie-hero-title">
+          <span>${escapeHtml(leadSource)}</span>
+          <strong>ゾンビモード発動</strong>
+        </h3>
+        <span class="home-zombie-event-name">${escapeHtml(eventName)}</span>
         ${infections}
       </div>`;
   }
 
   function zombiePublicSignature(rows = []) {
-    return rows
-      .map((row) => `${row.player_id || ""}:${row.team_id || ""}:${row.team_name || ""}:${row.updated_at || row.created_at || ""}`)
-      .join("|");
+    return JSON.stringify(rows.map((row) => ({
+      playerId: row.player_id || "",
+      source: row.display_name || "",
+      teamId: row.team_id || "",
+      team: row.team_name || "",
+      updatedAt: row.updated_at || row.created_at || "",
+    })));
+  }
+
+  function zombieRoundIsActive(view) {
+    return String(view?.rounds?.zombie?.status || "") === "open";
+  }
+
+  function syncZombieTheme(root, view) {
+    const pageId = typeof currentPageId === "function"
+      ? currentPageId()
+      : String(root?.location?.hash || "#home").replace(/^#/, "") || "home";
+    const active = zombieRoundIsActive(view) && pageId === "home";
+    root?.document?.body?.classList?.toggle("is-zombie-mypage", active);
+    const home = root?.document?.querySelector?.("#home");
+    home?.classList?.toggle("is-zombie-period", active);
+    home?.classList?.toggle("zombie-theme-active", active);
+    return active;
   }
 
   function patchZombieStatus(root, rows = zombiePublicPredictions()) {
     const home = root?.document?.querySelector?.("#home");
     if (!home) return false;
-    const tournament = home.querySelector(".home-event-dashboard.is-koshien");
+    const grid = home.querySelector(".home-global-grid");
     const existing = home.querySelector("[data-zombie-public-status]");
-    if (!rows.length || !tournament) {
+    if (!rows.length || !grid) {
       if (existing) existing.remove();
       return false;
     }
 
-    const signature = zombiePublicSignature(rows);
+    const laterView = typeof koshienLaterPhaseView === "object" && koshienLaterPhaseView ? koshienLaterPhaseView : null;
+    const eventName = resolveEvent(laterView)?.name || "夏の甲子園2026 YOSO";
+    const signature = `${eventName}|${zombiePublicSignature(rows)}`;
     if (existing?.dataset?.zombiePublicSignature === signature) return true;
 
     let status = existing;
@@ -322,12 +355,13 @@
       status = root.document.createElement("section");
       status.className = "home-zombie-public-status";
       status.dataset.zombiePublicStatus = "true";
-      const head = tournament.querySelector(".home-event-head");
-      if (head) head.insertAdjacentElement("afterend", status);
-      else tournament.prepend(status);
+      status.setAttribute("aria-label", "ゾンビモード感染状況");
+      grid.prepend(status);
     }
-    status.innerHTML = zombieHeroMarkup(rows);
+    status.innerHTML = zombieHeroMarkup(rows, eventName);
     status.dataset.zombiePublicSignature = signature;
+    status.dataset.zombieSource = rows.map((row) => row.display_name || "参加者").join(" / ");
+    status.dataset.zombieTeam = rows.map((row) => row.team_name).join(" / ");
     return true;
   }
 
@@ -365,28 +399,292 @@
       }
       #home .home-today-rest-day strong { font-size: 15px; }
       #home .home-today-rest-day span { color: var(--muted); font-size: 12px; }
-      #home .home-zombie-public-status {
-        margin: 10px 0 14px;
-        padding: 12px;
-        border: 1px solid rgba(180, 216, 90, .42);
-        border-radius: 14px;
-        background: linear-gradient(135deg, rgba(21, 24, 18, .95), rgba(35, 20, 39, .92));
+      body.is-zombie-mypage {
+        --zombie-black: #050507;
+        --zombie-surface: #111015;
+        --zombie-green: #9dff38;
+        --zombie-green-soft: #b6ff55;
+        --zombie-pink: #ff4f9a;
+        --zombie-purple: #70258f;
+        --zombie-purple-bright: #ba4dff;
+        --zombie-text: #f5f3f5;
+        --zombie-muted: #c9c5cc;
+        background:
+          radial-gradient(circle at 10% 16%, rgba(157, 255, 56, .10), transparent 27%),
+          radial-gradient(circle at 90% 28%, rgba(112, 37, 143, .22), transparent 31%),
+          #050507 !important;
       }
-      #home .home-zombie-public-inner { display: grid; gap: 9px; }
-      #home .home-zombie-public-inner > strong { color: #f0a8be; font-size: 15px; }
+      body.is-zombie-mypage .app-shell {
+        background:
+          radial-gradient(circle at 8% 16%, rgba(157, 255, 56, .12), transparent 26%),
+          radial-gradient(circle at 92% 34%, rgba(112, 37, 143, .22), transparent 31%),
+          radial-gradient(ellipse at 45% 78%, rgba(255, 79, 154, .055), transparent 35%),
+          linear-gradient(180deg, rgba(5, 5, 7, .985), rgba(9, 9, 13, .99) 54%, rgba(5, 5, 7, .99)) !important;
+      }
+      body.is-zombie-mypage .topbar.is-home-page,
+      body.is-zombie-mypage .topbar.is-home-page .account-chip.is-dashboard-header,
+      body.is-zombie-mypage .topbar.is-home-page .topbar-quick-stat,
+      body.is-zombie-mypage .topbar.is-home-page #logoutButton {
+        border-color: rgba(157, 255, 56, .12) !important;
+        background:
+          radial-gradient(circle at 92% 10%, rgba(112, 37, 143, .18), transparent 36%),
+          linear-gradient(150deg, rgba(12, 11, 15, .98), rgba(5, 5, 7, .99)) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 79, 154, .06), 0 10px 30px rgba(0, 0, 0, .30) !important;
+      }
+      #home.zombie-theme-active {
+        position: relative;
+        isolation: isolate;
+        color: var(--zombie-text);
+        background:
+          radial-gradient(circle at 8% 14%, rgba(157, 255, 56, .055), transparent 27%),
+          radial-gradient(circle at 92% 35%, rgba(112, 37, 143, .12), transparent 32%),
+          linear-gradient(180deg, rgba(5, 5, 7, .92), rgba(9, 9, 13, .96)) !important;
+      }
+      #home.zombie-theme-active::before {
+        content: "";
+        position: fixed;
+        inset: 88px 0 72px;
+        z-index: -1;
+        pointer-events: none;
+        opacity: .8;
+        background:
+          linear-gradient(121deg, transparent 0 48%, rgba(157, 255, 56, .035) 49%, transparent 50%),
+          linear-gradient(57deg, transparent 0 73%, rgba(186, 77, 255, .05) 74%, transparent 75%),
+          radial-gradient(ellipse at 12% 20%, rgba(121, 232, 41, .15), transparent 28%),
+          radial-gradient(ellipse at 88% 45%, rgba(73, 22, 95, .32), transparent 32%);
+      }
+      #home.zombie-theme-active .home-user-card,
+      #home.zombie-theme-active .home-today-card,
+      #home.zombie-theme-active .home-event-dashboard,
+      #home.zombie-theme-active .home-event-inner,
+      #home.zombie-theme-active .home-phase2-card,
+      #home.zombie-theme-active .home-match-row,
+      #home.zombie-theme-active .home-virtual-link,
+      #home.zombie-theme-active .entry-block,
+      #home.zombie-theme-active .koshien-phase2-public-player,
+      #home.zombie-theme-active .koshien-phase2-public-pick {
+        border-color: rgba(201, 197, 204, .13) !important;
+        color: var(--zombie-text) !important;
+        background:
+          radial-gradient(circle at 92% 8%, rgba(112, 37, 143, .15), transparent 34%),
+          radial-gradient(circle at 3% 96%, rgba(157, 255, 56, .07), transparent 37%),
+          linear-gradient(150deg, rgba(17, 16, 21, .97), rgba(7, 7, 10, .98)) !important;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, .035),
+          0 16px 38px rgba(0, 0, 0, .36) !important;
+      }
+      #home.zombie-theme-active .home-user-card {
+        border-color: rgba(255, 79, 154, .24) !important;
+        background:
+          linear-gradient(112deg, transparent 58%, rgba(157, 255, 56, .035) 59%, transparent 61%),
+          radial-gradient(circle at 90% 12%, rgba(112, 37, 143, .18), transparent 36%),
+          linear-gradient(150deg, rgba(14, 13, 18, .98), rgba(6, 6, 8, .99)) !important;
+        box-shadow:
+          inset 3px 0 0 rgba(255, 79, 154, .46),
+          inset -1px 0 0 rgba(157, 255, 56, .15),
+          0 14px 34px rgba(0, 0, 0, .38) !important;
+      }
+      #home.zombie-theme-active .home-user-card::after,
+      #home.zombie-theme-active .home-today-card::after,
+      #home.zombie-theme-active .home-event-dashboard.is-koshien::after {
+        opacity: .4 !important;
+        background:
+          linear-gradient(126deg, transparent 0 64%, rgba(157, 255, 56, .08) 64.4%, transparent 65%),
+          linear-gradient(33deg, transparent 0 79%, rgba(186, 77, 255, .1) 79.4%, transparent 80%) !important;
+      }
+      #home.zombie-theme-active .home-user-card .home-club-name,
+      #home.zombie-theme-active .home-event-head strong,
+      #home.zombie-theme-active .home-today-card h3,
+      #home.zombie-theme-active .home-event-score {
+        color: var(--zombie-pink) !important;
+        text-shadow: 0 0 16px rgba(255, 79, 154, .22) !important;
+      }
+      #home.zombie-theme-active .home-today-card {
+        border-color: rgba(112, 37, 143, .32) !important;
+      }
+      #home.zombie-theme-active .home-today-rest-day {
+        border-color: rgba(157, 255, 56, .14);
+        background: rgba(5, 5, 7, .58);
+      }
+      #home.zombie-theme-active .home-today-rest-day strong { color: var(--zombie-green-soft); }
+      #home.zombie-theme-active .home-today-rest-day span,
+      #home.zombie-theme-active .home-today-event,
+      #home.zombie-theme-active .home-event-gap,
+      #home.zombie-theme-active .home-milestone { color: var(--zombie-muted) !important; }
+      #home.zombie-theme-active .home-event-dashboard.is-koshien {
+        border-color: rgba(255, 79, 154, .22) !important;
+        background:
+          radial-gradient(circle at 96% 4%, rgba(112, 37, 143, .22), transparent 32%),
+          radial-gradient(circle at 5% 98%, rgba(157, 255, 56, .06), transparent 40%),
+          linear-gradient(155deg, rgba(13, 12, 17, .98), rgba(5, 5, 7, .99)) !important;
+      }
+      #home.zombie-theme-active .home-event-dashboard.is-koshien .status-label.open {
+        border-color: rgba(157, 255, 56, .28);
+        background: rgba(157, 255, 56, .08);
+        color: var(--zombie-green-soft);
+      }
+      #home.zombie-theme-active .home-progress-fill {
+        background: linear-gradient(90deg, var(--zombie-pink), var(--zombie-purple-bright), var(--zombie-green));
+      }
+      #home.zombie-theme-active .home-virtual-link {
+        border-color: rgba(186, 77, 255, .24) !important;
+      }
+      #home .home-zombie-public-status {
+        grid-column: 1 / -1;
+        position: relative;
+        min-height: 260px;
+        overflow: hidden;
+        padding: clamp(22px, 5vw, 34px);
+        border: 1px solid rgba(157, 255, 56, .46);
+        border-radius: 24px;
+        color: var(--zombie-text);
+        background:
+          radial-gradient(ellipse at 8% 80%, rgba(157, 255, 56, .18), transparent 35%),
+          radial-gradient(ellipse at 90% 18%, rgba(112, 37, 143, .46), transparent 38%),
+          radial-gradient(circle at 68% 76%, rgba(255, 79, 154, .10), transparent 31%),
+          linear-gradient(132deg, #050507 0%, #0d0811 45%, #08050b 100%);
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 79, 154, .12),
+          inset 0 -48px 90px rgba(73, 22, 95, .18),
+          0 22px 56px rgba(0, 0, 0, .52),
+          0 0 34px rgba(121, 232, 41, .09);
+      }
+      #home .home-zombie-public-status::before,
+      #home .home-zombie-public-status::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      #home .home-zombie-public-status::before {
+        opacity: .66;
+        background:
+          linear-gradient(117deg, transparent 0 54%, rgba(157, 255, 56, .15) 54.4%, transparent 55.1%),
+          linear-gradient(46deg, transparent 0 69%, rgba(186, 77, 255, .18) 69.4%, transparent 70%),
+          linear-gradient(153deg, transparent 0 81%, rgba(255, 79, 154, .10) 81.3%, transparent 82%);
+      }
+      #home .home-zombie-public-status::after {
+        inset: auto -10% -42% 22%;
+        height: 75%;
+        filter: blur(22px);
+        opacity: .48;
+        background:
+          radial-gradient(ellipse at 25% 50%, rgba(157, 255, 56, .20), transparent 36%),
+          radial-gradient(ellipse at 72% 40%, rgba(112, 37, 143, .46), transparent 40%);
+      }
+      #home .home-zombie-public-inner { position: relative; z-index: 1; display: grid; gap: 10px; }
+      #home .home-zombie-hero-title {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 10px;
+        margin: 0;
+        line-height: 1.03;
+      }
+      #home .home-zombie-hero-title > span {
+        color: var(--zombie-pink);
+        font-size: clamp(30px, 7vw, 45px);
+        font-weight: 950;
+        letter-spacing: -.045em;
+        text-shadow: 0 0 24px rgba(255, 79, 154, .28);
+      }
+      #home .home-zombie-hero-title > strong {
+        color: var(--zombie-green);
+        font-size: clamp(22px, 5.6vw, 35px);
+        font-weight: 950;
+        letter-spacing: -.025em;
+        text-shadow: 0 0 22px rgba(157, 255, 56, .26);
+      }
+      #home .home-zombie-event-name {
+        color: var(--zombie-muted);
+        font-size: 11px;
+        font-weight: 850;
+        letter-spacing: .08em;
+      }
       #home .home-zombie-public-row {
         display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 11px;
-        border: 1px solid rgba(180, 216, 90, .24);
-        border-radius: 12px;
-        background: rgba(7, 10, 7, .45);
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 5px 18px;
+        margin-top: 7px;
+        padding: 17px 18px;
+        border: 1px solid rgba(201, 197, 204, .12);
+        border-left-color: rgba(157, 255, 56, .48);
+        border-radius: 16px;
+        background: linear-gradient(118deg, rgba(5, 5, 7, .80), rgba(17, 8, 21, .72));
+        box-shadow: inset 3px 0 0 rgba(157, 255, 56, .22);
       }
-      #home .home-zombie-public-row span { color: #b4d85a; font-size: 11px; font-weight: 900; }
-      #home .home-zombie-public-row strong { color: #fff; font-size: 16px; }
-      #home .home-zombie-public-row small { color: var(--muted); font-size: 11px; font-weight: 800; }
+      #home .home-zombie-infection-label {
+        color: var(--zombie-green-soft);
+        font-size: 11px;
+        font-weight: 950;
+        letter-spacing: .13em;
+      }
+      #home .home-zombie-infection-copy {
+        color: var(--zombie-muted);
+        font-size: 11px;
+        font-weight: 850;
+        text-align: right;
+      }
+      #home .home-zombie-team-label,
+      #home .home-zombie-source-label {
+        align-self: end;
+        color: var(--zombie-muted);
+        font-size: 10px;
+        font-weight: 850;
+      }
+      #home .home-zombie-source-label { text-align: right; }
+      #home .home-zombie-team-name {
+        color: var(--zombie-green);
+        font-size: clamp(34px, 9vw, 56px);
+        font-weight: 950;
+        letter-spacing: -.04em;
+        line-height: 1;
+        text-shadow: 0 0 28px rgba(157, 255, 56, .23);
+      }
+      #home .home-zombie-source-name {
+        align-self: end;
+        color: var(--zombie-pink);
+        font-size: clamp(18px, 4.8vw, 27px);
+        font-weight: 950;
+        text-align: right;
+        text-shadow: 0 0 18px rgba(255, 79, 154, .22);
+      }
+      #home .home-zombie-public-row p {
+        grid-column: 1 / -1;
+        margin: 7px 0 0;
+        padding-top: 10px;
+        border-top: 1px solid rgba(201, 197, 204, .10);
+        color: var(--zombie-muted);
+        font-size: 12px;
+        font-weight: 750;
+        line-height: 1.6;
+      }
+      body.is-zombie-mypage .bottom-nav {
+        border-color: rgba(157, 255, 56, .20) !important;
+        background:
+          radial-gradient(circle at 5% 100%, rgba(157, 255, 56, .10), transparent 30%),
+          radial-gradient(circle at 92% 0%, rgba(112, 37, 143, .22), transparent 34%),
+          rgba(5, 5, 7, .96) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 79, 154, .08), 0 -12px 34px rgba(0, 0, 0, .44) !important;
+      }
+      body.is-zombie-mypage .bottom-nav a { color: #77747d !important; }
+      body.is-zombie-mypage .bottom-nav a[data-nav-page="home"] {
+        color: var(--zombie-pink) !important;
+        border: 1px solid rgba(157, 255, 56, .14) !important;
+        background: linear-gradient(180deg, rgba(255, 79, 154, .12), rgba(73, 22, 95, .18)) !important;
+        box-shadow: inset 0 0 18px rgba(157, 255, 56, .045), 0 0 18px rgba(255, 79, 154, .10) !important;
+      }
+      @media (max-width: 520px) {
+        #home .home-zombie-public-status { min-height: 248px; padding: 22px 17px; border-radius: 21px; }
+        #home .home-zombie-public-row { gap: 5px 12px; padding: 15px 14px; }
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        #home.zombie-theme-active .home-zombie-public-status { animation: zombieHeroArrival .42s ease-out both; }
+      }
+      @keyframes zombieHeroArrival {
+        from { opacity: 0; transform: translateY(5px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
     `;
     root.document.head.appendChild(style);
   }
@@ -401,6 +699,8 @@
   }
 
   function patchCard(root, now = Date.now()) {
+    const laterView = typeof koshienLaterPhaseView === "object" && koshienLaterPhaseView ? koshienLaterPhaseView : null;
+    syncZombieTheme(root, laterView);
     patchZombieStatus(root);
     const view = typeof koshienPhase2DraftView === "object" && koshienPhase2DraftView
       ? koshienPhase2DraftView
@@ -468,6 +768,8 @@
     patchCard(root);
     root.setTimeout(() => refreshStartTimes(root), 0);
 
+    root.addEventListener("hashchange", () => root.setTimeout(() => patchCard(root), 0));
+
     if (typeof renderDashboard === "function") {
       const originalRenderDashboard = renderDashboard;
       renderDashboard = function renderDashboardWithAllTodayYoso() {
@@ -509,6 +811,8 @@
     zombiePublicPredictions,
     zombieHeroMarkup,
     zombiePublicSignature,
+    zombieRoundIsActive,
+    syncZombieTheme,
     patchZombieStatus,
     patchCard,
     loadStartTimeRows,
