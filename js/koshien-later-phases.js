@@ -4,6 +4,43 @@
   const api = factory();
   if (typeof module === "object" && module.exports) module.exports = api;
   if (root) root.YosoKoshienLaterPhases = api;
+
+  if (root?.document && typeof root.setTimeout === "function") {
+    let installAttempts = 0;
+    const installLaterPhaseInputPersistence = () => {
+      if (root.__yosoKoshienLaterPhaseInputPersistenceInstalled) return;
+      const originalRender = root.render;
+      if (typeof originalRender !== "function") {
+        installAttempts += 1;
+        if (installAttempts < 250) root.setTimeout(installLaterPhaseInputPersistence, 40);
+        return;
+      }
+
+      root.render = function renderWithLaterPhaseInputPersistence() {
+        const form = root.document.querySelector("#eventForm");
+        const snapshot = {
+          revengeTeam: form?.querySelector("[data-koshien-revenge-team]")?.value || "",
+          zombieTeam: form?.querySelector("[data-koshien-zombie-team]")?.value || "",
+          scoreA: form?.querySelector("[data-koshien-phase3-score='a']")?.value ?? "",
+          scoreB: form?.querySelector("[data-koshien-phase3-score='b']")?.value ?? "",
+        };
+        const result = originalRender.apply(this, arguments);
+        const nextForm = root.document.querySelector("#eventForm");
+        const revenge = nextForm?.querySelector("[data-koshien-revenge-team]");
+        const zombie = nextForm?.querySelector("[data-koshien-zombie-team]");
+        const scoreA = nextForm?.querySelector("[data-koshien-phase3-score='a']");
+        const scoreB = nextForm?.querySelector("[data-koshien-phase3-score='b']");
+        if (revenge && snapshot.revengeTeam) revenge.value = snapshot.revengeTeam;
+        if (zombie && snapshot.zombieTeam) zombie.value = snapshot.zombieTeam;
+        if (scoreA && snapshot.scoreA !== "") scoreA.value = snapshot.scoreA;
+        if (scoreB && snapshot.scoreB !== "") scoreB.value = snapshot.scoreB;
+        return result;
+      };
+      root.__yosoKoshienLaterPhaseInputPersistenceInstalled = true;
+    };
+    root.setTimeout(installLaterPhaseInputPersistence, 0);
+    root.addEventListener?.("load", () => root.setTimeout(installLaterPhaseInputPersistence, 0), { once: true });
+  }
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
