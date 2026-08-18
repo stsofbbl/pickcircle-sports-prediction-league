@@ -28,3 +28,9 @@ test("early zombie status resolves real snapshots that mix loser UUIDs and schoo
   assert.match(guardSource, /match\?\.loser_id/);
   assert.match(guardSource, /completedLoserTeamIds\(event, view\)/);
 });
+
+test("eligible zombie input is also rendered on the Phase 2 screen", () => {
+  assert.match(guardSource, /koshienLaterPhaseView\?\.zombie\?\.eligibility/);
+  assert.match(guardSource, /eligibility\?\.eligible/);
+  assert.match(guardSource, /return `\$\{koshienZombieBlock\(\)\}\$\{draftHtml\}`/);
+});

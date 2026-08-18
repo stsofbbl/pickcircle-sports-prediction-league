@@ -352,8 +352,13 @@
       const view = typeof koshienPhase2DraftView === "object" && koshienPhase2DraftView
         ? koshienPhase2DraftView
         : null;
-      if (!shouldPublishPhase2Draft(view)) return originalDraftBlock();
-      return phase2PublicDraftHtml(view);
+      const draftHtml = shouldPublishPhase2Draft(view) ? phase2PublicDraftHtml(view) : originalDraftBlock();
+      const round = typeof koshienLaterPhaseView === "object" ? koshienLaterPhaseView?.rounds?.zombie : null;
+      const eligibility = typeof koshienLaterPhaseView === "object" ? koshienLaterPhaseView?.zombie?.eligibility : null;
+      const event = typeof state === "object" ? state?.event : null;
+      const showZombie = round ? Boolean(eligibility?.eligible) : Boolean(zombiePreEligibility(view, event)?.confirmed);
+      if (showZombie && typeof koshienZombieBlock === "function") return `${koshienZombieBlock()}${draftHtml}`;
+      return draftHtml;
     };
     root.__yosoPhase2PublicDraftInstalled = true;
     installPhase2PublicStyles();
