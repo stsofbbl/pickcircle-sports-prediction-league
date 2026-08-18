@@ -43,6 +43,22 @@
     };
   }
 
+  function deriveZombiePreEligibility({ playerId, formalPicks = [], eliminatedTeamIds = [] } = {}) {
+    const ownTeamIds = uniqueIds(formalPicks
+      .filter((pick) => String(pick.playerId || "") === String(playerId || ""))
+      .map((pick) => pick.teamId));
+    if (ownTeamIds.length !== 4) {
+      return { confirmed: false, ownTeamIds, remainingTeamIds: ownTeamIds };
+    }
+    const eliminated = new Set(uniqueIds(eliminatedTeamIds));
+    const remainingTeamIds = ownTeamIds.filter((teamId) => !eliminated.has(teamId));
+    return {
+      confirmed: remainingTeamIds.length === 0,
+      ownTeamIds,
+      remainingTeamIds,
+    };
+  }
+
   function deriveZombieEligibility({ playerId, formalPicks = [], best4TeamIds = [] } = {}) {
     const best4 = new Set(uniqueIds(best4TeamIds));
     const ownTeamIds = uniqueIds(formalPicks
@@ -134,6 +150,7 @@
     calculateZombieAdjustments,
     deriveRevengeEligibility,
     deriveZombieEligibility,
+    deriveZombiePreEligibility,
     validateFinalScore,
   };
 });
