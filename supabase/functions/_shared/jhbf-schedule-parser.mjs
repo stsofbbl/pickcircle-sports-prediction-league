@@ -42,7 +42,10 @@ export function parseJhbfScheduleHtml(html, options = {}) {
   if (!Number.isInteger(year)) throw new Error("year is required");
 
   const text = htmlToStructuredText(html);
-  const dayPattern = /(\d{1,2})月(\d{1,2})日[\s\S]{0,80}?[（(]\s*第\s*(\d+)\s*日\s*[）)]/gu;
+  // Keep the date and its tournament-day marker within the same date block.
+  // A rest day sits between separate date headings, so never cross a second newline
+  // looking for the next 「第N日」 marker.
+  const dayPattern = /(\d{1,2})月(\d{1,2})日[^\n]*\n?[^\n]*?[（(]\s*第\s*(\d+)\s*日\s*[）)]/gu;
   const headings = [...text.matchAll(dayPattern)];
   const rows = [];
   const warnings = [];
