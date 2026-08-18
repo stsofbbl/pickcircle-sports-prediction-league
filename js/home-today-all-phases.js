@@ -198,6 +198,20 @@
       });
   }
 
+  function tournamentRestDay(event, now = Date.now()) {
+    const matches = Array.isArray(event?.results?.matches) ? event.results.matches : [];
+    const todayKey = japanDateKey(now);
+    const hasTodayMatch = matches.some((match) => {
+      const startsAt = matchStartValue(match);
+      return startsAt && japanDateKey(startsAt) === todayKey;
+    });
+    if (hasTodayMatch) return false;
+    return matches.some((match) => {
+      const startMs = Date.parse(matchStartValue(match) || "");
+      return !matchCompleted(match) && Number.isFinite(startMs) && startMs > now;
+    });
+  }
+
   function phase2GuardCandidate(view, participantName, event, now = Date.now()) {
     const teamSet = new Set(phase2ParticipantTeams(view, participantName));
     if (!teamSet.size) return null;
@@ -248,14 +262,73 @@
       </section>`;
   }
 
-  function todaysYosoMarkup({ eventName, phase1Rows, phase2Rows }) {
+  function todaysYosoMarkup({ eventName, phase1Rows, phase2Rows, restDay = false }) {
     return `
       <h3>◉ 本日のYOSO</h3>
       <span class="home-today-event">${escapeHtml(eventName || "夏の甲子園2026 YOSO")}</span>
-      <div class="home-today-phases">
-        ${phaseRowsMarkup("フェーズ1", phase1Rows || [])}
-        ${phaseRowsMarkup("フェーズ2", phase2Rows || [])}
+      ${restDay ? `
+        <div class="home-today-rest-day">
+          <strong>本日は休養日です</strong>
+          <span>試合はありません。次戦に備えてお待ちください。</span>
+        </div>` : `
+        <div class="home-today-phases">
+          ${phaseRowsMarkup("フェーズ1", phase1Rows || [])}
+          ${phaseRowsMarkup("フェーズ2", phase2Rows || [])}
+        </div>`}
+    `;
+  }
+
+  function zombiePublicPredictions() {
+    const view = typeof koshienLaterPhaseView === "object" && koshienLaterPhaseView ? koshienLaterPhaseView : null;
+    const rows = view?.zombie?.public_predictions;
+    return Array.isArray(rows) ? rows.filter((row) => row?.team_name) : [];
+  }
+
+  function zombieHeroMarkup(rows = []) {
+    const infections = rows.map((row) => `
+      <div class="home-zombie-public-row">
+        <span>🧟 ゾンビウイルス感染中</span>
+        <strong>${escapeHtml(row.team_name)}</strong>
+        <small>感染源：${escapeHtml(row.display_name || "参加者")}</small>
+      </div>`).join("");
+    return `
+      <div class="home-zombie-public-inner">
+        <strong>ゾンビモード発動</strong>
+        ${infections}
       </div>`;
+  }
+
+  function zombiePublicSignature(rows = []) {
+    return rows
+      .map((row) => `${row.player_id || ""}:${row.team_id || ""}:${row.team_name || ""}:${row.updated_at || row.created_at || ""}`)
+      .join("|");
+  }
+
+  function patchZombieStatus(root, rows = zombiePublicPredictions()) {
+    const home = root?.document?.querySelector?.("#home");
+    if (!home) return false;
+    const tournament = home.querySelector(".home-event-dashboard.is-koshien");
+    const existing = home.querySelector("[data-zombie-public-status]");
+    if (!rows.length || !tournament) {
+      if (existing) existing.remove();
+      return false;
+    }
+
+    const signature = zombiePublicSignature(rows);
+    if (existing?.dataset?.zombiePublicSignature === signature) return true;
+
+    let status = existing;
+    if (!status) {
+      status = root.document.createElement("section");
+      status.className = "home-zombie-public-status";
+      status.dataset.zombiePublicStatus = "true";
+      const head = tournament.querySelector(".home-event-head");
+      if (head) head.insertAdjacentElement("afterend", status);
+      else tournament.prepend(status);
+    }
+    status.innerHTML = zombieHeroMarkup(rows);
+    status.dataset.zombiePublicSignature = signature;
+    return true;
   }
 
   function installStyles(root) {
@@ -281,6 +354,39 @@
       #home .home-today-phase-row strong { min-width: 0; font-size: 14px; line-height: 1.25; }
       #home .home-today-phase-row small { color: var(--muted); font-size: 10px; font-weight: 800; white-space: nowrap; }
       #home .home-today-phase-empty { color: var(--muted); font-size: 12px; font-weight: 750; }
+      #home .home-today-rest-day {
+        display: grid;
+        gap: 4px;
+        margin-top: 14px;
+        padding: 13px 14px;
+        border: 1px solid rgba(238, 232, 224, .12);
+        border-radius: 13px;
+        background: rgba(14, 13, 17, .24);
+      }
+      #home .home-today-rest-day strong { font-size: 15px; }
+      #home .home-today-rest-day span { color: var(--muted); font-size: 12px; }
+      #home .home-zombie-public-status {
+        margin: 10px 0 14px;
+        padding: 12px;
+        border: 1px solid rgba(180, 216, 90, .42);
+        border-radius: 14px;
+        background: linear-gradient(135deg, rgba(21, 24, 18, .95), rgba(35, 20, 39, .92));
+      }
+      #home .home-zombie-public-inner { display: grid; gap: 9px; }
+      #home .home-zombie-public-inner > strong { color: #f0a8be; font-size: 15px; }
+      #home .home-zombie-public-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 11px;
+        border: 1px solid rgba(180, 216, 90, .24);
+        border-radius: 12px;
+        background: rgba(7, 10, 7, .45);
+      }
+      #home .home-zombie-public-row span { color: #b4d85a; font-size: 11px; font-weight: 900; }
+      #home .home-zombie-public-row strong { color: #fff; font-size: 16px; }
+      #home .home-zombie-public-row small { color: var(--muted); font-size: 11px; font-weight: 800; }
     `;
     root.document.head.appendChild(style);
   }
@@ -295,6 +401,7 @@
   }
 
   function patchCard(root, now = Date.now()) {
+    patchZombieStatus(root);
     const view = typeof koshienPhase2DraftView === "object" && koshienPhase2DraftView
       ? koshienPhase2DraftView
       : null;
@@ -308,12 +415,14 @@
     const displayEvent = eventWithStartTimes(event, cachedStartTimeRows(eventId, now));
     const phase1Rows = todayCandidatesForTeams(phase1ParticipantTeams(displayEvent, participant), displayEvent, now);
     const phase2Rows = todayCandidatesForTeams(phase2ParticipantTeams(view, participant), displayEvent, now);
+    const restDay = tournamentRestDay(displayEvent, now);
     const card = root.document.querySelector("#home .home-today-card");
     if (!card) return false;
 
     const ownSignature = [
       participant,
       String(view.eventId || ""),
+      `rest:${restDay}`,
       ...phase1Rows.map((row) => `p1:${row.team}:${row.startsAt}:${row.completed}`),
       ...phase2Rows.map((row) => `p2:${row.team}:${row.startsAt}:${row.completed}`),
     ].join("|");
@@ -327,6 +436,7 @@
       eventName: event?.name || "夏の甲子園2026 YOSO",
       phase1Rows,
       phase2Rows,
+      restDay,
     });
     card.dataset.todayAllPhasesSignature = ownSignature;
     const oldGuard = guardSignature(view, participant, event, now);
@@ -392,9 +502,14 @@
     phase2ParticipantTeams,
     eventWithStartTimes,
     todayCandidatesForTeams,
+    tournamentRestDay,
     phase2GuardCandidate,
     guardSignature,
     todaysYosoMarkup,
+    zombiePublicPredictions,
+    zombieHeroMarkup,
+    zombiePublicSignature,
+    patchZombieStatus,
     patchCard,
     loadStartTimeRows,
     refreshStartTimes,
