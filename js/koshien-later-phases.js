@@ -39,6 +39,12 @@
           padding: 4px 6px !important;
           font-size: 20px !important;
         }
+        #eventForm .koshien-preset-panel.is-current-phase-only {
+          padding: 0 !important;
+          border: 0 !important;
+          background: transparent !important;
+          box-shadow: none !important;
+        }
         @media (max-width: 420px) {
           #eventForm .koshien-phase3-case .form-grid { gap: 8px !important; }
           #eventForm .koshien-phase3-case .form-grid .field {
@@ -68,6 +74,25 @@
       const phase3Button = root.document.querySelector("#eventForm [data-koshien-phase='phase3']");
       if (!phase3Button || phase3Button.classList.contains("is-active")) return;
       phase3Button.click();
+    };
+
+    const cleanupRetiredKoshienUi = () => {
+      const panel = root.document.querySelector("#eventForm .koshien-preset-panel");
+      if (panel) {
+        [...panel.children].forEach((child) => {
+          if (child.matches(".match-kicker, h3, p, .koshien-score-strip, .worldcup-phase-tabs")) child.remove();
+        });
+        panel.classList.add("is-current-phase-only");
+        [...panel.querySelectorAll(".entry-block")].forEach((block) => {
+          const heading = block.querySelector("h3")?.textContent?.trim() || "";
+          if (heading === "ゾンビモード") block.remove();
+        });
+      }
+
+      root.document.body?.classList.remove("is-zombie-mypage");
+      const home = root.document.querySelector("#home");
+      home?.classList.remove("is-zombie-period", "zombie-theme-active");
+      home?.querySelectorAll("[data-zombie-public-status]").forEach((node) => node.remove());
     };
 
     let installAttempts = 0;
@@ -106,10 +131,13 @@
         if (tiebreakScoreA && snapshot.tiebreakScoreA !== "") tiebreakScoreA.value = snapshot.tiebreakScoreA;
         if (tiebreakScoreB && snapshot.tiebreakScoreB !== "") tiebreakScoreB.value = snapshot.tiebreakScoreB;
         root.setTimeout(maybeActivateOpenPhase3, 0);
+        root.setTimeout(cleanupRetiredKoshienUi, 0);
+        root.setTimeout(cleanupRetiredKoshienUi, 80);
         return result;
       };
       root.__yosoKoshienLaterPhaseInputPersistenceInstalled = true;
       root.setTimeout(maybeActivateOpenPhase3, 0);
+      root.setTimeout(cleanupRetiredKoshienUi, 0);
     };
     root.setTimeout(installLaterPhaseInputPersistence, 0);
     root.addEventListener?.("load", () => root.setTimeout(installLaterPhaseInputPersistence, 0), { once: true });
