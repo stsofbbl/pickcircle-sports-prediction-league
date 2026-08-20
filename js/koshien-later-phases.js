@@ -6,6 +6,70 @@
   if (root) root.YosoKoshienLaterPhases = api;
 
   if (root?.document && typeof root.setTimeout === "function") {
+    const installCompactPhase3Styles = () => {
+      if (root.document.querySelector("#yoso-phase3-compact-style")) return;
+      const style = root.document.createElement("style");
+      style.id = "yoso-phase3-compact-style";
+      style.textContent = `
+        #eventForm .koshien-phase3-predictions { gap: 10px; }
+        #eventForm .koshien-phase3-case { gap: 10px; padding: 14px; }
+        #eventForm .koshien-phase3-case .form-grid {
+          display: grid !important;
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          gap: 10px !important;
+        }
+        #eventForm .koshien-phase3-case .form-grid .field {
+          display: grid !important;
+          grid-template-columns: minmax(0, 1fr) 54px !important;
+          align-items: center;
+          gap: 6px !important;
+          min-width: 0;
+        }
+        #eventForm .koshien-phase3-case .form-grid .field > span {
+          margin: 0;
+          font-size: 12px;
+          line-height: 1.3;
+          white-space: nowrap;
+        }
+        #eventForm .koshien-phase3-case input[type="number"] {
+          width: 54px !important;
+          min-width: 54px !important;
+          height: 44px !important;
+          min-height: 44px !important;
+          padding: 4px 6px !important;
+          font-size: 20px !important;
+        }
+        @media (max-width: 420px) {
+          #eventForm .koshien-phase3-case .form-grid { gap: 8px !important; }
+          #eventForm .koshien-phase3-case .form-grid .field {
+            grid-template-columns: minmax(0, 1fr) 48px !important;
+            gap: 5px !important;
+          }
+          #eventForm .koshien-phase3-case .form-grid .field > span { font-size: 11px; }
+          #eventForm .koshien-phase3-case input[type="number"] {
+            width: 48px !important;
+            min-width: 48px !important;
+            font-size: 18px !important;
+          }
+        }
+      `;
+      root.document.head?.appendChild(style);
+    };
+
+    const maybeActivateOpenPhase3 = () => {
+      let laterView = null;
+      try {
+        laterView = typeof koshienLaterPhaseView !== "undefined" ? koshienLaterPhaseView : null;
+      } catch (_error) {
+        return;
+      }
+      const phase3Round = laterView?.loadedFromDb ? laterView.rounds?.phase3 : null;
+      if (phase3Round?.status !== "open") return;
+      const phase3Button = root.document.querySelector("#eventForm [data-koshien-phase='phase3']");
+      if (!phase3Button || phase3Button.classList.contains("is-active")) return;
+      phase3Button.click();
+    };
+
     let installAttempts = 0;
     const installLaterPhaseInputPersistence = () => {
       if (root.__yosoKoshienLaterPhaseInputPersistenceInstalled) return;
@@ -16,6 +80,7 @@
         return;
       }
 
+      installCompactPhase3Styles();
       root.render = function renderWithLaterPhaseInputPersistence() {
         const form = root.document.querySelector("#eventForm");
         const snapshot = {
@@ -40,9 +105,11 @@
         if (scoreB && snapshot.scoreB !== "") scoreB.value = snapshot.scoreB;
         if (tiebreakScoreA && snapshot.tiebreakScoreA !== "") tiebreakScoreA.value = snapshot.tiebreakScoreA;
         if (tiebreakScoreB && snapshot.tiebreakScoreB !== "") tiebreakScoreB.value = snapshot.tiebreakScoreB;
+        root.setTimeout(maybeActivateOpenPhase3, 0);
         return result;
       };
       root.__yosoKoshienLaterPhaseInputPersistenceInstalled = true;
+      root.setTimeout(maybeActivateOpenPhase3, 0);
     };
     root.setTimeout(installLaterPhaseInputPersistence, 0);
     root.addEventListener?.("load", () => root.setTimeout(installLaterPhaseInputPersistence, 0), { once: true });
