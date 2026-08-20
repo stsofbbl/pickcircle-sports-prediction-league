@@ -175,6 +175,20 @@ test("completed match payload includes loser_team_id and normalizes final to com
   });
 });
 
+test("final result payload preserves the official tiebreak classification", () => {
+  const [row] = koshien.buildMatchRows({
+    eventId: "event-id",
+    matches: [{
+      match_id: "F-1", round: "F", match_no: 1,
+      team_a_id: "Team A", team_b_id: "Team B",
+      score_a: 7, score_b: 6, winner_id: "Team A", loser_id: "Team B",
+      status: "completed", metadata: { used_tiebreak: true },
+    }],
+    teams: [{ id: "team-a", name: "Team A" }, { id: "team-b", name: "Team B" }],
+  });
+  assert.equal(row.metadata.used_tiebreak, true);
+});
+
 test("public matches override the matching results payload slots without rebuilding later rounds", () => {
   const payload = {
     matches: [

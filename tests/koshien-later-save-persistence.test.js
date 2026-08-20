@@ -15,18 +15,20 @@ test("later-phase render preserves zombie, revenge, and phase3 inputs", () => {
       "[data-koshien-zombie-team]": { value: values.zombie },
       "[data-koshien-phase3-score='a']": { value: values.scoreA },
       "[data-koshien-phase3-score='b']": { value: values.scoreB },
+      "[data-koshien-phase3-tiebreak-score='a']": { value: values.tiebreakScoreA },
+      "[data-koshien-phase3-tiebreak-score='b']": { value: values.tiebreakScoreB },
     };
     return { querySelector: (selector) => controls[selector] || null };
   }
 
-  form = makeForm({ revenge: "revenge-team", zombie: "zombie-team", scoreA: "4", scoreB: "2" });
+  form = makeForm({ revenge: "revenge-team", zombie: "zombie-team", scoreA: "4", scoreB: "2", tiebreakScoreA: "7", tiebreakScoreB: "6" });
   const context = {
     console,
     document: { querySelector: (selector) => (selector === "#eventForm" ? form : null) },
     addEventListener() {},
     setTimeout(callback) { timers.push(callback); return timers.length; },
     render() {
-      form = makeForm({ revenge: "", zombie: "", scoreA: "", scoreB: "" });
+      form = makeForm({ revenge: "", zombie: "", scoreA: "", scoreB: "", tiebreakScoreA: "", tiebreakScoreB: "" });
     },
   };
   context.globalThis = context;
@@ -40,4 +42,6 @@ test("later-phase render preserves zombie, revenge, and phase3 inputs", () => {
   assert.equal(form.querySelector("[data-koshien-zombie-team]").value, "zombie-team");
   assert.equal(form.querySelector("[data-koshien-phase3-score='a']").value, "4");
   assert.equal(form.querySelector("[data-koshien-phase3-score='b']").value, "2");
+  assert.equal(form.querySelector("[data-koshien-phase3-tiebreak-score='a']").value, "7");
+  assert.equal(form.querySelector("[data-koshien-phase3-tiebreak-score='b']").value, "6");
 });

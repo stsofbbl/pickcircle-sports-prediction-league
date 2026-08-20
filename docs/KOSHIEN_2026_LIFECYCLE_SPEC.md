@@ -133,9 +133,10 @@ Exact timestamps remain event data set by the admin. A write is valid only while
 ### 8. Phase 3 data and submission
 
 - The phase 3 round stores fixed `team_a_id` and `team_b_id` finalist identities.
-- The UI shows those teams in fixed order and accepts only `team_a_score` and `team_b_score`.
-- Both scores must be integers greater than or equal to zero and must not be equal.
-- The submission RPC accepts `event_id`, the two scores, `expected_version`, and `request_id`; finalist IDs are server-owned and not trusted from the client.
+- The UI shows those teams in fixed order and accepts a normal-finish score pair and a tiebreak-finish score pair.
+- All four scores must be integers greater than or equal to zero, and neither pair may be equal.
+- The submission RPC accepts `event_id`, both score pairs, `expected_version`, and `request_id`; finalist IDs are server-owned and not trusted from the client.
+- The final result stores whether tiebreak was used. Scoring selects only the matching normal or tiebreak prediction pair.
 - Existing champion/runner-up named columns are not used as the new domain contract. A safe migration must add fixed-finalist score semantics and stop if existing rows cannot be converted unambiguously.
 
 ### 9. Scoring and ranking

@@ -22,6 +22,10 @@ test("prediction UI renders only the authenticated viewer later-phase state", ()
   assert.match(app, /data-koshien-revenge-team/);
   assert.match(app, /data-koshien-zombie-team/);
   assert.match(app, /data-koshien-phase3-score="a"/);
+  assert.match(app, /data-koshien-phase3-tiebreak-score="a"/);
+  assert.match(app, /通常決着の場合/);
+  assert.match(app, /タイブレークの場合/);
+  assert.match(app, /2つの予想を保存/);
   assert.doesNotMatch(app.slice(app.indexOf("function koshienRevengeBlock"), app.indexOf("function koshienPublicPredictions")), /state\.participants\.map/);
 });
 
@@ -79,7 +83,14 @@ test("participant later-phase cards explain before-open, open, and ended states"
   assert.match(app, /日本時間/);
   assert.match(app, /view\.status === "ready" \|\| receptionRound\?\.status === "ready"/);
   assert.match(app, /提出内容:/);
-  assert.match(app, /prediction \? `\$\{prediction\.predicted_score_a\} - \$\{prediction\.predicted_score_b\}` : "未提出"/);
+  assert.match(app, /predicted_tiebreak_score_a/);
+  assert.match(app, /タイブレーク/);
+});
+
+test("admin final result records whether tiebreak was used", () => {
+  assert.match(app, /match\.round === "F" \? `<label class="koshien-final-tiebreak-toggle"/);
+  assert.match(app, /data-koshien-match-tiebreak=/);
+  assert.match(app, /used_tiebreak: input\.checked/);
 });
 
 test("not-ready persisted rounds remain unprepared in the five-state admin UI", () => {

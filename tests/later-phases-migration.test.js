@@ -8,6 +8,7 @@ const rosterMigrationPath = path.join(__dirname, "..", "supabase", "migrations",
 const lifecycleMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722200000_harden_koshien_later_phase_lifecycle.sql");
 const triggerPermissionMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260722202000_revoke_koshien_trigger_execution.sql");
 const progressMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260730043742_improve_koshien_later_phase_progress_ui.sql");
+const phase3TiebreakMigrationPath = path.join(__dirname, "..", "supabase", "migrations", "20260820065700_add_koshien_phase3_tiebreak_prediction.sql");
 
 test("later-phase migration provides server-owned round snapshots and authenticated RPC writes", () => {
   const sql = fs.readFileSync(migrationPath, "utf8");
@@ -86,6 +87,20 @@ test("later-phase progress migration keeps scheduling and state changes server-o
   assert.match(sql, /p_end_mode = 'automatic'/i);
   assert.match(sql, /revoke all on function public\.update_koshien_later_phase_schedule[\s\S]*from anon, public/i);
   assert.match(sql, /grant execute on function public\.update_koshien_later_phase_schedule[\s\S]*to authenticated/i);
+});
+
+test("phase 3 tiebreak migration stores both predictions and scores only the applicable one", () => {
+  const sql = fs.readFileSync(phase3TiebreakMigrationPath, "utf8");
+  assert.match(sql, /add column if not exists predicted_tiebreak_score_a integer/i);
+  assert.match(sql, /add column if not exists predicted_tiebreak_score_b integer/i);
+  assert.match(sql, /p_tiebreak_score_a integer/i);
+  assert.match(sql, /p_tiebreak_score_b integer/i);
+  assert.match(sql, /drop function if exists public\.save_koshien_phase3_prediction\(text, integer, integer, bigint, uuid\)/i);
+  assert.match(sql, /jsonb_typeof\(m\.metadata->'used_tiebreak'\) = 'boolean'/i);
+  assert.match(sql, /case when v_used_tiebreak then fsp\.predicted_tiebreak_score_a else fsp\.predicted_score_a end/i);
+  assert.match(sql, /case when v_used_tiebreak then fsp\.predicted_tiebreak_score_b else fsp\.predicted_score_b end/i);
+  assert.match(sql, /revoke all on function public\.save_koshien_phase3_prediction\(text,integer,integer,integer,integer,bigint,uuid\) from anon, public/i);
+  assert.match(sql, /grant execute on function public\.save_koshien_phase3_prediction\(text,integer,integer,integer,integer,bigint,uuid\) to authenticated/i);
 });
 
 test("open phase deadline changes support extension and shortening without changing picks", () => {
