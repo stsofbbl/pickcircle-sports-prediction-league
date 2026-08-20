@@ -122,13 +122,20 @@
     const requestId = String(payload.requestId || "").trim();
     const scoreA = Number(payload.scoreA);
     const scoreB = Number(payload.scoreB);
+    const tiebreakScoreA = Number(payload.tiebreakScoreA);
+    const tiebreakScoreB = Number(payload.tiebreakScoreB);
     const version = Number(payload.version);
     if (!eventId || !requestId || !Number.isInteger(version) || !Number.isInteger(scoreA) || scoreA < 0
-      || !Number.isInteger(scoreB) || scoreB < 0 || scoreA === scoreB) throw new Error("フェーズ3保存payloadを確認してください。");
+      || !Number.isInteger(scoreB) || scoreB < 0 || scoreA === scoreB
+      || !Number.isInteger(tiebreakScoreA) || tiebreakScoreA < 0
+      || !Number.isInteger(tiebreakScoreB) || tiebreakScoreB < 0
+      || tiebreakScoreA === tiebreakScoreB) throw new Error("フェーズ3保存payloadを確認してください。");
     return laterPhaseRpc("save_koshien_phase3_prediction", {
       p_event_id: eventId,
       p_score_a: scoreA,
       p_score_b: scoreB,
+      p_tiebreak_score_a: tiebreakScoreA,
+      p_tiebreak_score_b: tiebreakScoreB,
       p_expected_version: version,
       p_request_id: requestId,
     }, "phase3_prediction");

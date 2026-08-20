@@ -265,6 +265,11 @@ create table if not exists public.final_score_predictions (
   runner_up_team_id uuid references public.teams(id) on delete set null,
   champion_score integer check (champion_score is null or champion_score >= 0),
   runner_up_score integer check (runner_up_score is null or runner_up_score >= 0),
+  predicted_score_a integer check (predicted_score_a is null or predicted_score_a >= 0),
+  predicted_score_b integer check (predicted_score_b is null or predicted_score_b >= 0),
+  predicted_tiebreak_score_a integer check (predicted_tiebreak_score_a is null or predicted_tiebreak_score_a >= 0),
+  predicted_tiebreak_score_b integer check (predicted_tiebreak_score_b is null or predicted_tiebreak_score_b >= 0),
+  request_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (event_id, player_id)
@@ -473,8 +478,10 @@ select
   player_id,
   champion_team_id as team_a_id,
   runner_up_team_id as team_b_id,
-  champion_score as predicted_score_a,
-  runner_up_score as predicted_score_b,
+  predicted_score_a,
+  predicted_score_b,
+  predicted_tiebreak_score_a,
+  predicted_tiebreak_score_b,
   created_at,
   updated_at
 from public.final_score_predictions;

@@ -80,12 +80,27 @@ test("revenge zombie and phase 3 saves send only server-owned IDs scores version
   const { service, calls } = loadService();
   await service.koshien.saveRevengePick({ eventId: "event-1", teamId: "team-1", version: 2, requestId: "request-1" });
   await service.koshien.saveZombiePrediction({ eventId: "event-1", teamId: "team-2", version: 3, requestId: "request-2" });
-  await service.koshien.savePhase3Prediction({ eventId: "event-1", scoreA: 5, scoreB: 3, version: 4, requestId: "request-3" });
+  await service.koshien.savePhase3Prediction({
+    eventId: "event-1", scoreA: 5, scoreB: 3, tiebreakScoreA: 7, tiebreakScoreB: 6, version: 4, requestId: "request-3",
+  });
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     { name: "save_koshien_revenge_pick", args: { p_event_id: "event-1", p_target_team_id: "team-1", p_expected_version: 2, p_request_id: "request-1" } },
     { name: "save_koshien_zombie_prediction", args: { p_event_id: "event-1", p_target_team_id: "team-2", p_expected_version: 3, p_request_id: "request-2" } },
-    { name: "save_koshien_phase3_prediction", args: { p_event_id: "event-1", p_score_a: 5, p_score_b: 3, p_expected_version: 4, p_request_id: "request-3" } },
+    { name: "save_koshien_phase3_prediction", args: {
+      p_event_id: "event-1", p_score_a: 5, p_score_b: 3, p_tiebreak_score_a: 7, p_tiebreak_score_b: 6, p_expected_version: 4, p_request_id: "request-3",
+    } },
   ]);
+});
+
+test("phase 3 save rejects a missing or tied tiebreak prediction before RPC", async () => {
+  const { service, calls } = loadService();
+  await assert.rejects(
+    service.koshien.savePhase3Prediction({
+      eventId: "event-1", scoreA: 5, scoreB: 3, tiebreakScoreA: 6, tiebreakScoreB: 6, version: 4, requestId: "request-3",
+    }),
+    /フェーズ3保存payload/,
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("admin preparation uses explicit event schedule without participant identities", async () => {

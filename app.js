@@ -1915,10 +1915,20 @@ async function saveKoshienLaterChoice(kind) {
     } else {
       const scoreA = els.eventForm.querySelector("[data-koshien-phase3-score='a']")?.value;
       const scoreB = els.eventForm.querySelector("[data-koshien-phase3-score='b']")?.value;
+      const tiebreakScoreA = els.eventForm.querySelector("[data-koshien-phase3-tiebreak-score='a']")?.value;
+      const tiebreakScoreB = els.eventForm.querySelector("[data-koshien-phase3-tiebreak-score='b']")?.value;
       const validation = window.YosoKoshienLaterPhases?.validateFinalScore(scoreA, scoreB);
-      if (!validation?.ok) throw new Error(validation?.message || "決勝スコアを確認してください。");
+      const tiebreakValidation = window.YosoKoshienLaterPhases?.validateFinalScore(tiebreakScoreA, tiebreakScoreB);
+      if (!validation?.ok) throw new Error(`通常決着用: ${validation?.message || "決勝スコアを確認してください。"}`);
+      if (!tiebreakValidation?.ok) throw new Error(`タイブレーク用: ${tiebreakValidation?.message || "決勝スコアを確認してください。"}`);
       response = await service.savePhase3Prediction({
-        eventId, scoreA: validation.scoreA, scoreB: validation.scoreB, version: Number(round.version), requestId,
+        eventId,
+        scoreA: validation.scoreA,
+        scoreB: validation.scoreB,
+        tiebreakScoreA: tiebreakValidation.scoreA,
+        tiebreakScoreB: tiebreakValidation.scoreB,
+        version: Number(round.version),
+        requestId,
       });
     }
     applyKoshienLaterPhaseResponse(response, eventId);
@@ -3414,6 +3424,7 @@ function koshienMatchBottomSheet(match, teams, disabledResults, message) {
         <label class="field score-field"><span>高校A得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:a" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(match.score_a)}" ${disabledResults}></label>
         <label class="field score-field"><span>高校B得点</span><input data-koshien-match-score="${escapeAttr(match.match_id)}:b" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(match.score_b)}" ${disabledResults}></label>
       </div>
+      ${match.round === "F" ? `<label class="koshien-final-tiebreak-toggle"><input type="checkbox" data-koshien-match-tiebreak="${escapeAttr(match.match_id)}" ${match.metadata?.used_tiebreak === true ? "checked" : ""} ${disabledResults}><span><strong>タイブレーク実施</strong><small>フェーズ3はタイブレーク用の予想で採点します。</small></span></label>` : ""}
       <p class="helper-text koshien-match-message ${message?.type === "error" ? "is-error" : "is-success"}" data-koshien-sheet-message>${escapeHtml(message?.text || "")}</p>
       <div class="koshien-match-sheet-actions">
         ${match.status === "completed" ? `<button class="ghost-button danger-action" type="button" data-koshien-match-cancel="${escapeAttr(match.match_id)}" ${disabledResults}>結果取消</button>` : ""}
@@ -3912,6 +3923,16 @@ function bindActiveEventManagerInputs() {
       if (side === "a") match.score_a = value;
       if (side === "b") match.score_b = value;
       match.winner_id = window.YosoKoshienResults.inferMatchWinner(match);
+    });
+  });
+  root.querySelectorAll("[data-koshien-match-tiebreak]").forEach((input) => {
+    input.disabled = !canEditResults;
+    input.addEventListener("change", () => {
+      if (!canEditResults) return;
+      clearKoshienMatchMessage(root);
+      const match = koshienMatchById(input.dataset.koshienMatchTiebreak);
+      if (!match || match.round !== "F") return;
+      match.metadata = { ...(match.metadata || {}), used_tiebreak: input.checked };
     });
   });
   root.querySelectorAll("[data-koshien-match-save]").forEach((button) => {
@@ -4958,6 +4979,7 @@ async function cancelKoshienMatchResult(matchId) {
   match.winner_id = "";
   match.loser_id = "";
   match.status = "scheduled";
+  if (match.round === "F") match.metadata = { ...(match.metadata || {}), used_tiebreak: false };
   applyKoshienMatchFinishes();
   if (koshienLaterPhaseView.eventId === String(state.event.id)) koshienLaterPhaseView.official_scores = [];
   saveLocalStateOnly();
@@ -5337,18 +5359,20 @@ function participantKoshienFinalScoreBlock() {
   if (!round) return `<div class="entry-block"><h3>フェーズ3・決勝スコア</h3><p class="helper-text">受付開始までお待ちください。決勝進出2校が確定すると入力できます。</p>${koshienLaterMessage()}</div>`;
   if (round.status === "ready") return `<div class="entry-block"><h3>フェーズ3・決勝スコア</h3><p class="helper-text">受付開始までお待ちください</p></div>`;
   if (["locked", "completed"].includes(round.status)) {
-    const submittedScore = prediction ? `${prediction.predicted_score_a} - ${prediction.predicted_score_b}` : "未提出";
+    const submittedNormalScore = prediction ? `${prediction.predicted_score_a} - ${prediction.predicted_score_b}` : "未提出";
+    const submittedTiebreakScore = prediction ? `${prediction.predicted_tiebreak_score_a} - ${prediction.predicted_tiebreak_score_b}` : "未提出";
     const publicPredictions = koshienLaterPhaseView.phase3?.predictions || [];
     return `
       <div class="entry-block">
         <h3>フェーズ3・決勝スコア</h3>
         <p class="helper-text">受付終了</p>
-        <p class="helper-text">あなたの提出内容: ${escapeHtml(submittedScore)}</p>
+        <p class="helper-text">あなたの通常決着予想: ${escapeHtml(submittedNormalScore)}</p>
+        <p class="helper-text">あなたのタイブレーク予想: ${escapeHtml(submittedTiebreakScore)}</p>
         <div class="history-list">
           ${publicPredictions.length ? publicPredictions.map((row) => `
             <div class="history-row wc-public-row">
               <strong>${escapeHtml(row.display_name || "参加者")}</strong>
-              <span>${escapeHtml(`${row.predicted_score_a} - ${row.predicted_score_b}`)}</span>
+              <span>${escapeHtml(`通常 ${row.predicted_score_a} - ${row.predicted_score_b} / TB ${row.predicted_tiebreak_score_a} - ${row.predicted_tiebreak_score_b}`)}</span>
             </div>
           `).join("") : `<p class="helper-text">提出済み予想はありません。</p>`}
         </div>
@@ -5361,14 +5385,31 @@ function participantKoshienFinalScoreBlock() {
         <h3>フェーズ3・決勝スコア</h3>
         <span>決勝スコア</span>
       </div>
+      <div class="koshien-phase3-score-badges"><span>完全一致 <strong>50pt</strong></span><span>最接近 <strong>30pt</strong></span></div>
       <p class="wc-phase-intro">決勝2校は公式結果から固定されています。完全一致50点、完全一致者がいない場合の最接近者は30点です。</p>
-      <p class="koshien-later-reception-message">${escapeHtml(koshienParticipantReceptionMessage(round))}</p>
-      <div class="form-grid">
-        <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_a_id))}</span><input data-koshien-phase3-score="a" type="number" min="0" step="1" value="${escapeAttr(prediction?.predicted_score_a ?? "")}" ${canSave ? "" : "disabled"}></label>
-        <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_b_id))}</span><input data-koshien-phase3-score="b" type="number" min="0" step="1" value="${escapeAttr(prediction?.predicted_score_b ?? "")}" ${canSave ? "" : "disabled"}></label>
+      <div class="koshien-phase3-matchup" aria-label="決勝カード">
+        <strong>${escapeHtml(koshienLaterTeamName(round.team_a_id))}</strong><span>VS</span><strong>${escapeHtml(koshienLaterTeamName(round.team_b_id))}</strong>
       </div>
-      <div class="koshien-phase2-actions"><button class="primary-button" type="button" data-koshien-later-save="phase3" ${canSave ? "" : "disabled"}>決勝スコア予想を保存</button></div>
-      <p class="helper-text">同点予想はできません。締切日時 ${escapeHtml(round.end_mode === "manual" ? "管理者が受付終了するまで" : `${formatKoshienJapanDateTime(round.deadline_at)}（日本時間）`)}</p>${koshienLaterMessage()}
+      <p class="koshien-later-reception-message">${escapeHtml(koshienParticipantReceptionMessage(round))}</p>
+      <div class="koshien-phase3-predictions">
+        <section class="koshien-phase3-case is-normal">
+          <div class="koshien-phase3-case-head"><div><strong>通常決着の場合</strong><span>タイブレークなしで終了した場合に採点</span></div></div>
+          <div class="form-grid">
+            <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_a_id))}</span><input data-koshien-phase3-score="a" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(prediction?.predicted_score_a ?? "")}" ${canSave ? "" : "disabled"}></label>
+            <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_b_id))}</span><input data-koshien-phase3-score="b" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(prediction?.predicted_score_b ?? "")}" ${canSave ? "" : "disabled"}></label>
+          </div>
+        </section>
+        <section class="koshien-phase3-case is-tiebreak">
+          <div class="koshien-phase3-case-head"><span class="koshien-phase3-tb-badge">TB</span><div><strong>タイブレークの場合</strong><span>タイブレークが実施された場合のみ採点</span></div></div>
+          <div class="form-grid">
+            <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_a_id))}</span><input data-koshien-phase3-tiebreak-score="a" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(prediction?.predicted_tiebreak_score_a ?? "")}" ${canSave ? "" : "disabled"}></label>
+            <label class="field"><span>${escapeHtml(koshienLaterTeamName(round.team_b_id))}</span><input data-koshien-phase3-tiebreak-score="b" type="number" min="0" step="1" inputmode="numeric" value="${escapeAttr(prediction?.predicted_tiebreak_score_b ?? "")}" ${canSave ? "" : "disabled"}></label>
+          </div>
+        </section>
+      </div>
+      <p class="koshien-phase3-applicable-note">実際の試合状況に応じて、どちらか一方のみ採点します。</p>
+      <div class="koshien-phase2-actions"><button class="primary-button" type="button" data-koshien-later-save="phase3" ${canSave ? "" : "disabled"}>2つの予想を保存</button></div>
+      <p class="helper-text">どちらも同点予想はできません。締切日時 ${escapeHtml(round.end_mode === "manual" ? "管理者が受付終了するまで" : `${formatKoshienJapanDateTime(round.deadline_at)}（日本時間）`)}</p>${koshienLaterMessage()}
     </div>
   `;
 }

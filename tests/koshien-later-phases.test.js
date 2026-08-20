@@ -124,6 +124,28 @@ test("phase 3 awards all fully tied nearest predictions 30", () => {
   assert.deepEqual(scores, { a: 30, b: 30 });
 });
 
+test("phase 3 uses only the normal prediction when the final has no tiebreak", () => {
+  const scores = later.calculatePhase3Scores({
+    actual: { scoreA: 5, scoreB: 3, usedTiebreak: false },
+    predictions: [
+      { playerId: "normal", scoreA: 5, scoreB: 3, tiebreakScoreA: 8, tiebreakScoreB: 7 },
+      { playerId: "tiebreak", scoreA: 4, scoreB: 3, tiebreakScoreA: 5, tiebreakScoreB: 3 },
+    ],
+  });
+  assert.deepEqual(scores, { normal: 50 });
+});
+
+test("phase 3 uses only the tiebreak prediction when the final uses tiebreak", () => {
+  const scores = later.calculatePhase3Scores({
+    actual: { scoreA: 7, scoreB: 6, usedTiebreak: true },
+    predictions: [
+      { playerId: "normal", scoreA: 7, scoreB: 6, tiebreakScoreA: 8, tiebreakScoreB: 6 },
+      { playerId: "tiebreak", scoreA: 5, scoreB: 3, tiebreakScoreA: 7, tiebreakScoreB: 6 },
+    ],
+  });
+  assert.deepEqual(scores, { tiebreak: 50 });
+});
+
 test("phase 3 rejects negative decimal and tied predictions", () => {
   assert.equal(later.validateFinalScore(-1, 0).ok, false);
   assert.equal(later.validateFinalScore(1.5, 0).ok, false);

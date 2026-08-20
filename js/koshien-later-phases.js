@@ -23,6 +23,8 @@
           zombieTeam: form?.querySelector("[data-koshien-zombie-team]")?.value || "",
           scoreA: form?.querySelector("[data-koshien-phase3-score='a']")?.value ?? "",
           scoreB: form?.querySelector("[data-koshien-phase3-score='b']")?.value ?? "",
+          tiebreakScoreA: form?.querySelector("[data-koshien-phase3-tiebreak-score='a']")?.value ?? "",
+          tiebreakScoreB: form?.querySelector("[data-koshien-phase3-tiebreak-score='b']")?.value ?? "",
         };
         const result = originalRender.apply(this, arguments);
         const nextForm = root.document.querySelector("#eventForm");
@@ -30,10 +32,14 @@
         const zombie = nextForm?.querySelector("[data-koshien-zombie-team]");
         const scoreA = nextForm?.querySelector("[data-koshien-phase3-score='a']");
         const scoreB = nextForm?.querySelector("[data-koshien-phase3-score='b']");
+        const tiebreakScoreA = nextForm?.querySelector("[data-koshien-phase3-tiebreak-score='a']");
+        const tiebreakScoreB = nextForm?.querySelector("[data-koshien-phase3-tiebreak-score='b']");
         if (revenge && snapshot.revengeTeam) revenge.value = snapshot.revengeTeam;
         if (zombie && snapshot.zombieTeam) zombie.value = snapshot.zombieTeam;
         if (scoreA && snapshot.scoreA !== "") scoreA.value = snapshot.scoreA;
         if (scoreB && snapshot.scoreB !== "") scoreB.value = snapshot.scoreB;
+        if (tiebreakScoreA && snapshot.tiebreakScoreA !== "") tiebreakScoreA.value = snapshot.tiebreakScoreA;
+        if (tiebreakScoreB && snapshot.tiebreakScoreB !== "") tiebreakScoreB.value = snapshot.tiebreakScoreB;
         return result;
       };
       root.__yosoKoshienLaterPhaseInputPersistenceInstalled = true;
@@ -166,7 +172,13 @@
 
   function calculatePhase3Scores({ predictions = [], actual } = {}) {
     if (!actual || !validateFinalScore(actual.scoreA, actual.scoreB).ok) return {};
-    const valid = predictions.filter((prediction) => validateFinalScore(prediction.scoreA, prediction.scoreB).ok);
+    const useTiebreak = actual.usedTiebreak === true;
+    const applicable = predictions.map((prediction) => ({
+      ...prediction,
+      scoreA: useTiebreak ? prediction.tiebreakScoreA : prediction.scoreA,
+      scoreB: useTiebreak ? prediction.tiebreakScoreB : prediction.scoreB,
+    }));
+    const valid = applicable.filter((prediction) => validateFinalScore(prediction.scoreA, prediction.scoreB).ok);
     const exact = valid.filter((prediction) => (
       Number(prediction.scoreA) === Number(actual.scoreA)
       && Number(prediction.scoreB) === Number(actual.scoreB)
