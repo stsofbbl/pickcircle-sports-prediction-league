@@ -87,6 +87,11 @@
           const heading = block.querySelector("h3")?.textContent?.trim() || "";
           if (heading === "ゾンビモード") block.remove();
         });
+        const phase3Intro = [...panel.querySelectorAll(".wc-phase-intro")]
+          .find((node) => node.textContent?.includes("完全一致50点"));
+        if (phase3Intro) {
+          phase3Intro.textContent = "決勝2校は公式結果から固定されています。完全一致50点。完全一致者がいない場合は、勝敗的中者の中で最接近者に30点です。";
+        }
       }
 
       root.document.body?.classList.remove("is-zombie-mypage");
@@ -279,7 +284,11 @@
       && Number(prediction.scoreB) === Number(actual.scoreB)
     ));
     if (exact.length) return Object.fromEntries(exact.map((prediction) => [String(prediction.playerId), 50]));
-    const ranked = valid.map((prediction) => ({ prediction, metric: finalScoreMetric(prediction, actual) }))
+    const winnerMatched = valid.filter((prediction) => (
+      Math.sign(Number(prediction.scoreA) - Number(prediction.scoreB))
+      === Math.sign(Number(actual.scoreA) - Number(actual.scoreB))
+    ));
+    const ranked = winnerMatched.map((prediction) => ({ prediction, metric: finalScoreMetric(prediction, actual) }))
       .sort((left, right) => compareMetric(left.metric, right.metric));
     if (!ranked.length) return {};
     return Object.fromEntries(ranked

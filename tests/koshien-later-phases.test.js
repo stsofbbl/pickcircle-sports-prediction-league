@@ -124,6 +124,28 @@ test("phase 3 awards all fully tied nearest predictions 30", () => {
   assert.deepEqual(scores, { a: 30, b: 30 });
 });
 
+test("phase 3 excludes wrong-winner predictions from nearest points", () => {
+  const scores = later.calculatePhase3Scores({
+    actual: { scoreA: 5, scoreB: 6 },
+    predictions: [
+      { playerId: "wrong", scoreA: 6, scoreB: 5 },
+      { playerId: "correct", scoreA: 2, scoreB: 3 },
+    ],
+  });
+  assert.deepEqual(scores, { correct: 30 });
+});
+
+test("phase 3 awards no nearest points when nobody predicts the winner", () => {
+  const scores = later.calculatePhase3Scores({
+    actual: { scoreA: 5, scoreB: 6 },
+    predictions: [
+      { playerId: "wrong-a", scoreA: 6, scoreB: 5 },
+      { playerId: "wrong-b", scoreA: 8, scoreB: 7 },
+    ],
+  });
+  assert.deepEqual(scores, {});
+});
+
 test("phase 3 uses only the normal prediction when the final has no tiebreak", () => {
   const scores = later.calculatePhase3Scores({
     actual: { scoreA: 5, scoreB: 3, usedTiebreak: false },
@@ -144,6 +166,17 @@ test("phase 3 uses only the tiebreak prediction when the final uses tiebreak", (
     ],
   });
   assert.deepEqual(scores, { tiebreak: 50 });
+});
+
+test("phase 3 winner eligibility follows the tiebreak prediction when tiebreak is used", () => {
+  const scores = later.calculatePhase3Scores({
+    actual: { scoreA: 7, scoreB: 8, usedTiebreak: true },
+    predictions: [
+      { playerId: "wrong", scoreA: 1, scoreB: 0, tiebreakScoreA: 8, tiebreakScoreB: 7 },
+      { playerId: "correct", scoreA: 0, scoreB: 1, tiebreakScoreA: 4, tiebreakScoreB: 5 },
+    ],
+  });
+  assert.deepEqual(scores, { correct: 30 });
 });
 
 test("phase 3 rejects negative decimal and tied predictions", () => {
