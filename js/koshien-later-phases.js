@@ -70,7 +70,7 @@
         return;
       }
       const phase3Round = laterView?.loadedFromDb ? laterView.rounds?.phase3 : null;
-      if (phase3Round?.status !== "open") return;
+      if (!["open", "locked", "completed"].includes(phase3Round?.status)) return;
       const phase3Button = root.document.querySelector("#eventForm [data-koshien-phase='phase3']");
       if (!phase3Button || phase3Button.classList.contains("is-active")) return;
       phase3Button.click();
