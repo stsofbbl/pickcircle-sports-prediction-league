@@ -21,17 +21,18 @@ CREATE TABLE public.koshien_revenge_eligibility (event_id text, player_id uuid);
 CREATE TABLE public.revenge_picks (event_id text, player_id uuid);
 CREATE TABLE public.koshien_zombie_eligibility (event_id text, player_id uuid);
 CREATE TABLE public.zombie_predictions (
- event_id text, player_id uuid, team_id text, created_at timestamptz, updated_at timestamptz);
-CREATE TABLE public.teams (id text, event_id text, name text, sqrt_odds numeric);
+ event_id text, player_id uuid, team_id uuid, created_at timestamptz, updated_at timestamptz);
+CREATE TABLE public.teams (id uuid PRIMARY KEY, event_id text, name text, sqrt_odds numeric);
 CREATE TABLE public.scores (
  event_id text, player_id uuid, phase1_score numeric, revenge_score numeric,
  phase2_score numeric, zombie_score numeric, phase3_score numeric,
  total_score numeric, breakdown jsonb);
+\ir fixtures/phase3-production-constraints.sql
 \ir fixtures/phase3-production-functions.sql
 
 UPDATE public.league_members SET membership_status='active';
 UPDATE public.koshien_later_rounds
- SET status='open', opens_at=clock_timestamp()-interval '1 day',
+ SET status='open', opens_at=clock_timestamp()-interval '2 days',
  deadline_at=clock_timestamp()+interval '1 day', version=0
  WHERE event_id='event' AND phase_key='phase3';
 
@@ -86,7 +87,7 @@ SELECT public.assert_phase3_rpc(0,'open','manual end remains private despite pas
 RESET ROLE;
 
 UPDATE public.koshien_later_rounds
- SET status='ready',end_mode='automatic',opens_at=clock_timestamp()-interval '1 day',
+ SET status='ready',end_mode='automatic',opens_at=clock_timestamp()-interval '2 days',
  deadline_at=clock_timestamp()+interval '1 day'
  WHERE event_id='event' AND phase_key='phase3';
 SET LOCAL ROLE yoso_phase3_test_member;

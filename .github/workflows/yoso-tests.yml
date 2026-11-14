@@ -38,6 +38,7 @@ jobs:
           sudo install -D -o postgres -m 644 tests/sql/phase3-visibility.sql "$stage_dir/tests/sql/phase3-visibility.sql"
           sudo install -D -o postgres -m 644 tests/sql/phase3-rpc-integration.sql "$stage_dir/tests/sql/phase3-rpc-integration.sql"
           sudo install -D -o postgres -m 644 tests/sql/fixtures/phase3-production-functions.sql "$stage_dir/tests/sql/fixtures/phase3-production-functions.sql"
+          sudo install -D -o postgres -m 644 tests/sql/fixtures/phase3-production-constraints.sql "$stage_dir/tests/sql/fixtures/phase3-production-constraints.sql"
           sudo install -D -o postgres -m 644 supabase/patches/phase3-visibility.sql "$stage_dir/supabase/patches/phase3-visibility.sql"
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test -f "$stage_dir/tests/sql/phase3-visibility.sql"
           # The fixture must leave no relations or role after its ROLLBACK.

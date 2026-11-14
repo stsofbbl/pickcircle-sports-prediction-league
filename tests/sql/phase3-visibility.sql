@@ -90,9 +90,9 @@ RESET ROLE;
 SET LOCAL ROLE yoso_phase3_test_member;
 SELECT public.assert_visible(1,'owner only when phase3 is absent despite expired event deadline');
 RESET ROLE;
-INSERT INTO public.koshien_later_rounds VALUES ('event','phase2','completed'),('event','phase3','open');
+INSERT INTO public.koshien_later_rounds VALUES ('event','zombie','completed'),('event','phase3','open');
 SET LOCAL ROLE yoso_phase3_test_member;
-SELECT public.assert_visible(1,'phase2 completion does not publish open phase3');
+SELECT public.assert_visible(1,'zombie completion does not publish open phase3');
 RESET ROLE;
 -- A completed round belonging to another event must not publish this event.
 INSERT INTO public.events VALUES ('other-event','00000000-0000-0000-0000-000000000010','archive',now()-interval '1 day');
