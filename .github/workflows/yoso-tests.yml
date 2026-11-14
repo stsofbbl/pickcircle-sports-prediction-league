@@ -25,6 +25,24 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Verify phase3 visibility in isolated PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reuse the runner's preinstalled PostgreSQL; never connect to Supabase.
+          sudo systemctl start postgresql.service
+          sudo -u postgres createdb yoso_phase3_rls_test
+          # postgres cannot traverse the runner's private checkout directory.
+          stage_dir="$(mktemp -d /tmp/yoso-phase3.XXXXXX)"
+          sudo chown postgres "$stage_dir"
+          sudo install -D -o postgres -m 644 tests/sql/phase3-visibility.sql "$stage_dir/tests/sql/phase3-visibility.sql"
+          sudo install -D -o postgres -m 644 tests/sql/phase3-rpc-integration.sql "$stage_dir/tests/sql/phase3-rpc-integration.sql"
+          sudo install -D -o postgres -m 644 tests/sql/fixtures/phase3-production-functions.sql "$stage_dir/tests/sql/fixtures/phase3-production-functions.sql"
+          sudo install -D -o postgres -m 644 tests/sql/fixtures/phase3-production-constraints.sql "$stage_dir/tests/sql/fixtures/phase3-production-constraints.sql"
+          sudo install -D -o postgres -m 644 supabase/migrations/20261114123717_protect_phase3_prediction_visibility.sql "$stage_dir/supabase/migrations/20261114123717_protect_phase3_prediction_visibility.sql"
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test -f "$stage_dir/tests/sql/phase3-visibility.sql"
+          # The fixture must leave no relations or role after its ROLLBACK.
+          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
@@ -53,7 +71,7 @@ jobs:
           tail -n 160 test-output.txt
           exit $status
       - name: Upload Node test output
-        if: always()
+        if: ${{ always() && steps.node-tests.outcome != 'skipped' }}
         uses: actions/upload-artifact@v4
         with:
           name: yoso-node-test-output
