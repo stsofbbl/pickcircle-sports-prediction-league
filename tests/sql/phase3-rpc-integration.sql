@@ -40,7 +40,7 @@ CREATE FUNCTION public.assert_phase3_rpc(expected_count integer, expected_status
 RETURNS void LANGUAGE plpgsql SECURITY INVOKER AS $$
 DECLARE payload jsonb; actual_count integer;
 BEGIN
- IF current_user <> 'yoso_phase3_test_member' THEN RAISE EXCEPTION 'Test role required'; END IF;
+ IF current_user <> 'authenticated' THEN RAISE EXCEPTION 'Test role required'; END IF;
  payload := public.get_koshien_later_phase_state('event');
  actual_count := jsonb_array_length(payload #> '{phase3,predictions}');
  IF actual_count <> expected_count
@@ -56,14 +56,14 @@ BEGIN
 END $$;
 
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 SELECT public.assert_phase3_rpc(0,'open','before final deadline: own only');
 RESET ROLE;
 
 -- At the captured deadline, every subsequent clock_timestamp() is >= deadline.
 UPDATE public.koshien_later_rounds SET deadline_at=clock_timestamp()
  WHERE event_id='event' AND phase_key='phase3';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 SELECT public.assert_phase3_rpc(2,'locked','deadline reached: refresh locks before RPC publishes');
 SELECT public.assert_phase3_rpc(2,'locked','repeated read preserves locked visibility');
 RESET ROLE;
@@ -76,13 +76,13 @@ END $$;
 UPDATE public.koshien_later_rounds
  SET status='open',deadline_at=clock_timestamp()-interval '1 day'
  WHERE event_id='event' AND phase_key='phase3';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 SELECT public.assert_phase3_rpc(2,'locked','after final deadline: public to members');
 RESET ROLE;
 
 UPDATE public.koshien_later_rounds SET status='open',end_mode='manual'
  WHERE event_id='event' AND phase_key='phase3';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 SELECT public.assert_phase3_rpc(0,'open','manual end remains private despite past deadline');
 RESET ROLE;
 
@@ -90,13 +90,13 @@ UPDATE public.koshien_later_rounds
  SET status='ready',end_mode='automatic',opens_at=clock_timestamp()-interval '2 days',
  deadline_at=clock_timestamp()+interval '1 day'
  WHERE event_id='event' AND phase_key='phase3';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 SELECT public.assert_phase3_rpc(0,'open','automatic opening does not publish predictions');
 RESET ROLE;
 
 UPDATE public.koshien_later_rounds SET status='completed'
  WHERE event_id='event' AND phase_key='phase3';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 SELECT public.assert_phase3_rpc(2,'completed','completed phase remains published');
 RESET ROLE;
 
@@ -104,7 +104,7 @@ RESET ROLE;
 UPDATE public.koshien_later_rounds SET status='open',deadline_at=clock_timestamp()-interval '1 day',version=0
  WHERE event_id='event' AND phase_key='phase3';
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 DO $$ BEGIN
  BEGIN
    PERFORM public.get_koshien_later_phase_state('event');
@@ -126,7 +126,7 @@ RESET ROLE;
 UPDATE public.league_members SET membership_status='inactive'
  WHERE user_id='00000000-0000-0000-0000-000000000001';
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
-SET LOCAL ROLE yoso_phase3_test_member;
+SET LOCAL ROLE authenticated;
 DO $$ BEGIN
  BEGIN
    PERFORM public.get_koshien_later_phase_state('event');

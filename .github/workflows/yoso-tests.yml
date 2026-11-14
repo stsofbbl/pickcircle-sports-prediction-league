@@ -42,7 +42,22 @@ jobs:
           sudo install -D -o postgres -m 644 supabase/patches/phase3-visibility.sql "$stage_dir/supabase/patches/phase3-visibility.sql"
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test -f "$stage_dir/tests/sql/phase3-visibility.sql"
           # The fixture must leave no relations or role after its ROLLBACK.
-          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='yoso_phase3_test_member')")" = t
+          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
+      - name: Generate phase3 migration filename with pinned CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_dir="$PWD"
+          mkdir -p "$RUNNER_TEMP/yoso-migration/supabase/migrations"
+          cd "$RUNNER_TEMP/yoso-migration"
+          npx --yes supabase@3.1.0 --help
+          npx --yes supabase@3.1.0 migration --help
+          npx --yes supabase@3.1.0 migration new --help
+          npx --yes supabase@3.1.0 migration new protect_phase3_prediction_visibility
+          migration_file="$(find supabase/migrations -name '*_protect_phase3_prediction_visibility.sql')"
+          test -n "$migration_file"
+          cp "$repo_dir/supabase/patches/phase3-visibility.sql" "$migration_file"
+          echo "GENERATED_MIGRATION=$migration_file"
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
