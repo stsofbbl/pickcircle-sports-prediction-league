@@ -17,9 +17,9 @@ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
 $$;
 CREATE TABLE public.league_members (league_id uuid, user_id uuid, membership_status text);
 CREATE TABLE public.events (id text PRIMARY KEY, league_id uuid, status text, prediction_deadline timestamptz);
-CREATE TABLE public.players (id text PRIMARY KEY, league_id uuid, profile_id uuid);
+CREATE TABLE public.players (id uuid PRIMARY KEY, league_id uuid, profile_id uuid);
 CREATE TABLE public.koshien_later_rounds (event_id text, phase_key text, status text);
-CREATE TABLE public.final_score_predictions (event_id text, player_id text);
+CREATE TABLE public.final_score_predictions (event_id text, player_id uuid);
 CREATE FUNCTION public.is_league_member(p_league_id uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
  SELECT EXISTS (SELECT 1 FROM public.league_members lm
@@ -67,9 +67,9 @@ INSERT INTO public.league_members VALUES
  ('00000000-0000-0000-0000-000000000020','00000000-0000-0000-0000-000000000003','active');
 INSERT INTO public.events VALUES ('event','00000000-0000-0000-0000-000000000010','resultWait',now()-interval '1 day');
 INSERT INTO public.players VALUES
- ('owner','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001'),
- ('peer','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000002');
-INSERT INTO public.final_score_predictions VALUES ('event','owner'),('event','peer');
+ ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001'),
+ ('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000002');
+INSERT INTO public.final_score_predictions VALUES ('event','10000000-0000-0000-0000-000000000001'),('event','10000000-0000-0000-0000-000000000002');
 CREATE FUNCTION public.assert_visible(expected integer, label text) RETURNS void
 LANGUAGE plpgsql SECURITY INVOKER AS $$
 DECLARE actual integer;
@@ -101,7 +101,7 @@ SET LOCAL ROLE yoso_phase3_test_member;
 SELECT public.assert_visible(1,'another event phase3 does not publish current predictions');
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
 DO $$ BEGIN
- IF (SELECT player_id FROM public.final_score_predictions) IS DISTINCT FROM 'peer' THEN
+ IF (SELECT player_id FROM public.final_score_predictions) IS DISTINCT FROM '10000000-0000-0000-0000-000000000002' THEN
    RAISE EXCEPTION 'Peer must see their own prediction only';
  END IF;
  RAISE NOTICE 'PASS: peer identity sees own row only';
@@ -156,4 +156,5 @@ DO $$ BEGIN
  END IF;
 END $$;
 RESET ROLE;
+\ir phase3-rpc-integration.sql
 ROLLBACK;
