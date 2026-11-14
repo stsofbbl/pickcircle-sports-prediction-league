@@ -4166,6 +4166,11 @@ function requiredApprovalCount() {
   return requiredApprovalCountForEvent(state.event);
 }
 
+function isOnlineKoshienResultFlow() {
+  return baseTemplateId(state.event?.templateId) === "koshien"
+    && Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
+}
+
 function requiredApprovalCountForEvent(event = state.event) {
   const policy = event?.approvalPolicy || state.approvalPolicy;
   if (policy === "admin") return 1;
@@ -4182,6 +4187,7 @@ function isResultFinalized(event = state.event) {
 }
 
 function submitResults() {
+  if (isOnlineKoshienResultFlow()) return;
   ensureResultFlow();
   const name = currentParticipantName();
   state.event.resultFlow.status = "submitted";
@@ -4193,6 +4199,7 @@ function submitResults() {
 }
 
 function approveResults(name) {
+  if (isOnlineKoshienResultFlow()) return;
   ensureResultFlow();
   const approver = name || currentParticipantName();
   if (!approver) return;
@@ -4203,6 +4210,7 @@ function approveResults(name) {
 }
 
 function finalizeResultsIfReady() {
+  if (isOnlineKoshienResultFlow()) return;
   ensureResultFlow();
   if (approvalCount(state.event) < requiredApprovalCountForEvent(state.event)) return;
   state.event.resultFlow.status = "finalized";
@@ -4545,6 +4553,10 @@ function renderPresetDescription() {
 
 function resultFlowPanel() {
   if (baseTemplateId(state.event.templateId) === "worldCup") return "";
+  if (isOnlineKoshienResultFlow() && !isResultFinalized(state.event)) {
+    if (state.event.status === "open") return "";
+    return '<div class="entry-block result-flow-panel"><h3>大会全体の結果確定</h3><p class="helper-text">大会全体の提出・承認はオンライン共有に未対応です。試合結果の保存は引き続き利用できます。</p></div>';
+  }
   ensureResultFlow();
   const flow = state.event.resultFlow;
   if (state.event.status === "open" && flow.status === "none") return "";
