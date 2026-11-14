@@ -50,6 +50,13 @@ jobs:
           # Previous SQL fixture rolls back; no Supabase URL or credential is used.
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test < tests/sql/koshien-result-version-contract.sql
           test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.matches') IS NULL AND to_regprocedure('public.koshien_result_version(text)') IS NULL")" = t
+      - name: Verify approval revision prototype with two PostgreSQL sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_approval_revision_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_approval_revision_test' EXIT
+          python3 scripts/verify-approval-revision.py yoso_approval_revision_test
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax

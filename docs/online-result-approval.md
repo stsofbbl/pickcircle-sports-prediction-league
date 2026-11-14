@@ -72,3 +72,16 @@ eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態�
 次の実装単位は「承認revisionと全結果更新経路のロック/無効化」。RPC/UI全体を一括投入しない。
 隔離DBで実関数を使い、未認証/他クラブ/非管理者、締切前/境界、未完了/決勝なし、二重投票、提出と訂正の同時実行、A→B→A、取消→再提出、退会、汎用UPDATE迂回を検証する。2接続による競合試験が必要。
 現時点では承認RPC・認可/RLS・競合試験は未実装。既存SQLの衝突再現成功を新RPCの安全性検証と扱わない。PRはdraft、本番migration/merge/deployなし。
+
+## 2026-11-15：更新番号の内部試作
+
+`supabase/prototypes/koshien-approval-revision.sql`に内部更新番号管理を実装。migrationではなく、本番への適用対象外。
+- `lock_revision`はevent行→revision行の順にロックし、未作成なら0を作成。読取り専用ではない。
+- `advance_revision`は期待番号を必須とし、不一致を40001で拒否。変更と同じtransactionで呼ぶことでrollback時も番号を戻せる。コミット済み変更は単調増加し、内容を元へ戻しても以前の番号を再利用しない。
+- 空search_path、SECURITY INVOKER、PUBLICのschema/table/function権限剥奪。外部公開RPCやtriggerは追加しない。本人・所属・締切の判定を代行する関数ではなく、認可済みサーバー処理だけが使う部品。
+- 既存の結果保存/取消/自動取得からはまだ呼ばない。したがって本番の競合防止・承認無効化は未完了。実際のSupabase既定権限/既存rolesでのACL検証も本番化前に必要。
+
+`scripts/verify-approval-revision.py`は使い捨てローカルDB名を固定し、既存CIのPostgreSQLで実SQLを検証。初期値、更新、古い番号/不正引数/不存在/別競技の拒否、rollback、二段階更新、非特権roleからの直接操作拒否を確認する。2接続で同じeventのロック競合、別eventの独立更新、commit後の古い番号拒否も確認する。CIは終了時にテストDBを削除。
+このテストは更新番号部品の契約であり、未実装の承認本人確認・締切・全保存経路の統合テストではない。
+
+次の1件は既存`save_koshien_result_snapshot`へのevent先行ロックとrevision更新の組込み、およびその実関数を使った認可/整合性/競合テスト。全更新経路の対応が揃うまでmigration化/本番適用しない。
