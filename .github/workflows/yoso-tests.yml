@@ -61,6 +61,10 @@ jobs:
           deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
           deno check --config supabase/functions/jhbf-schedule/deno.json supabase/functions/jhbf-schedule/index.ts
           deno check --config supabase/functions/koshien-auto-sync/deno.json supabase/functions/koshien-auto-sync/index.ts
+      - name: Verify pinned auto-sync deployment
+        run: |
+          deno check --config supabase/deployments/koshien-auto-sync/deno.json supabase/deployments/koshien-auto-sync/index.ts
+          deno run --config supabase/deployments/koshien-auto-sync/deno.json scripts/verify-auto-sync-deployment.ts
       - name: Run all Node tests
         id: node-tests
         shell: bash
