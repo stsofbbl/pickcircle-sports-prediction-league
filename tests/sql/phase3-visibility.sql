@@ -100,12 +100,12 @@ INSERT INTO public.koshien_later_rounds VALUES ('other-event','phase3','complete
 SET LOCAL ROLE yoso_phase3_test_member;
 SELECT public.assert_visible(1,'another event phase3 does not publish current predictions');
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
-DO $ BEGIN
+DO $$ BEGIN
  IF (SELECT player_id FROM public.final_score_predictions) IS DISTINCT FROM 'peer' THEN
    RAISE EXCEPTION 'Peer must see their own prediction only';
  END IF;
  RAISE NOTICE 'PASS: peer identity sees own row only';
-END $;
+END $$;
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
 SELECT public.assert_visible(0,'other league cannot read open phase3');
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
