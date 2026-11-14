@@ -7,6 +7,7 @@ const path = require("node:path");
 test("later-phase render preserves zombie, revenge, and phase3 inputs", () => {
   const source = fs.readFileSync(path.join(__dirname, "../js/koshien-later-phases.js"), "utf8");
   const timers = [];
+  const styles = new Map();
   let form;
 
   function makeForm(values) {
@@ -24,7 +25,14 @@ test("later-phase render preserves zombie, revenge, and phase3 inputs", () => {
   form = makeForm({ revenge: "revenge-team", zombie: "zombie-team", scoreA: "4", scoreB: "2", tiebreakScoreA: "7", tiebreakScoreB: "6" });
   const context = {
     console,
-    document: { querySelector: (selector) => (selector === "#eventForm" ? form : null) },
+    document: {
+      querySelector: (selector) => selector === "#eventForm" ? form : styles.get(selector) || null,
+      createElement(tagName) {
+        assert.equal(tagName, "style");
+        return { id: "", textContent: "" };
+      },
+      head: { appendChild(style) { styles.set(`#${style.id}`, style); } },
+    },
     addEventListener() {},
     setTimeout(callback) { timers.push(callback); return timers.length; },
     render() {
@@ -35,6 +43,8 @@ test("later-phase render preserves zombie, revenge, and phase3 inputs", () => {
   vm.createContext(context);
   vm.runInContext(source, context, { filename: "koshien-later-phases.js" });
   while (timers.length) timers.shift()();
+  assert.equal(styles.size, 1);
+  assert.ok(styles.get("#yoso-phase3-compact-style").textContent.includes("#eventForm"));
 
   context.render();
 
