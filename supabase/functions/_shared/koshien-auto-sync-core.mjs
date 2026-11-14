@@ -79,6 +79,10 @@ export function scheduleDecision(matches = [], state = {}, now = new Date()) {
   const scheduleWindowOpen = withinMinutes(minutes, SCHEDULE_FETCH_START_MINUTES, SCHEDULE_FETCH_END_MINUTES);
   const relevant = (Array.isArray(matches) ? matches : [])
     .filter((match) => ["R1", "R2"].includes(String(match?.round_key || match?.roundKey || "")));
+  // Completion does not require changing the event's approval/finalization state.
+  if (relevant.length && relevant.every((match) => String(match?.status || "") === "completed")) {
+    return { due: false, reason: "schedule_completed" };
+  }
   const lastAttempt = parseDate(state?.last_schedule_attempt_at);
   const retryReady = !lastAttempt || nowDate.getTime() - lastAttempt.getTime() >= SCHEDULE_RETRY_MINUTES * 60 * 1000;
   const scheduleMissing = relevant.length === 33 && relevant.some((match) => !matchStartsAt(match));

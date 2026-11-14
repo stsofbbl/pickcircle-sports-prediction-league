@@ -112,3 +112,39 @@ test("automatic result mapping accepts exact matches and blocks manual cancellat
   assert.equal(blocked.ready.length, 0);
   assert.equal(blocked.skipped[0].reason, "manual_cancel_block");
 });
+
+test("completed R1/R2 schedules do not fetch again on match day", async () => {
+  const { scheduleDecision } = await corePromise;
+  const matches = [...Array.from({ length: 17 }, (_, i) => ({
+    round_key: "R1", match_no: i + 1, status: "completed", starts_at: "2026-08-08T08:00:00+09:00",
+  })), ...Array.from({ length: 16 }, (_, i) => ({
+    round_key: "R2", match_no: i + 1, status: "completed", starts_at: "2026-08-08T08:00:00+09:00",
+  }))];
+  assert.deepEqual(scheduleDecision(matches, {}, new Date("2026-08-08T12:00:00+09:00")), {
+    due: false, reason: "schedule_completed",
+  });
+  for (const match of matches) match.starts_at = null;
+  assert.deepEqual(scheduleDecision(matches, {}, new Date("2026-08-08T12:00:00+09:00")), {
+    due: false, reason: "schedule_completed",
+  });
+});
+
+test("reopening a match resumes missing-schedule checks with existing retry limits", async () => {
+  const { scheduleDecision } = await corePromise;
+  const matches = [...Array.from({ length: 17 }, (_, i) => ({
+    round_key: "R1", match_no: i + 1, status: "completed", starts_at: null,
+  })), ...Array.from({ length: 16 }, (_, i) => ({
+    round_key: "R2", match_no: i + 1, status: i ? "completed" : "scheduled", starts_at: null,
+  }))];
+  const now = new Date("2026-08-08T12:00:00+09:00");
+  assert.equal(scheduleDecision(matches, {}, now).reason, "missing_schedule");
+  assert.equal(scheduleDecision(matches, { last_schedule_attempt_at: now.toISOString() }, now).reason, "schedule_retry_wait");
+  assert.equal(scheduleDecision(matches, {}, new Date("2026-08-08T02:00:00+09:00")).reason, "schedule_window_closed");
+});
+
+test("empty and unrelated rounds are not treated as completed schedules", async () => {
+  const { scheduleDecision } = await corePromise;
+  const now = new Date("2026-08-08T12:00:00+09:00");
+  assert.equal(scheduleDecision([], {}, now).reason, "no_match_today");
+  assert.equal(scheduleDecision([{ round_key: "F", status: "completed" }], {}, now).reason, "no_match_today");
+});
