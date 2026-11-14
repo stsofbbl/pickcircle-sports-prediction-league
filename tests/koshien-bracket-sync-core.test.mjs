@@ -5,18 +5,28 @@ import {
   parseJhbfFinalSchedule,
   parseJhbfRedrawTeams,
   pendingRedrawRound,
-} from "./koshien-bracket-sync-core.mjs";
+} from "../supabase/functions/_shared/koshien-bracket-sync-core.mjs";
 
 const html = `
 <h5>準々決勝の組み合わせ(上が1塁側)</h5>
 <table class="tournamentTable">
-${["A (a)", "B (b)", "C (c)", "D (d)", "E (e)", "F (f)", "G (g)", "H (h)"].map((name) => `<tr><td class="teamName">${name}</td></tr>`).join("\n")}
+${["A (a)", "B (b)", "C (c)", "D (d)", "E (e)", "F (f)", "G (g)", "H (h)"].map((name, index) => `<tr><td class="teamName">${name}</td></tr>${index % 2 === 0 ? `<tr><td>第13日 第${index / 2 + 1}試合</td></tr>` : ""}`).join("\n")}
 </table>
 <h5>準決勝、決勝の組み合わせ(上が1塁側)</h5>
 <table class="tournamentTable">
-${["A (a)", "D (d)", "F (f)", "H (h)"].map((name) => `<tr><td class="teamName">${name}</td></tr>`).join("\n")}
+${["A (a)", "D (d)", "F (f)", "H (h)"].map((name, index) => `<tr><td class="teamName">${name}</td></tr>${index % 2 === 0 ? `<tr><td>第14日 第${index / 2 + 1}試合</td></tr>` : ""}`).join("\n")}
 </table>`;
 assert.deepEqual(parseJhbfRedrawTeams(html), {
+  qfMatches: [
+    { matchNo: 1, team1Name: "A", team2Name: "B" },
+    { matchNo: 2, team1Name: "C", team2Name: "D" },
+    { matchNo: 3, team1Name: "E", team2Name: "F" },
+    { matchNo: 4, team1Name: "G", team2Name: "H" },
+  ],
+  sfMatches: [
+    { matchNo: 1, team1Name: "A", team2Name: "D" },
+    { matchNo: 2, team1Name: "F", team2Name: "H" },
+  ],
   qf: ["A", "B", "C", "D", "E", "F", "G", "H"],
   sf: ["A", "D", "F", "H"],
 });
@@ -30,7 +40,8 @@ assert.deepEqual(pairRoundTeams("QF", ["1","2","3","4","5","6","7","8"]), [
 
 const r3Completed = Array.from({ length: 8 }, (_, i) => ({ round_key: "R3", match_no: i + 1, status: "completed", winner_team_id: `w${i + 1}` }));
 assert.equal(pendingRedrawRound(r3Completed), "QF");
-assert.equal(pendingRedrawRound([...r3Completed, { round_key: "QF", match_no: 1, status: "scheduled" }]), "");
+assert.equal(pendingRedrawRound([...r3Completed, { round_key: "QF", match_no: 1, status: "scheduled" }]), "QF");
+assert.equal(pendingRedrawRound([...r3Completed, ...Array.from({ length: 4 }, (_, index) => ({ round_key: "QF", match_no: index + 1, status: "scheduled" }))]), "");
 
 const scheduleRows = [
   ...Array.from({ length: 8 }, (_, i) => ({ roundLabel: "3回戦", dayNo: 11 + Math.floor(i / 4), dailyMatchNo: (i % 4) + 1, startsAt: `2026-08-${15 + Math.floor(i / 4)}T0${8 + (i % 4) * 2}:00:00+09:00` })),
