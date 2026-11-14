@@ -33,3 +33,42 @@ js/data-service.jsのsaveKoshienSnapshotは、新規event作成時にはrules.re
 ## 復旧
 今回のUI/ローカル関数ガードをrevert可能。DB migration・データ更新なし。
 ただし戻すと共有されない承認表示が復活するため、恒久RPC導入時に置き換える。
+
+## 2026-11-15：承認RPCの具体契約（未実装）
+
+### 既存関数を確認した結果
+本番の関数定義・trigger定義だけをSELECTで確認。ユーザー予想・結果の試験書込みなし。
+- `koshien_result_version(text)`は完了試合の`extract(epoch from updated_at)::bigint`の合計。秒以下の丸め、日時の入替え、未完了試合の追加、同一transaction内の`now()`更新を識別できない。承認対象を保証するtokenに流用しない。既存利用者の互換性のため、この関数自体は変更しない。
+- `save_koshien_result_snapshot`は管理者チェック後にmatches/scores/resultsを更新するが、eventsのSELECTにFOR UPDATEがない。承認RPCだけのeventロックでは結果保存を直列化できない。
+- matchesのtriggerは結果訂正制約・外部取得状態・後続ラウンド更新。eventsのtriggerはupdated_atとテスト大会マーカー保護。承認revisionの更新は存在しない。
+- scoresは`recompute_koshien_current_scores`のBEFORE INSERT/UPDATEで再計算される。クライアント集計値を承認の正とせず、この再計算経路を維持する。
+- `reopen_koshien_results`はevent行をFOR UPDATEし管理者を確認、旧eventを監査表に保存してresultWaitへ戻す。新しい承認提出も同時に無効化する改修が必要。
+
+`tests/sql/koshien-result-version-contract.sql`は取得した既存関数の同じSQLを最小fixtureで実行する。衝突を「期待される既存動作」として固定し、新RPCが依存してはいけない理由を再現する。実際の全triggerや保存RPCの統合試験ではない。
+
+### 保存モデル案
+既存rules.resultFlowの表示名キーを本人の証拠へ変換しない。履歴の移植・自動確定はしない。
+- event単位のサーバー管理`approval_revision bigint`を設ける。承認対象変更で単調増加し、A→B→Aでも古い承認を復活させない。内容hashだけではこの条件を満たさない。
+- submissions: id UUID、event_id、revision、policy、eligible_user_ids UUID[]、required_count、submitted_by UUID、status、submitted_at、finalized_at。eventごとの有効submittedは一つ。
+- votes: submission_idとvoter_user_idの複合PRIMARY KEY、approved_at。認証UIDをサーバーで設定し、名前/他人UUIDを引数にしない。
+- submissionには承認時の結果/再計算得点のsnapshotを保存する。revisionが排他制御、snapshotが監査説明用。全予想の閲覧許可を広げない。
+- private schema（PostgREST非公開）に配置し、クライアントの直接DMLを許可しない。公開RPCはSECURITY DEFINER、空search_path、明示的なauthenticated EXECUTEのみ、PUBLIC/anonは拒否。状態読取も所属を検証し、副作用なしとする。
+
+### RPCと状態遷移
+- `submit_koshien_results(event_id, expected_revision)`: activeなリーグ管理者のみ。大会行をロックし、未確定・全対象試合完了・決勝結果・締切経過・phase状態・再計算得点整合を検証。同じrevisionでも新submission IDを発行。提出者本人の一票を記録。
+- `approve_koshien_results(event_id, submission_id, expected_revision)`: activeな所属、提出時の有権者集合に本人UIDがあること、現在のrevision/提出ID一致を確認。重複投票は同じ結果を返す。必要数到達時のみ同一transactionでsubmissionとeventsをfinalizedにする。
+- `reopen_koshien_results(event_id)`: 現行の監査保存を維持し、submissionを無効化、revisionを増加、resultWaitへ戻す。
+- 閾値は既存どおりadmin=1、half=ceil(n/2)、unanimous=n。nは提出時のactiveな参加者本人UID集合。playersとauth UIDの対応・管理者が参加者でない場合は次工程で実スキーマと仕様を照合し、暗黙に人数へ加えない。
+- 有権者の加入/脱退/権限変更、approvalPolicy変更は提出無効化→再提出とする案。固定集合のまま退会者票を残す/残人数で勝手に閾値を下げる動作は採用しない。
+- 拒否時はtransaction全体をrollbackし、revision/得点/票を部分更新しない。stale_submissionは再読込を促し、自動再投票しない。
+
+### 排他制御と迂回経路（実装前の必須条件）
+更新と承認が共通してevent行を先にロックすること。既存snapshot RPC、自動取得apply、試合取消、後続ラウンドtrigger、直接DML、得点再計算、所属変更を列挙して対応する。
+matchesの行ロック後にeventをロックするtriggerを単に追加すると、承認側のevent→matches順と逆転するため、そのまま実装しない。直接DML権限を限定しRPC側のロック順をそろえる変更と、既存利用経路の互換テストを一組にする。
+eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態も残さない。SECURITY DEFINERであることだけでは防げない。
+試合追加/削除/取消、結果訂正、得点根拠の予想/ルール変更は承認revisionの対象。updated_atだけの変更や取得ログは対象外にできるが、実際の依存列確認後に絞る。
+
+### 検証・リリースゲート
+次の実装単位は「承認revisionと全結果更新経路のロック/無効化」。RPC/UI全体を一括投入しない。
+隔離DBで実関数を使い、未認証/他クラブ/非管理者、締切前/境界、未完了/決勝なし、二重投票、提出と訂正の同時実行、A→B→A、取消→再提出、退会、汎用UPDATE迂回を検証する。2接続による競合試験が必要。
+現時点では承認RPC・認可/RLS・競合試験は未実装。既存SQLの衝突再現成功を新RPCの安全性検証と扱わない。PRはdraft、本番migration/merge/deployなし。

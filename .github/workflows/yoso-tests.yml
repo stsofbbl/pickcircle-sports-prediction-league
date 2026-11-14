@@ -43,6 +43,13 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test -f "$stage_dir/tests/sql/phase3-visibility.sql"
           # The fixture must leave no relations or role after its ROLLBACK.
           test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
+      - name: Verify result approval version contract in isolated PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Previous SQL fixture rolls back; no Supabase URL or credential is used.
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test < tests/sql/koshien-result-version-contract.sql
+          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.matches') IS NULL AND to_regprocedure('public.koshien_result_version(text)') IS NULL")" = t
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
