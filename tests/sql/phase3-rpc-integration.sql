@@ -48,7 +48,7 @@ BEGIN
    RAISE EXCEPTION '%: unexpected RPC payload %',label,payload;
  END IF;
  IF (SELECT count(*) FROM public.final_score_predictions WHERE event_id='event')
-    <> CASE WHEN expected_count=0 THEN 1 ELSE expected_count END THEN
+    <> (CASE WHEN expected_count=0 THEN 1 ELSE expected_count END) THEN
    RAISE EXCEPTION '%: RPC and direct SELECT disagree',label;
  END IF;
  RAISE NOTICE 'PASS RPC: %',label;
