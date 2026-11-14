@@ -583,6 +583,8 @@ function renderAccountSettings(user = currentAuthUser()) {
 function renderConnectionSettings() {
   state.connection = normalizeConnectionSettings(state.connection);
   const connection = state.connection;
+  const connectionLocked = connection.mode === "supabase" && !window.YosoSupabase?.allowsConnectionOverrides?.();
+  const trustedConnection = window.YosoSupabase?.config?.() || {};
   const isDeveloperMode = new URLSearchParams(window.location.search).get("dev") === "1";
   const isSheetsReady = connection.mode === "sheets" && connection.scriptUrl && connection.spreadsheetId && connection.leagueId;
   const isSupabaseReady = connection.mode === "supabase" && window.YosoSupabase?.hasConfig?.();
@@ -598,10 +600,14 @@ function renderConnectionSettings() {
   });
   if (els.dataConnectionScriptUrl) {
     els.dataConnectionScriptUrl.value = connection.mode === "supabase" ? connection.supabaseUrl : connection.scriptUrl;
+    els.dataConnectionScriptUrl.disabled = connectionLocked;
+    if (connectionLocked) els.dataConnectionScriptUrl.value = trustedConnection.url || "";
     els.dataConnectionScriptUrl.placeholder = connection.mode === "supabase" ? "https://YOUR_PROJECT_REF.supabase.co" : "https://script.google.com/...";
   }
   if (els.dataConnectionSpreadsheetId) {
     els.dataConnectionSpreadsheetId.value = connection.mode === "supabase" ? connection.supabaseAnonKey : connection.spreadsheetId;
+    els.dataConnectionSpreadsheetId.disabled = connectionLocked;
+    if (connectionLocked) els.dataConnectionSpreadsheetId.value = trustedConnection.anonKey || "";
     els.dataConnectionSpreadsheetId.placeholder = connection.mode === "supabase" ? "Supabaseの匿名公開キー" : "スプレッドシートID";
   }
   if (els.dataConnectionLeagueId) els.dataConnectionLeagueId.value = connection.leagueId;
@@ -636,7 +642,9 @@ function renderConnectionSettings() {
   if (els.dataConnectionNote) {
     els.dataConnectionNote.hidden = !isDeveloperMode;
     els.dataConnectionNote.textContent = connection.mode === "supabase"
-      ? "通常はSupabaseのURLや匿名公開キーの入力は不要です。接続できない場合は通信環境またはログイン状態を確認してください。"
+      ? connectionLocked
+        ? "公開環境の接続先は固定されています。招待URLから同じクラブに参加できます。接続できない場合は通信環境またはログイン状態を確認してください。"
+        : "ローカル検証用の接続先を設定できます。実ユーザーの認証情報は使わないでください。"
       : "Google Apps ScriptをWebアプリとして公開し、そのURLとスプレッドシートIDを入れると同期できます。Google側の作成と公開操作だけは、あなたのGoogleアカウントで行う必要があります。";
   }
   if (els.dataConnectionTestButton) els.dataConnectionTestButton.textContent = connection.mode === "supabase" ? "Supabase接続テスト" : "接続テスト";
@@ -647,7 +655,7 @@ function renderConnectionSettings() {
     els.dataConnectionSyncFromButton.textContent = connection.mode === "supabase" ? "Supabaseから読込" : "Google Sheetsから読込";
   }
   if (els.dataConnectionCopyStateButton) {
-    els.dataConnectionCopyStateButton.textContent = connection.mode === "supabase" ? "設定URLをコピー" : "現在のデータをコピー";
+    els.dataConnectionCopyStateButton.textContent = connection.mode === "supabase" ? connectionLocked ? "招待URLをコピー" : "設定URLをコピー" : "現在のデータをコピー";
   }
 }
 
@@ -1057,19 +1065,24 @@ async function copyCurrentStateForSheets() {
 
 async function copySupabaseSetupUrl() {
   const current = window.YosoSupabase?.config?.() || {};
+  const allowOverrides = window.YosoSupabase?.allowsConnectionOverrides?.() === true;
   const url = current.url || state.connection?.supabaseUrl || "";
   const anonKey = current.anonKey || state.connection?.supabaseAnonKey || "";
-  if (!url || !anonKey) {
+  if (allowOverrides && (!url || !anonKey)) {
     setConnectionMessage("Supabase設定URLを作るには、プロジェクトURLと匿名公開キーを保存してください。");
     return;
   }
   const setupUrl = new URL(window.location.href.split("#")[0].split("?")[0]);
-  setupUrl.searchParams.set("supabaseUrl", url);
-  setupUrl.searchParams.set("supabaseAnonKey", anonKey);
+  if (allowOverrides) {
+    setupUrl.searchParams.set("supabaseUrl", url);
+    setupUrl.searchParams.set("supabaseAnonKey", anonKey);
+  }
   setupUrl.searchParams.set("inviteCode", state.connection?.leagueId || current.inviteCode || "g-unit-koshien-2026");
   try {
     await navigator.clipboard.writeText(setupUrl.toString());
-    setConnectionMessage("Supabase設定URLをコピーしました。スマホでこのURLを一度開くとオンライン設定が入ります。");
+    setConnectionMessage(allowOverrides
+      ? "ローカル検証用のSupabase設定URLをコピーしました。"
+      : "招待URLをコピーしました。このURLを開いてログインするとクラブへの参加を進められます。");
   } catch {
     setConnectionMessage(`コピーできませんでした。次のURLをスマホで開いてください: ${setupUrl.toString()}`);
   }

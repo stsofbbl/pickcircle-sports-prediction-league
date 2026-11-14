@@ -21,12 +21,32 @@
     return window.YOSO_SUPABASE_CONFIG || {};
   }
 
+  function allowsConnectionOverrides() {
+    return ["http:", "https:"].includes(window.location.protocol)
+      && ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  }
+
+  function protectConnection(nextConfig) {
+    if (allowsConnectionOverrides()) return nextConfig;
+    // Published configuration is trusted; links and previous browser settings are not.
+    const trusted = publicConfig();
+    return {
+      ...nextConfig,
+      url: String(trusted.url || "").trim(),
+      anonKey: String(trusted.anonKey || "").trim(),
+      sdkUrl: trusted.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
+      redirectTo: trusted.redirectTo,
+      emailRedirectTo: trusted.emailRedirectTo,
+      passwordResetRedirectTo: trusted.passwordResetRedirectTo,
+    };
+  }
+
   function saveConfig(nextConfig = {}) {
     const base = {
       ...publicConfig(),
       ...fromStorage(),
     };
-    const normalized = {
+    const normalized = protectConnection({
       ...base,
       ...nextConfig,
       url: String(nextConfig.url ?? base.url ?? "").trim(),
@@ -37,7 +57,7 @@
       sdkUrl: nextConfig.sdkUrl || base.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
       auth: { enabled: true, ...(nextConfig.auth || {}) },
       sync: { autoSaveKoshien: true, ...(nextConfig.sync || {}) },
-    };
+    });
     localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(normalized));
     clientPromise = null;
     return normalized;
@@ -45,8 +65,8 @@
 
   function applyConfigFromUrl() {
     const params = new URLSearchParams(window.location.search);
-    const url = params.get("supabaseUrl");
-    const anonKey = params.get("supabaseAnonKey") || params.get("anonKey");
+    const url = allowsConnectionOverrides() ? params.get("supabaseUrl") : null;
+    const anonKey = allowsConnectionOverrides() ? params.get("supabaseAnonKey") || params.get("anonKey") : null;
     const leagueId = params.get("league") || params.get("inviteCode") || params.get("leagueId");
     if (!url && !anonKey && !leagueId) return;
     saveConfig({
@@ -64,7 +84,7 @@
   function config() {
     const base = publicConfig();
     const stored = fromStorage();
-    return {
+    return protectConnection({
       ...base,
       ...stored,
       url: String(stored.url || base.url || "").trim(),
@@ -74,7 +94,7 @@
       sdkUrl: stored.sdkUrl || base.sdkUrl || "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2",
       auth: { enabled: true, ...(base.auth || {}), ...(stored.auth || {}) },
       sync: { autoSaveKoshien: true, ...(base.sync || {}), ...(stored.sync || {}) },
-    };
+    });
   }
 
   function hasConfig() {
@@ -246,6 +266,7 @@
   }
 
   window.YosoSupabase = {
+    allowsConnectionOverrides,
     config,
     hasConfig,
     saveConfig,

@@ -31,6 +31,13 @@ jobs:
         run: |
           node --check app.js
           find js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Verify hosted connection in isolated Chrome
+        shell: bash
+        run: |
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME_BIN"
+          curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          node scripts/verify-supabase-browser.cjs "$RUNNER_TEMP/yoso-supabase-sdk.js"
       - name: Check Edge Functions
         run: |
           deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts

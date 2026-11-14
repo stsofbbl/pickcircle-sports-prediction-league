@@ -104,30 +104,19 @@ GitHub Pagesへ反映するまでは、`gh-pages` ブランチには入れずロ
 
 `supabase-config.js` は `.gitignore` に入っています。ローカルで実キーを入れても通常のコミット対象にはなりません。ブラウザに入れてよいのは anon public key だけです。
 
-## 5.1 公開URLでSupabaseを有効にする
+## 5.1 公開環境の接続先と招待リンク
 
-公開URLに `supabase-config.js` が無い場合でも、アプリ内の設定画面から端末ごとにSupabaseを有効化できます。
+公開環境（Vercel Previewを含む）は、配信された `js/supabase-public-config.js` の設定を使用します。URL引数・以前のlocalStorage・設定画面の保存値では、Project URL、公開キー、SDK URL、認証リダイレクト先を変更できません。公開設定が欠けている場合は、保存済み接続先へのフォールバックを行いません。
 
-重要: 通常の公開URLを開くだけでは、スマホ側にSupabase Project URL / anon public key は入りません。その場合はローカル保存として動き、PCで作った大会は見えません。各端末で次の設定を行うか、PC側でコピーした設定URLをスマホで一度開いてください。
-
-1. 設定 > データ接続を開きます。
-2. 保存モードを `Supabaseオンライン` にします。
-3. `Supabase Project URL` に `https://YOUR_PROJECT_REF.supabase.co` を入れます。
-4. `anon public key` にSupabaseのanon public keyを入れます。
-5. `League ID` に `g-unit-koshien-2026` を入れます。
-6. `接続設定を保存` を押します。
-7. メールアドレスでログインし直します。
-8. 甲子園大会を選び、`Supabaseへ保存` / `Supabaseから読込` で端末間同期を確認します。
-
-PCで設定済みの場合は、保存モードを `Supabaseオンライン` にした状態で `設定URLをコピー` を押し、そのURLをスマホで一度開きます。その後スマホでメールログインすると同じリーグを読みに行きます。
-
-同じ設定を複数端末へ配る場合は、次の形式のURLを一度だけ開くと、その端末のlocalStorageへSupabase設定が保存されます。
+招待コードと選択中クラブの保存は引き続き利用できます。招待リンクは次の形式です。
 
 ```text
-https://stsofbbl.github.io/pickcircle-sports-prediction-league/?supabaseUrl=https%3A%2F%2FYOUR_PROJECT_REF.supabase.co&supabaseAnonKey=YOUR_SUPABASE_ANON_PUBLIC_KEY&inviteCode=g-unit-koshien-2026
+https://yoso-murex.vercel.app/?inviteCode=YOUR_INVITE_CODE
 ```
 
-anon public keyはブラウザで使う公開キーです。ただし、`service_role` key、secret key、Supabaseアカウントのパスワードは絶対にURLやGitHubへ入れないでください。
+別のSupabaseプロジェクトを検証する場合は、`http://localhost`、`http://127.0.0.1` または `http://[::1]`（任意のポート、HTTPSも可）でローカル配信してください。この場合のみ従来のURL引数・保存済み設定による上書きが使えます。`supabase-config.js` を使った設定も引き続き可能です。実ユーザーの認証情報を検証先に入力しないでください。
+
+公開接続先の変更は配信コードの変更としてレビューします。開発用設定画面でも公開接続先・公開キーは編集できず、コピーボタンは接続情報を含まない招待URLを作成します。保護は表示に依存せずクライアント境界で実施します。
 
 ## 6. 動作確認
 
