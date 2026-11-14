@@ -74,6 +74,10 @@ CREATE FUNCTION public.assert_visible(expected integer, label text) RETURNS void
 LANGUAGE plpgsql SECURITY INVOKER AS $$
 DECLARE actual integer;
 BEGIN
+ IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolbypassrls))
+ OR current_user <> 'yoso_phase3_test_member' THEN
+   RAISE EXCEPTION 'Assertions must run as non-bypass test role';
+ END IF;
  SELECT count(*) INTO actual FROM public.final_score_predictions;
  IF actual <> expected THEN RAISE EXCEPTION '%: expected %, got %',label,expected,actual; END IF;
  RAISE NOTICE 'PASS: %',label;
@@ -89,6 +93,35 @@ RESET ROLE;
 INSERT INTO public.koshien_later_rounds VALUES ('event','phase2','completed'),('event','phase3','open');
 SET LOCAL ROLE yoso_phase3_test_member;
 SELECT public.assert_visible(1,'phase2 completion does not publish open phase3');
+RESET ROLE;
+-- A completed round belonging to another event must not publish this event.
+INSERT INTO public.events VALUES ('other-event','00000000-0000-0000-0000-000000000010','archive',now()-interval '1 day');
+INSERT INTO public.koshien_later_rounds VALUES ('other-event','phase3','completed');
+SET LOCAL ROLE yoso_phase3_test_member;
+SELECT public.assert_visible(1,'another event phase3 does not publish current predictions');
+SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+DO $ BEGIN
+ IF (SELECT player_id FROM public.final_score_predictions) IS DISTINCT FROM 'peer' THEN
+   RAISE EXCEPTION 'Peer must see their own prediction only';
+ END IF;
+ RAISE NOTICE 'PASS: peer identity sees own row only';
+END $;
+SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
+SELECT public.assert_visible(0,'other league cannot read open phase3');
+SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+RESET ROLE;
+-- Transaction now() is stable: verify exact event deadline and either side.
+UPDATE public.events SET status='open',prediction_deadline=now()-interval '1 microsecond' WHERE id='event';
+SET LOCAL ROLE yoso_phase3_test_member;
+SELECT public.assert_visible(1,'event deadline passed does not publish open phase3');
+RESET ROLE;
+UPDATE public.events SET prediction_deadline=now() WHERE id='event';
+SET LOCAL ROLE yoso_phase3_test_member;
+SELECT public.assert_visible(1,'exact event deadline does not publish open phase3');
+RESET ROLE;
+UPDATE public.events SET prediction_deadline=now()+interval '1 microsecond' WHERE id='event';
+SET LOCAL ROLE yoso_phase3_test_member;
+SELECT public.assert_visible(1,'before event deadline only owner visible');
 RESET ROLE;
 UPDATE public.events SET status='archive';
 SET LOCAL ROLE yoso_phase3_test_member;
