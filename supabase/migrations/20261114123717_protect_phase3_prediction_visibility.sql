@@ -1,4 +1,4 @@
--- DRAFT: isolated validation required before creating/applying a migration.
+-- Restrict final predictions to the owner or a published phase3 in the same league.
 -- Match get_koshien_later_phase_state phase3.predictions visibility.
 -- No schedule refresh or other mutation is performed during reads.
 ALTER POLICY final_score_predictions_select_owner_or_public

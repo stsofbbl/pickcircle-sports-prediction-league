@@ -87,7 +87,7 @@ SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
 SET LOCAL ROLE authenticated;
 SELECT public.assert_visible(2,'baseline reproduces early disclosure after event deadline');
 RESET ROLE;
-\ir ../../supabase/patches/phase3-visibility.sql
+\ir ../../supabase/migrations/20261114123717_protect_phase3_prediction_visibility.sql
 SET LOCAL ROLE authenticated;
 SELECT public.assert_visible(1,'owner only when phase3 is absent despite expired event deadline');
 RESET ROLE;
