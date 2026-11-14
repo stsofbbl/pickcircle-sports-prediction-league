@@ -266,6 +266,7 @@
   }
 
   window.YosoSupabase = {
+    allowsConnectionOverrides,
     config,
     hasConfig,
     saveConfig,
