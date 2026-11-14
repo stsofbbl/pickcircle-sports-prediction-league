@@ -48,7 +48,11 @@ test("admin edits and saves the complete 49-school multiplier list", () => {
 });
 
 test("phase-one choices show a saved multiplier or the explicit unset state", () => {
-  assert.match(dataService, /select\("name, game_multiplier, metadata"\)/);
+  const selectedColumns = dataService.match(/\.from\("teams"\)\s*\.select\("([^"]+)"\)/g) || [];
+  assert.ok(selectedColumns.some((query) => {
+    const columns = query.match(/\.select\("([^"]+)"\)/)[1].split(",").map((column) => column.trim());
+    return ["name", "game_multiplier", "metadata"].every((column) => columns.includes(column));
+  }), "team loading must select name, game_multiplier, and metadata (additional columns are allowed)");
   assert.match(app, /gameMultiplier[^]*?倍率未設定/);
   assert.match(app, /`\$\{team\}（\$\{formatScore\(gameMultiplier\)\}倍）`/);
 });

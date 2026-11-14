@@ -60,11 +60,19 @@ test("deriveCurrentStages keeps current winners and final losers together", () =
 
 test("browser bootstrap replaces applyKoshienMatchFinishes after load", () => {
   let onLoad;
+  const timers = new Map();
+  let nextTimerId = 0;
   const context = {
     globalThis: null,
     addEventListener(type, handler) {
       if (type === "load") onLoad = handler;
     },
+    setTimeout(callback, delay) {
+      const id = ++nextTimerId;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) { timers.delete(id); },
     applyKoshienMatchFinishes() {},
     normalizeKoshienEvent() {},
     state: {
@@ -80,6 +88,9 @@ test("browser bootstrap replaces applyKoshienMatchFinishes after load", () => {
   vm.runInContext(script, context);
   assert.equal(typeof onLoad, "function");
   onLoad();
+  // The bootstrap polls for a deadline when the event is not ready yet.
+  assert.equal(timers.size, 1);
+  assert.equal([...timers.values()][0].delay, 1000);
   context.applyKoshienMatchFinishes();
   assert.equal(context.state.event.results.finishes.A, "first_win_then_loss");
   assert.equal(context.state.event.results.finishes.B, "initial_loss");
