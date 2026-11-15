@@ -85,3 +85,13 @@ eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態�
 このテストは更新番号部品の契約であり、未実装の承認本人確認・締切・全保存経路の統合テストではない。
 
 次の1件は既存`save_koshien_result_snapshot`へのevent先行ロックとrevision更新の組込み、およびその実関数を使った認可/整合性/競合テスト。全更新経路の対応が揃うまでmigration化/本番適用しない。
+
+## 2026-11-15：結果保存RPCへの試作組込み
+
+`supabase/prototypes/koshien-result-write.sql`は本番からSELECT取得した`save_koshien_result_snapshot`の定義に、管理者確認直後の内部`begin_result_write`呼出を追加した試作。既存のSECURITY INVOKERとpayload検証を維持し、保存全体をSECURITY DEFINERに変更しない。
+内部関数のみSECURITY DEFINERとし、auth.uid/active owner・co_owner確認→event/revisionロック→再認可→revision更新。authenticatedにはこの入口のEXECUTEだけを付与し、素のlock/advance/tableへの権限は付与しない。公開schemaに新RPCを追加しない。管理者が内部入口だけを呼んだ場合もrevisionは進む（不要な承認無効化に留まり、結果の書込みや確定はしない）。
+失敗時は同じtransaction内のrevisionもrollbackする。result保存の締切条件は変えず、予想締切の前後で既存の管理者保存を維持する。
+
+隔離fixtureでは実際の保存関数本体を実行し、未認証/一般参加者/他クラブ管理者/退会管理者/anonの拒否、正常な試合・得点行・results保存、payload不正と保存先RLS拒否時のrevision/results不変を検証する。得点再計算triggerを含む本番全schemaの再現ではない。既存revisionの2接続競合試験も継続する。
+未完: 自動取得/取消/直接DML/後続trigger等の全更新経路統一、実際の保存RPC同士の2接続競合、所属変更の並行実行、提出/voteの実装、全本番ACL/得点trigger統合。migration化・本番適用はしない。
+次の1件は保存RPC同士の2接続競合と、他の結果更新経路を同じevent先行ロックにそろえるための差分実装。
