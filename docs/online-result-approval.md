@@ -105,3 +105,14 @@ eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態�
 
 対象は最小依存fixtureでの保存RPC競合。実際の採点trigger・後続ラウンドtrigger・所属変更競合・自動取得/取消/直接DMLを含む全経路ではない。migration化/本番反映なし。
 次の1件は結果取消RPCの実定義を確認し、event先行ロックとrevisionを同じ試作へ組み込み、保存との競合・拒否時の整合性を検証する。
+
+## 2026-11-15：結果取消の試作組込み
+
+本番の`cancel_koshien_match_result`定義をSELECTで確認。既存処理は管理者確認後にmatchをFOR UPDATEするため、試作保存RPCのevent→match順と合わせ、match取得前に`begin_result_write`を追加した。既存SECURITY DEFINER、入力検証、後続phase準備済み時の拒否、取消前matchと実行者の監査保存は維持。
+`supabase/prototypes/koshien-result-cancel.sql`は試作のみ。migrationではなく本番未適用。
+
+隔離検証へ取消用の最小依存表を追加し、未認証/非管理者/他クラブ、不存在、後続phase開始済み、不正得点参照、二重取消の拒否とrevision/audit不変を検証。正常取消ではスコアを消しscheduledへ戻り、revisionが一回増え、元スコアと本人UIDを監査表に保存する。
+既存2接続テストへ保存→取消と取消→保存を追加。pg_blocking_pidsで実際の待機を観測し、確定後のrevision、matchスコア、results、取消監査を確認する。
+
+未完: 全本番trigger・採点再計算、取消後の後続試合整合、自動取得/直接DML/所属変更の競合、提出/vote/画面。最小fixture成功を全機能の安全性確認とは扱わない。
+次の1件は自動取得の結果適用RPCの実定義と呼出経路を確認し、保存・取消と同じevent先行ロック/revisionへ組み込む。
