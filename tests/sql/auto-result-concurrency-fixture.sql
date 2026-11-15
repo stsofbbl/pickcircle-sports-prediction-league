@@ -1,4 +1,5 @@
 -- Restore only fixture privileges removed when the earlier test roles were dropped.
+GRANT USAGE ON SCHEMA auth TO authenticated;
 GRANT SELECT ON public.events,public.teams,public.players TO authenticated;
 GRANT SELECT,INSERT,UPDATE ON public.matches,public.scores,public.results,public.external_match_imports TO authenticated;
 GRANT USAGE ON SCHEMA yoso_approval_private TO authenticated;

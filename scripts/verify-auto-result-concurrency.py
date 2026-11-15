@@ -92,7 +92,9 @@ def race(first, second, finish, expected, seed=False):
         limit = time.monotonic() + 8
         while sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='yoso_auto_race' "
                   f"AND {pid}=ANY(pg_blocking_pids(pid));") != "1":
-            assert b.poll() is None and time.monotonic() < limit, "second RPC did not wait"
+            if b.poll() is not None:
+                raise AssertionError("second RPC exited: " + b.stderr.read())
+            assert time.monotonic() < limit, "second RPC did not wait"
             time.sleep(0.05)
         send(a, finish + ";")
         a.stdin.close()
@@ -117,8 +119,14 @@ def race(first, second, finish, expected, seed=False):
     finally:
         for p in sessions:
             if p.poll() is None:
-                p.kill()
-                p.wait()
+                # Closing input releases idle transactions in the psql child too.
+                if p.stdin and not p.stdin.closed:
+                    p.stdin.close()
+                try:
+                    p.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    p.wait()
 
 
 paths = ["tests/sql/auto-result-fixture.sql",
