@@ -172,4 +172,4 @@ begin
     'results', 1
   );
 end;
-$function$
+$function$;
