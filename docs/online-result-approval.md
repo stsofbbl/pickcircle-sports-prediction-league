@@ -95,3 +95,13 @@ eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態�
 隔離fixtureでは実際の保存関数本体を実行し、未認証/一般参加者/他クラブ管理者/退会管理者/anonの拒否、正常な試合・得点行・results保存、payload不正と保存先RLS拒否時のrevision/results不変を検証する。得点再計算triggerを含む本番全schemaの再現ではない。既存revisionの2接続競合試験も継続する。
 未完: 自動取得/取消/直接DML/後続trigger等の全更新経路統一、実際の保存RPC同士の2接続競合、所属変更の並行実行、提出/voteの実装、全本番ACL/得点trigger統合。migration化・本番適用はしない。
 次の1件は保存RPC同士の2接続競合と、他の結果更新経路を同じevent先行ロックにそろえるための差分実装。
+
+## 2026-11-15：保存RPC同士の2接続検証
+
+`scripts/verify-result-write-concurrency.py`で内部部品だけでなく、試作の`save_koshien_result_snapshot`本体を2つの認証済み・非bypass接続から実行する。
+先行保存を未commitで保持し、後続保存がそのbackend PIDにブロックされていることを`pg_blocking_pids`で確認する。同時に別大会を保存できることも確認。
+先行commitの場合は両保存分のrevision=2、先行rollbackの場合は後続分だけ増えてrevision=3となり、最終試合スコア/resultsは後続保存の内容と一致することを検証する。固定sleepを実行順の根拠にしない。
+試験DB以外は受け付けずローカルsocketに固定。接続は失敗時も終了し、cluster共通の試験roleを明示削除、DBは既存CIのtrapで削除する。
+
+対象は最小依存fixtureでの保存RPC競合。実際の採点trigger・後続ラウンドtrigger・所属変更競合・自動取得/取消/直接DMLを含む全経路ではない。migration化/本番反映なし。
+次の1件は結果取消RPCの実定義を確認し、event先行ロックとrevisionを同じ試作へ組み込み、保存との競合・拒否時の整合性を検証する。
