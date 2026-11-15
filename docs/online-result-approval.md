@@ -126,3 +126,12 @@ eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態�
 保存・取消と違いno-opではrevisionを増やさない（初回ロックによる0行の作成はあり得る）。適用時は試合・resultsスロット・importと同じtransactionでrevisionを増やす。
 
 未完: 自動適用と保存/取消の2接続競合、全本番採点/後続trigger、直接DML、所属変更、提出/voteと認証済みUI。次の1件は自動適用と保存・取消の競合を同じ隔離DBで検証する。本番migration/merge/deployなし。
+
+## 2026-11-15：自動適用と手動操作の競合
+
+`sync_external_import_status_with_match`の本番定義をSELECT確認し、テストfixtureにそのまま取り込んだ（製品変更ではない）。取消時にconfirmed importをcanceledへ変える経路を含めて検証する。
+`verify-auto-result-concurrency.py`はservice_roleの自動適用とauthenticatedの手動操作を2接続で実行し、pg_blocking_pidsで待機を観測する。
+自動→手動保存、手動保存→同結果自動skip、自動→取消、取消→自動block、先行自動rollback→手動保存の5ケースで、revision・match・resultsスロット・import状態・取消監査を比較する。取消済み結果の復活を防ぐ実triggerも含む。
+手動訂正後も外部importには元の公式値が記録される既存動作は変更しない（importのstatusと元データは別の意味）。外部サイト取得・本番書込み・job起動なし。
+
+未完は全採点/後続round trigger、直接DMLと所属変更、提出/vote/認証済みUI。次の1件は本番の直接UPDATE権限・RLS・状態更新経路を読取り確認し、共通ロック/revisionを迂回する経路を閉じる試作と隔離テスト。migration化・本番適用は未実施。
