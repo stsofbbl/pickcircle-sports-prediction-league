@@ -116,3 +116,13 @@ eventの汎用UPDATEからfinalized/rules.resultFlowを上書きできる状態�
 
 未完: 全本番trigger・採点再計算、取消後の後続試合整合、自動取得/直接DML/所属変更の競合、提出/vote/画面。最小fixture成功を全機能の安全性確認とは扱わない。
 次の1件は自動取得の結果適用RPCの実定義と呼出経路を確認し、保存・取消と同じevent先行ロック/revisionへ組み込む。
+
+## 2026-11-15：自動取得結果適用への試作組込み
+
+本番`auto_apply_koshien_official_results(text,jsonb)`の定義とACLをSELECT確認。既存ACLはpostgres/service_roleだけのEXECUTEで、auth.uidを必要としないサーバー用関数。既にevent→results→import→match順でロックしているため、event取得後に内部revisionロックを追加し、v_changed>0時だけ番号を進める試作を追加した。
+管理者用begin_result_writeを流用してユーザーを偽装せず、既存のservice_role専用実行権限を明示維持する。`supabase/prototypes/koshien-auto-result-write.sql`は本番未適用でmigrationではない。
+
+隔離fixtureで実関数を実行しauthenticated/anon拒否、service_roleによる正規結果の保存、配列途中の不正URLによる全件rollback、同一結果再取得のskip、取消済みimportのblockとrevision不変を検証する。外部サイトの取得や本番jobの起動は行わない。
+保存・取消と違いno-opではrevisionを増やさない（初回ロックによる0行の作成はあり得る）。適用時は試合・resultsスロット・importと同じtransactionでrevisionを増やす。
+
+未完: 自動適用と保存/取消の2接続競合、全本番採点/後続trigger、直接DML、所属変更、提出/voteと認証済みUI。次の1件は自動適用と保存・取消の競合を同じ隔離DBで検証する。本番migration/merge/deployなし。

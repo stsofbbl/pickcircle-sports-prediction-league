@@ -59,6 +59,7 @@ jobs:
           python3 scripts/verify-approval-revision.py yoso_approval_revision_test
           python3 scripts/verify-result-write.py yoso_approval_revision_test
           python3 scripts/verify-result-write-concurrency.py yoso_approval_revision_test
+          python3 scripts/verify-auto-result-write.py yoso_approval_revision_test
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
