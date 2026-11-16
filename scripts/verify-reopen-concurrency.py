@@ -60,6 +60,10 @@ def reopen():
 
 
 def reset(legacy=False):
+    # Reopen any previous finalized fixture before writing its next seed.
+    if sql("SELECT count(*) FROM public.events WHERE id='save' AND "
+           "(status='finalized' OR rules->'resultFlow'->>'status'='finalized');") == "1":
+        sql(AUTH + reopen())
     # Trusted fixture seeding uses the real writer and exact transition permits.
     state = "resultWait" if legacy else "finalized"
     sql("BEGIN;" + AUTH + save("seed", 3) + "RESET ROLE;"
@@ -74,7 +78,7 @@ def reset(legacy=False):
         "DELETE FROM yoso_approval_private.revisions WHERE event_id='save';COMMIT;")
 
 
-def race(first, second, finish, expected):
+def race(first, second, finish, expected, rejected=False):
     reset()
     sessions = []
     try:
@@ -101,13 +105,16 @@ def race(first, second, finish, expected):
         a.wait(timeout=10)
         assert a.returncode == 0, a.stderr.read()
         output, errors = b.communicate(timeout=10)
-        assert b.returncode == 0, errors
-        json.loads(output)
+        if rejected:
+            assert b.returncode != 0 and "reopen finalized results before editing" in errors, errors
+        else:
+            assert b.returncode == 0, errors
+            json.loads(output)
         actual = json.loads(sql(
-            "SELECT jsonb_build_array(r.revision,e.status,m.team1_score,"
+            "SELECT jsonb_build_array(coalesce(r.revision,0),e.status,m.team1_score,"
             "(SELECT count(*) FROM public.koshien_result_reopens WHERE event_id='save')) "
             "FROM public.events e JOIN public.matches m ON m.event_id=e.id "
-            "JOIN yoso_approval_private.revisions r ON r.event_id=e.id WHERE e.id='save';"))
+            "LEFT JOIN yoso_approval_private.revisions r ON r.event_id=e.id WHERE e.id='save';"))
         assert actual == expected, (actual, expected)
         assert sql("SELECT count(*) FROM yoso_approval_private.transition_permits;") == "0"
         assert sql("SELECT count(*) FROM public.koshien_result_reopens "
@@ -171,5 +178,71 @@ try:
     assert sql("SELECT count(*) FROM public.koshien_result_reopens;") == "0"
     assert sql("SELECT status FROM public.events WHERE id='save';") == "finalized"
     print("PASS: inactive owner reopen rejected without mutation")
+
+    # Baseline races above reproduce the old finalized-write behavior.
+    sql((root / "supabase/prototypes/koshien-finalized-result-guard.sql").read_text())
+    sql("UPDATE public.league_members SET membership_status='active' "
+        "WHERE user_id='00000000-0000-0000-0000-000000000001';")
+
+    def snapshot():
+        tables = ["public.events", "public.matches", "public.results", "public.scores",
+                  "public.koshien_result_reopens", "public.koshien_result_cancellations",
+                  "public.external_match_imports", "yoso_approval_private.revisions",
+                  "yoso_approval_private.write_permits", "yoso_approval_private.transition_permits"]
+        return [sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                    "FROM " + table + " t;") for table in tables]
+
+    for legacy in [False, True]:
+        reset(legacy=legacy)
+        before = snapshot()
+        for statement in [save("denied", 7), cancel()]:
+            sql(AUTH + "SELECT public.test_reject($q$" + statement + "$q$,'55000');")
+            assert snapshot() == before, "finalized denial must roll back every table"
+        print(f"PASS: finalized save/cancel unchanged (legacy={legacy})")
+
+    # Actual event-lock waits, with both commit and rollback of the opener.
+    race(reopen(), save("second", 4), "COMMIT", [2, "resultWait", 4, 1])
+    race(reopen(), cancel(), "COMMIT", [2, "resultWait", None, 1])
+    race(reopen(), save("second", 4), "ROLLBACK", [0, "finalized", 3, 0], rejected=True)
+    race(reopen(), cancel(), "ROLLBACK", [0, "finalized", 3, 0], rejected=True)
+
+    # A permit issued earlier in this transaction must not bypass later finalization.
+    sql("BEGIN;" + AUTH + reopen() +
+        "SELECT yoso_approval_private.begin_result_write('save');RESET ROLE;"
+        "INSERT INTO yoso_approval_private.transition_permits "
+        "SELECT id,txid_current(),auth.uid(),status,'finalized',rules->'resultFlow',"
+        "'{\"status\":\"finalized\"}' FROM public.events WHERE id='save';"
+        "UPDATE public.events SET status='finalized',rules=jsonb_set(rules,'{resultFlow}',"
+        "'{\"status\":\"finalized\"}',true) WHERE id='save';" + AUTH +
+        "SELECT public.test_reject($q$UPDATE public.matches SET team1_score=9 "
+        "WHERE event_id='save'$q$,'55000');ROLLBACK;")
+    print("PASS: earlier writer permit cannot bypass finalization")
+
+    # Auto-apply uses a real scheduled match and service-only RPC, without impersonation.
+    sql("CREATE ROLE service_role NOLOGIN NOSUPERUSER NOBYPASSRLS;"
+        "GRANT USAGE ON SCHEMA public TO service_role;"
+        "GRANT EXECUTE ON FUNCTION public.auto_apply_koshien_official_results(text,jsonb) TO service_role;")
+    row = json.loads((root / "tests/sql/auto-result-checks.sql").read_text().split("'auto','", 1)[1].split("')$q$", 1)[0])
+    auto_call = "SELECT public.auto_apply_koshien_official_results('auto','" + json.dumps(row) + "');"
+    sql("BEGIN;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';"
+        "SELECT yoso_approval_private.issue_write_permit('auto');"
+        "DELETE FROM public.external_match_imports WHERE event_id='auto';"
+        "UPDATE public.matches SET status='scheduled',team1_score=NULL,team2_score=NULL,"
+        "winner_team_id=NULL,loser_team_id=NULL WHERE event_id='auto';"
+        "INSERT INTO yoso_approval_private.transition_permits "
+        "SELECT id,txid_current(),auth.uid(),status,'finalized',rules->'resultFlow',"
+        "'{\"status\":\"finalized\"}' FROM public.events WHERE id='auto';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='auto';COMMIT;")
+    before = snapshot()
+    sql("SET ROLE service_role;SELECT public.test_reject($q$" + auto_call + "$q$,'55000');")
+    assert snapshot() == before, "rejected automatic apply must leave no partial changes"
+    sql(AUTH + "SELECT public.reopen_koshien_results('auto');")
+    sql("SET ROLE service_role;" + auto_call)
+    assert sql("SELECT team1_score FROM public.matches WHERE event_id='auto';") == "3"
+    print("PASS: automatic apply rejected when finalized and succeeds after authorized reopen")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
+    sql("DO $ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN "
+        "EXECUTE 'DROP OWNED BY service_role'; EXECUTE 'DROP ROLE service_role'; END IF; END $;")
