@@ -11,3 +11,13 @@ Tests cover unauthorized callers, missing/non-finalized events, normal reopen wi
 Reopen continues existing behavior regardless of prediction deadline; this does not change prediction submission rights. Shared submission/vote tables do not exist yet, so their invalidation is NOT implemented; revision advancement alone is not the completed approval lifecycle.
 
 Next: race reopen against result-save/cancel under the event lock and test legacy flow-only finalized state plus inactive membership. Migration, production deployment and approval UI remain blocked by these and creation/delete/TRUNCATE/config/full-trigger gaps. Restore by reverting this prototype/test commit.
+
+## Reopen concurrency integration
+
+The existing disposable DB now runs five additional two-connection cases: reopen/save, save/reopen, reopen/cancel, cancel/reopen, and first reopen rollback followed by another reopen. Actual pg_blocking_pids waits are required; event status, revision, match score, audit count/actor and consumed transition permits are checked after completion. New connections cannot alter resultFlow directly. Identity, writer, approval-state and transition gates are installed together.
+
+Legacy resultFlow.status=finalized with event.status=resultWait is tested, preserving the original status in audit. Inactive-owner reopen is rejected. This is not a concurrent membership-change test.
+
+The existing save/cancel RPCs still permit edits to a finalized event before reopen; race success does not endorse that lifecycle policy. Finalized-result immutability, all production triggers, public submissions/votes and membership-change serialization remain unresolved.
+
+Next: enforce and test finalized-result write policy in save/cancel/auto paths, requiring authorized reopen before editing if consistent with existing documented behavior; first inspect production guards and client flow. No production changes.
