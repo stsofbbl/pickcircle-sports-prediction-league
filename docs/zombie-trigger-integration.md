@@ -22,3 +22,16 @@ prepare_koshien_zombie_phase_internal、koshien_result_versionの定義を取得
 
 次: 自動準備の不足条件（ドラフト未完/QF不足/設定無効/不整合SF）を同じ実処理で検証し、
 試作の承認revisionが後続round/資格変更を追跡できる範囲を整理する。
+
+## 条件不足とrevision境界の追加検証
+実際の遅延トリガーをSET CONSTRAINTS ALL IMMEDIATEで実行してから、
+ドラフト未完・設定無効・QF不足・SF時刻なし・SFカードなし・SFに非勝者を含む6条件を検査。
+各ケースでround/資格が作られず、元のwriterによるrevision増加は1回、rollbackで12表とドラフトが元へ戻ることを確認する。
+不正SFは合成fixtureへの管理者INSERTで作成する。通常UIから作れると主張するテストではない。
+
+内部prepareを特権fixtureから単独実行するとround/資格は作成されるが承認revisionは増えない。
+これは内部関数本体にrevision更新がないことの再現であり、認証ユーザーからの迂回や本番脆弱性の認定ではない。
+今回の自動経路は外側begin_result_writeのeventロック/revisionに依存する。
+全公開呼出元・service経路・schedule RPCがその条件を満たすかは未確認。
+次の1件: 内部prepareの本番ACLと呼出元をcatalogで列挙し、event先行ロック/revisionの不足経路を特定する。
+製品SQL・得点・本番データ変更なし。追加テストと資料のみ。

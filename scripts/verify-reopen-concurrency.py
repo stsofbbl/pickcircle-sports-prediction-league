@@ -377,6 +377,51 @@ try:
     assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility;") == "0"
     print("PASS: unauthorized preparation and equal schedule rejected; elapsed deadline creates nothing")
 
+
+    # Each condition is isolated by rollback; force the real deferred triggers
+    # before asserting, so a queued-but-unrun trigger cannot make the test pass.
+    missing_conditions = [
+        ("draft incomplete", "UPDATE public.phase2_drafts SET status='drafting' WHERE event_id='zombie-test';"),
+        ("disabled", "UPDATE public.events SET rules='{\"config\":{\"zombieEnabled\":false}}' WHERE id='zombie-test';"),
+        ("QF missing", "DELETE FROM public.matches WHERE event_id='zombie-test' AND round_key='QF' AND match_no=4;"),
+        ("SF time missing", "UPDATE public.matches SET starts_at=NULL WHERE event_id='zombie-test' AND round_key='SF';"),
+        ("SF card missing", "DELETE FROM public.matches WHERE event_id='zombie-test' AND round_key='SF';"
+         "UPDATE public.matches SET updated_at=now() WHERE event_id='zombie-test' AND round_key='QF';"),
+        ("SF contains nonwinner", "INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,status,starts_at) "
+         "VALUES('zombie-test','SF',2,'50000000-0000-0000-0000-000000000005',"
+         "'50000000-0000-0000-0000-000000000003','scheduled',now()+interval '1 day');"),
+    ]
+    for label, mutation in missing_conditions:
+        before = zombie_snapshot()
+        draft_before = sql("SELECT to_jsonb(d) FROM public.phase2_drafts d WHERE event_id='zombie-test';")
+        revision_before = int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='zombie-test';"))
+        sql(zombie_update("clock_timestamp()+interval '1 day'") + "RESET ROLE;" + mutation +
+            "SET CONSTRAINTS ALL IMMEDIATE;"
+            "SELECT public.test_assert(NOT EXISTS(SELECT 1 FROM public.koshien_later_rounds "
+            "WHERE event_id='zombie-test'),'missing condition leaves no round');"
+            "SELECT public.test_assert(NOT EXISTS(SELECT 1 FROM public.koshien_zombie_eligibility "
+            "WHERE event_id='zombie-test'),'missing condition leaves no eligibility');"
+            "SELECT public.test_assert((SELECT revision=" + str(revision_before + 1) +
+            " FROM yoso_approval_private.revisions WHERE event_id='zombie-test'),"
+            "'source write advances once even when preparation skips');ROLLBACK;")
+        assert zombie_snapshot() == before
+        assert sql("SELECT to_jsonb(d) FROM public.phase2_drafts d WHERE event_id='zombie-test';") == draft_before
+        print(f"PASS: zombie condition {label}: deferred skip, one source revision, complete rollback")
+
+    # The internal prepare itself is not an approval-revision writer.
+    # This privileged fixture call is not an exposed RPC or a production mutation.
+    before = zombie_snapshot()
+    revision_before = int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='zombie-test';"))
+    sql("BEGIN;SELECT public.prepare_koshien_zombie_phase_internal("
+        "'zombie-test',now(),now()+interval '1 day');"
+        "SELECT public.test_assert((SELECT count(*)=2 FROM public.koshien_zombie_eligibility),"
+        "'internal prepare creates real eligibility');"
+        "SELECT public.test_assert((SELECT revision=" + str(revision_before) +
+        " FROM yoso_approval_private.revisions WHERE event_id='zombie-test'),"
+        "'internal prepare alone does not advance approval revision');ROLLBACK;")
+    assert zombie_snapshot() == before
+    print("PASS: internal prepare revision boundary reproduced without persistent changes")
+
     # A failure after eligibility insertion must roll back the caller's whole write.
     sql("CREATE FUNCTION public.test_fail_zombie() RETURNS trigger LANGUAGE plpgsql AS $f$ "
         "BEGIN RAISE EXCEPTION 'injected zombie failure'; END $f$;"
