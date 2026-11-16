@@ -7,12 +7,15 @@ import sys
 if sys.argv[1:] != ["yoso_approval_revision_test"]:
     raise SystemExit("Only disposable yoso_approval_revision_test is allowed")
 root = pathlib.Path(__file__).resolve().parents[1]
-for checks in ("result-write-checks.sql", "result-direct-dml-checks.sql", "result-write-permit-checks.sql"):
+for checks in ("result-write-checks.sql", "result-direct-dml-checks.sql", "result-write-permit-checks.sql", "event-identity-checks.sql"):
     paths = ["tests/sql/result-write-fixture.sql",
              "supabase/prototypes/koshien-result-write.sql",
              f"tests/sql/{checks}"]
-    if checks == "result-write-permit-checks.sql":
+    if checks in ("result-write-permit-checks.sql", "event-identity-checks.sql"):
         paths.insert(2, "supabase/prototypes/koshien-result-write-permit.sql")
+    if checks == "event-identity-checks.sql":
+        paths[3:3] = ["tests/sql/event-identity-fixture.sql",
+                      "supabase/prototypes/koshien-event-identity.sql"]
     query = "\n".join((root / path).read_text() for path in paths)
     subprocess.run(["sudo", "-u", "postgres", "psql", "-h", "/var/run/postgresql",
                     "-X", "-v", "ON_ERROR_STOP=1", "-d", sys.argv[1]],

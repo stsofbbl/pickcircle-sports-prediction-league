@@ -32,3 +32,13 @@ The save/cancel concurrency runner installs the gate after seed/authorization ch
 Automatic apply now advances revision and issues its permit once, immediately before the first actual match update. It already holds event/revision locks; the issuer reacquires only locks held by the same transaction. The former end-of-batch advance is removed. Failures still roll back the whole batch; skip/block do not issue a permit or increment revision. This avoids granting unversioned write permission on a no-op call. Service execution keeps its original EXECUTE ACL and does not impersonate an auth UID.
 
 Added checks cover failed-batch permit rollback, service permit actor=NULL, no-op permit absence and rejection of direct writes from a fresh connection after every race. Existing races observe actual lock waits and compare revision/match/result/import/audit outcomes on commit and rollback. This is still prototype validation; event-state bypass, TRUNCATE, membership changes and complete production triggers remain release blockers.
+
+## 2026-11-16: event identity gate
+
+A before/after fixture reproduces changing a Koshien event to another preset and inserting a child row without a permit. The event identity prototype rejects UPDATE changes to id/preset_type/league_id/created_by whenever either OLD or NEW is Koshien, including conversion of an existing other-preset event. A result-writing permit does not authorize identity changes. SECURITY INVOKER, no extra row locks or client EXECUTE grant.
+
+The current client updates name/status/prediction_deadline on existing events (js/data-service.js, db62425); inserts establish identity. Tests preserve that update shape, identical identity assignments, deadlines before/after now, ordinary-member RLS denial, successful result RPC and rollback. SELECT policy is simplified. The identity gate is loaded only in the dedicated scenario, not all writer race fixtures.
+
+This closes the UPDATE-based identity escape in the prototype only. INSERT/DELETE/TRUNCATE, direct finalized status, rules/resultFlow, deadline semantics, membership races and full production triggers remain unresolved. Event transfer/conversion would require a separate migration design. No production changes or claim of complete approval enforcement.
+
+Next: design and prototype server-owned status/resultFlow transitions and a compatible settings entry, including creation and reopen. Recovery: revert this prototype/test change.
