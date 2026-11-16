@@ -348,6 +348,63 @@ try:
     assert sql("SELECT status FROM public.matches WHERE event_id='save' AND round_key='R1' AND match_no=2;") == "completed"
     print("PASS: same-winner correction and initial completion remain allowed after phase opens")
 
+    # Last production matches trigger: real zombie preparation + eligibility writer.
+    sql((root / "tests/sql/result-zombie-integration-fixture.sql").read_text())
+
+    def zombie_snapshot():
+        return snapshot() + [
+            sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') FROM " + table + " t;")
+            for table in ["public.koshien_later_rounds", "public.koshien_zombie_eligibility"]]
+
+    def zombie_update(deadline):
+        return ("BEGIN;" + AUTH +
+                "SELECT yoso_approval_private.begin_result_write('zombie-test');"
+                "UPDATE public.matches SET starts_at=" + deadline + ",updated_at=now() "
+                "WHERE event_id='zombie-test' AND round_key='SF';")
+
+    before = zombie_snapshot()
+    sql("SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';SET ROLE authenticated;"
+        "SELECT public.test_reject($q$SELECT yoso_approval_private.begin_result_write('zombie-test')$q$,'42501');")
+    assert zombie_snapshot() == before
+    sql(AUTH + "SELECT public.test_reject($q$SELECT public.prepare_koshien_zombie_phase_internal("
+        "'zombie-test',now(),now()+interval '1 day')$q$,'42501');")
+    sql("SELECT public.test_reject($q$SELECT public.prepare_koshien_zombie_phase_internal("
+        "'zombie-test',now(),now())$q$,'P0001');")
+    assert zombie_snapshot() == before
+    # Already elapsed deadlines must not create a round or eligibility rows.
+    sql(zombie_update("clock_timestamp()-interval '1 second'") + "COMMIT;")
+    assert sql("SELECT count(*) FROM public.koshien_later_rounds WHERE event_id='zombie-test';") == "0"
+    assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility;") == "0"
+    print("PASS: unauthorized preparation and equal schedule rejected; elapsed deadline creates nothing")
+
+    # A failure after eligibility insertion must roll back the caller's whole write.
+    sql("CREATE FUNCTION public.test_fail_zombie() RETURNS trigger LANGUAGE plpgsql AS $f$ "
+        "BEGIN RAISE EXCEPTION 'injected zombie failure'; END $f$;"
+        "CREATE CONSTRAINT TRIGGER test_fail_zombie AFTER INSERT ON public.koshien_zombie_eligibility "
+        "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.test_fail_zombie();")
+    before = zombie_snapshot()
+    failed = subprocess.run(PSQL, input=zombie_update("clock_timestamp()+interval '1 day'") + "COMMIT;",
+                            text=True, capture_output=True, timeout=10)
+    assert failed.returncode != 0 and "injected zombie failure" in failed.stderr, failed.stderr
+    assert zombie_snapshot() == before, "late zombie failure must roll back twelve tables"
+    sql("DROP TRIGGER test_fail_zombie ON public.koshien_zombie_eligibility;DROP FUNCTION public.test_fail_zombie();")
+    print("PASS: late zombie failure rolls back schedule, round, eligibility, revision and permits")
+
+    sql(zombie_update("clock_timestamp()+interval '1 day'") + "COMMIT;")
+    assert sql("SELECT status||':'||start_mode||':'||end_mode||':'||version FROM public.koshien_later_rounds "
+               "WHERE event_id='zombie-test';") == "open:automatic:automatic:1"
+    assert sql("SELECT eligible AND cardinality(allowed_team_ids)=4 FROM public.koshien_zombie_eligibility "
+               "WHERE player_id='20000000-0000-0000-0000-000000000001';") == "t"
+    assert sql("SELECT NOT eligible AND cardinality(allowed_team_ids)=0 FROM public.koshien_zombie_eligibility "
+               "WHERE player_id='20000000-0000-0000-0000-000000000002';") == "t"
+    assert sql("SELECT bool_and(source_results_version=public.koshien_result_version(event_id)) "
+               "FROM public.koshien_zombie_eligibility;") == "t"
+    rounds_before = sql("SELECT to_jsonb(t) FROM public.koshien_later_rounds t WHERE event_id='zombie-test';")
+    sql(zombie_update("clock_timestamp()+interval '2 days'") + "COMMIT;")
+    assert sql("SELECT to_jsonb(t) FROM public.koshien_later_rounds t WHERE event_id='zombie-test';") == rounds_before
+    assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility;") == "2"
+    print("PASS: future deadline auto-opens once with real eligibility; repeat does not overwrite")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
