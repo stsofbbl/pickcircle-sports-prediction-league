@@ -244,5 +244,5 @@ try:
 
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
-    sql("DO $ BEGIN IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN "
-        "EXECUTE 'DROP OWNED BY service_role'; EXECUTE 'DROP ROLE service_role'; END IF; END $;")
+    if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
+        sql("DROP OWNED BY service_role; DROP ROLE service_role;")
