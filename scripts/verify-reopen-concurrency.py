@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Two-session tests for the actual result-save prototype in a local disposable DB."""
+"""Race reopen against result save/cancel in a disposable local database."""
 import json
 import pathlib
 import selectors
@@ -137,6 +137,8 @@ GRANT USAGE ON SCHEMA public,auth,yoso_approval_private TO authenticated;
 GRANT SELECT ON public.events,public.teams,public.players TO authenticated;
 GRANT SELECT,INSERT,UPDATE ON public.matches,public.results,public.scores TO authenticated;
 GRANT UPDATE ON public.events TO authenticated;
+-- Recreated role must retain access used by the invoker import-sync trigger.
+GRANT SELECT,UPDATE ON public.external_match_imports TO authenticated;
 GRANT EXECUTE ON FUNCTION yoso_approval_private.begin_result_write(text) TO authenticated;
 ALTER TABLE public.events ADD COLUMN status text DEFAULT 'resultWait';
 ALTER TABLE public.events ADD COLUMN rules jsonb DEFAULT '{}';
