@@ -17,7 +17,12 @@ INSERT INTO public.events(id,preset_type,league_id,created_by) VALUES
 INSERT INTO public.teams VALUES
  ('30000000-0000-0000-0000-000000000001','auto','Team A'),
  ('30000000-0000-0000-0000-000000000002','auto','Team B');
+-- Trusted fixture seeding uses the same gate; remove its permit/revision before tests.
+SELECT yoso_approval_private.issue_write_permit('auto');
 INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,status,id) VALUES
  ('auto','R1',1,'30000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000002','scheduled','40000000-0000-0000-0000-000000000001');
 INSERT INTO public.results(event_id,payload) VALUES
  ('auto','{"matches":[{"round":"R1","match_no":1,"status":"scheduled"}]}');
+
+DELETE FROM yoso_approval_private.write_permits WHERE event_id='auto';
+DELETE FROM yoso_approval_private.revisions WHERE event_id='auto';

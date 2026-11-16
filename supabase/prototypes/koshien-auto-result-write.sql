@@ -153,6 +153,13 @@ begin
       raise exception 'automatic result contains an unknown team';
     end if;
 
+    -- Locks are already held event -> revision -> child. Issue permission only
+    -- for a real write, so skip/block cannot leave an unversioned write permit.
+    if v_changed = 0 then
+      perform yoso_approval_private.advance_revision(p_event_id, v_approval_revision);
+      perform yoso_approval_private.issue_write_permit(p_event_id);
+    end if;
+
     update public.matches
     set team1_score = v_team1_score,
         team2_score = v_team2_score,
@@ -212,7 +219,6 @@ begin
   end loop;
 
   if v_changed > 0 then
-    perform yoso_approval_private.advance_revision(p_event_id, v_approval_revision);
     update public.results
     set payload = v_payload,
         updated_by = v_event.created_by,

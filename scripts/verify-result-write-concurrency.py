@@ -113,6 +113,8 @@ sql(setup)
 try:
     sql((root / "tests/sql/result-cancel-checks.sql").read_text())
     print("PASS: cancellation authorization, downstream guards, revision and audit checks")
+    # Authorization fixture uses direct seed writes before installing the gate.
+    sql((root / "supabase/prototypes/koshien-result-write-permit.sql").read_text())
     race("COMMIT", 3, 4, 2)
     # A's increment and match write roll back; only B's increment survives.
     race("ROLLBACK", 8, 7, 3)

@@ -64,12 +64,14 @@ def line(p):
 
 
 def reset():
-    sql("DELETE FROM public.external_match_imports WHERE event_id='auto';"
+    sql("BEGIN; SELECT yoso_approval_private.issue_write_permit('auto');"
+        "DELETE FROM public.external_match_imports WHERE event_id='auto';"
         "DELETE FROM public.koshien_result_cancellations WHERE event_id='auto';"
         "DELETE FROM yoso_approval_private.revisions WHERE event_id='auto';"
         "UPDATE public.matches SET status='scheduled',team1_score=NULL,team2_score=NULL,"
         "winner_team_id=NULL,loser_team_id=NULL WHERE event_id='auto';"
-        f"UPDATE public.results SET payload='{payload(None)}' WHERE event_id='auto';")
+        f"UPDATE public.results SET payload='{payload(None)}' WHERE event_id='auto';"
+        "DELETE FROM yoso_approval_private.write_permits WHERE event_id='auto'; COMMIT;")
 
 
 def race(first, second, finish, expected, seed=False):
@@ -110,6 +112,11 @@ def race(first, second, finish, expected, seed=False):
             "FROM yoso_approval_private.revisions r JOIN public.matches m ON m.event_id=r.event_id "
             "JOIN public.results x ON x.event_id=r.event_id WHERE r.event_id='auto';"))
         assert actual == expected, (actual, expected)
+        # A fresh connection must not reuse either committed writer's permit.
+        sql("SELECT public.test_reject($q$UPDATE public.matches SET team1_score=99 "
+            "WHERE event_id='auto'$q$,'42501');")
+        assert sql("SELECT count(*) FROM yoso_approval_private.write_permits "
+                   "WHERE event_id='auto' AND transaction_id=txid_current();") == "0"
         if second == "auto":
             assert result["blocked" if first == "cancel" else "skipped"] == 1, result
         if "cancel" in (first, second):

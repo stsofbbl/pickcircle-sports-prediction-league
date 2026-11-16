@@ -1,5 +1,5 @@
 -- PROTOTYPE ONLY: load after koshien-result-write.sql in an isolated transaction.
--- Not a migration. Cancel/auto/deferred writers are not integrated yet.
+-- Not a migration. Save/cancel/auto are fixture-tested; full deferred writers are not.
 CREATE TABLE yoso_approval_private.write_permits (
  event_id text PRIMARY KEY REFERENCES public.events(id) ON DELETE CASCADE,
  transaction_id bigint NOT NULL,
