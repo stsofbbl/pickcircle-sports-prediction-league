@@ -25,3 +25,15 @@ trigger定義も確認し、後続試合更新はDEFERRABLE INITIALLY DEFERRED�
 決勝30点関数は本番の定義をコピーしただけで条件を変更せず、今回の入力は決勝なし。正式ルールとの不一致を解決・承認したことにはしない。
 次の1件: 残りのmatchesトリガーを同じ隔離fixtureへ組込み、遅延更新の全経路と整合性を検証。
 本番migration/merge/deployなし。復旧はこのテスト追加のrevert。
+
+## 追加: 公式R1進行と既存の訂正保護
+本番からSELECT取得したsync_koshien_official_second_round_advancement、
+protect_completed_koshien_downstream_result、protect_koshien_opened_later_resultsを
+改変せずresult-existing-guards-fixture.sqlに追加。R1更新の遅延実行と2本のBEFORE保護を維持。
+R1完了/取消によるR2枠とresults同期、R2完了後のR1取消拒否、後続phase開始後の勝者変更拒否と10表不変、
+同じ勝者での得点訂正・初回結果登録の許可を検証する。既存の実採点とwriter/finalized gatesも有効。
+初回登録用の2枚目カードは同じチームを使う合成fixtureで、完全な大会ブラケット検証ではない。
+今回は製品SQL/採点条件/本番データ変更なし。
+残るmatchesトリガーはauto_prepare_koshien_zombie_from_sf。定義を読取り、
+prepare_koshien_zombie_phase_internalへの依存を確認したが、内部処理はまだ統合していない。
+次の1件はこの内部処理と依存表を確認し、実処理を使って自動準備の締切前後・rollbackを隔離検証する。

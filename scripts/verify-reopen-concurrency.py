@@ -303,6 +303,51 @@ try:
     assert snapshot() == before
     print("PASS: finalized rejection retains downstream cards and recomputed scores")
 
+    # Add actual R1 advancement and both existing result-correction guards.
+    sql((root / "tests/sql/result-existing-guards-fixture.sql").read_text())
+    sql(AUTH + reopen())
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('save');RESET ROLE;"
+        "DELETE FROM public.matches WHERE event_id='save';"
+        "INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,status,metadata) VALUES "
+        "('save','R1',1,'10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','scheduled','{}'),"
+        "('save','R1',2,'10000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','scheduled','{}'),"
+        "('save','R2',1,NULL,NULL,'scheduled','{\"team1_source_match_no\":1}');"
+        "UPDATE public.results SET payload='" + slots + "' WHERE event_id='save';COMMIT;")
+    sql(AUTH + save_round("R1"))
+    assert sql("SELECT team1_id::text FROM public.matches WHERE event_id='save' AND round_key='R2';") == base_row["team1_id"]
+    assert sql("SELECT payload->'matches'->0->>'team_a_id' FROM public.results WHERE event_id='save';") == "Team A"
+    print("PASS: official R1 advancement updates R2 card and results payload")
+
+    cancel_r1 = "SELECT public.cancel_koshien_match_result('save','R1',1,'" + slots + "','[]');"
+    sql(AUTH + cancel_r1)
+    assert sql("SELECT team1_id IS NULL FROM public.matches WHERE event_id='save' AND round_key='R2';") == "t"
+    assert sql("SELECT payload->'matches'->0->>'team_a_id' FROM public.results WHERE event_id='save';") == ""
+    print("PASS: R1 cancellation clears official R2 slot through deferred trigger")
+    sql(AUTH + save_round("R1"))
+    sql(AUTH + save_round("R2"))
+    before = snapshot()
+    sql(AUTH + "SELECT public.test_reject($q$" + cancel_r1 + "$q$,'55000');")
+    assert snapshot() == before
+    print("PASS: completed downstream guard rejects cancellation without mutation")
+
+    sql("INSERT INTO public.koshien_later_rounds VALUES('save','revenge','open');")
+    changed_winner = dict(base_row, round_key="R1", team1_score=1, team2_score=3,
+                          winner_team_id=base_row["team2_id"], loser_team_id=base_row["team1_id"])
+
+    def save_rows(rows):
+        return "SELECT public.save_koshien_result_snapshot('save','" + json.dumps(rows) + "','[]','" + slots + "');"
+
+    before = snapshot()
+    sql(AUTH + "SELECT public.test_reject($q$" + save_rows([changed_winner]) + "$q$,'55000');")
+    assert snapshot() == before
+    print("PASS: opened later phase rejects winner-changing correction")
+    sql(AUTH + save_rows([dict(base_row, round_key="R1", team1_score=4)]))
+    assert sql("SELECT team1_score FROM public.matches WHERE event_id='save' AND round_key='R1' AND match_no=1;") == "4"
+    # The second synthetic scheduled card isolates the initial-completion exemption.
+    sql(AUTH + save_rows([dict(base_row, round_key="R1", match_no=2)]))
+    assert sql("SELECT status FROM public.matches WHERE event_id='save' AND round_key='R1' AND match_no=2;") == "completed"
+    print("PASS: same-winner correction and initial completion remain allowed after phase opens")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
