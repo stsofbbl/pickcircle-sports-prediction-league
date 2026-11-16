@@ -226,9 +226,11 @@ end;
 $function$
 ;
 
--- Fixture-only roles are not a substitute for verifying production ACL/RLS.
+-- Effective EXECUTE matches catalog 2026-11-17: service_role yes, authenticated/anon no.
+-- Fixture roles/tables still do not reproduce the complete production ACL/RLS.
 REVOKE ALL ON FUNCTION public.prepare_koshien_zombie_phase_internal(text,timestamptz,timestamptz)
- FROM PUBLIC,authenticated,anon,service_role;
+ FROM PUBLIC,authenticated,anon;
+GRANT EXECUTE ON FUNCTION public.prepare_koshien_zombie_phase_internal(text,timestamptz,timestamptz) TO service_role;
 BEGIN;
 INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules)
  VALUES('zombie-test','koshien','00000000-0000-0000-0000-000000000010',

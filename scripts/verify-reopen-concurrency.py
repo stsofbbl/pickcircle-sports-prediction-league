@@ -409,18 +409,18 @@ try:
         print(f"PASS: zombie condition {label}: deferred skip, one source revision, complete rollback")
 
     # The internal prepare itself is not an approval-revision writer.
-    # This privileged fixture call is not an exposed RPC or a production mutation.
+    # Match the production service_role EXECUTE grant; never call this in production.
     before = zombie_snapshot()
     revision_before = int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='zombie-test';"))
-    sql("BEGIN;SELECT public.prepare_koshien_zombie_phase_internal("
-        "'zombie-test',now(),now()+interval '1 day');"
+    sql("BEGIN;SET ROLE service_role;SELECT public.prepare_koshien_zombie_phase_internal("
+        "'zombie-test',now(),now()+interval '1 day');RESET ROLE;"
         "SELECT public.test_assert((SELECT count(*)=2 FROM public.koshien_zombie_eligibility),"
         "'internal prepare creates real eligibility');"
         "SELECT public.test_assert((SELECT revision=" + str(revision_before) +
         " FROM yoso_approval_private.revisions WHERE event_id='zombie-test'),"
         "'internal prepare alone does not advance approval revision');ROLLBACK;")
     assert zombie_snapshot() == before
-    print("PASS: internal prepare revision boundary reproduced without persistent changes")
+    print("PASS: production service-role permission reproduces unversioned internal preparation")
 
     # A failure after eligibility insertion must roll back the caller's whole write.
     sql("CREATE FUNCTION public.test_fail_zombie() RETURNS trigger LANGUAGE plpgsql AS $f$ "
@@ -449,6 +449,27 @@ try:
     assert sql("SELECT to_jsonb(t) FROM public.koshien_later_rounds t WHERE event_id='zombie-test';") == rounds_before
     assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility;") == "2"
     print("PASS: future deadline auto-opens once with real eligibility; repeat does not overwrite")
+
+    # A read-state RPC calls this real mutator. Exercise it without invoking
+    # the much larger read response or pretending it is a read-only function.
+    sql((root / "tests/sql/result-refresh-schedule-fixture.sql").read_text())
+    before = zombie_snapshot()
+    revision_before = int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='zombie-test';"))
+    sql("BEGIN;UPDATE public.koshien_later_rounds SET deadline_at=now()-interval '1 second' "
+        "WHERE event_id='zombie-test';"
+        "SET ROLE anon;SELECT public.test_reject($q$SELECT public.refresh_koshien_phase_schedule('zombie-test')$q$,'42501');"
+        "RESET ROLE;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';"
+        "SET ROLE authenticated;SELECT public.test_reject($q$SELECT public.refresh_koshien_phase_schedule('zombie-test')$q$,'42501');"
+        "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';"
+        "SELECT public.refresh_koshien_phase_schedule('zombie-test');"
+        "SELECT public.refresh_koshien_phase_schedule('zombie-test');RESET ROLE;"
+        "SELECT public.test_assert((SELECT status='locked' AND version=2 AND locked_at IS NOT NULL "
+        "FROM public.koshien_later_rounds WHERE event_id='zombie-test'),'member refresh locks elapsed round exactly once');"
+        "SELECT public.test_assert((SELECT revision=" + str(revision_before) +
+        " FROM yoso_approval_private.revisions WHERE event_id='zombie-test'),"
+        "'production refresh does not advance prototype approval revision');ROLLBACK;")
+    assert zombie_snapshot() == before
+    print("PASS: member refresh mutates round once without approval revision; unauthorized rejected and rollback clean")
 
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
