@@ -471,6 +471,114 @@ try:
     assert zombie_snapshot() == before
     print("PASS: member refresh mutates round once without approval revision; unauthorized rejected and rollback clean")
 
+
+    # Real service schedule RPC joins the same event/revision/permit boundary.
+    sql((root / "supabase/prototypes/koshien-late-schedule-write.sql").read_text())
+    # Reset only synthetic fixture state. Expired SF prevents deferred preparation.
+    sql(zombie_update("now()-interval '1 day'") + "RESET ROLE;"
+        "DELETE FROM public.koshien_later_rounds WHERE event_id='zombie-test';"
+        "DELETE FROM public.koshien_zombie_eligibility WHERE event_id='zombie-test';"
+        "INSERT INTO public.results(event_id,payload) VALUES('zombie-test',"
+        "'{\"matches\":[{\"round\":\"SF\",\"match_no\":1}]}');COMMIT;")
+    service = "SET ROLE service_role;"
+
+    def late_schedule(starts="2099-08-20T00:00:00Z", fetched="2026-11-17T00:00:00Z", missing=False):
+        rows = [dict(round_key="SF", match_no=1, starts_at=starts,
+                     tournament_day_no=13, daily_match_no=1)]
+        if missing:
+            rows.append(dict(rows[0], match_no=2, daily_match_no=2))
+        return ("SELECT public.auto_sync_koshien_late_schedule('zombie-test','" +
+                json.dumps(rows) + "','https://www.jhbf.or.jp/sensyuken/2026/schedule/','" +
+                fetched + "');")
+
+    def zombie_revision():
+        return int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='zombie-test';"))
+
+    before = zombie_snapshot()
+    for role in ["anon", "authenticated"]:
+        sql("SET ROLE " + role + ";SELECT public.test_reject($q$" + late_schedule() + "$q$,'42501');")
+    sql(service + "SELECT public.test_reject($q$" + late_schedule(missing=True) + "$q$,'P0001');")
+    assert zombie_snapshot() == before, "missing second slot rolls back first write and revision"
+    print("PASS: late schedule ACL and partial-batch rejection leave twelve tables unchanged")
+
+    # Actual deadline boundary via service RPC, with deferred triggers forced before rollback.
+    rev = zombie_revision()
+    sql("BEGIN;" + service + late_schedule(starts="2000-08-20T00:00:00Z") +
+        "RESET ROLE;SET CONSTRAINTS ALL IMMEDIATE;"
+        "SELECT public.test_assert(NOT EXISTS(SELECT 1 FROM public.koshien_later_rounds "
+        "WHERE event_id='zombie-test'),'expired service schedule cannot open zombie');ROLLBACK;")
+    assert zombie_snapshot() == before
+    result = json.loads(sql(service + late_schedule()))
+    assert result["changed"] == 1 and not result["idempotent"]
+    assert zombie_revision() == rev + 1
+    assert sql("SELECT status||':'||version FROM public.koshien_later_rounds "
+               "WHERE event_id='zombie-test';") == "open:1"
+    assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility WHERE event_id='zombie-test';") == "2"
+    assert sql("SELECT (payload->'matches'->0->>'starts_at')::timestamptz = "
+               "(SELECT starts_at FROM public.matches WHERE event_id='zombie-test' AND round_key='SF') "
+               "FROM public.results WHERE event_id='zombie-test';") == "t"
+    print("PASS: service SF schedule opens real zombie round and eligibility with one revision")
+
+    before = zombie_snapshot()
+    result = json.loads(sql(service + late_schedule()))
+    assert result["idempotent"] and result["changed"] == 0
+    assert zombie_snapshot() == before, "identical schedule cannot issue new permit or revision"
+    result = json.loads(sql(service + late_schedule(fetched="2026-11-17T01:00:00Z")))
+    assert not result["idempotent"] and result["changed"] == 0
+    assert zombie_revision() == rev + 2, "results-only mutation must advance once"
+    print("PASS: identical schedule is no-op; fetched-at-only results update advances once")
+
+
+    # Two real RPCs serialize on the event; the waiter observes the committed no-op.
+    rev = zombie_revision()
+    a = subprocess.Popen(PSQL, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, bufsize=1)
+    b = subprocess.Popen(PSQL, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    try:
+        send(a, "SELECT pg_backend_pid();")
+        pid = int(line(a))
+        concurrent = late_schedule(fetched="2026-11-17T03:00:00Z")
+        send(a, "BEGIN;" + service + concurrent)
+        assert not json.loads(line(a))["idempotent"]
+        send(b, "SET application_name='yoso_late_schedule_b';SET statement_timeout='15s';" +
+             service + concurrent)
+        deadline = time.monotonic() + 8
+        while sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='yoso_late_schedule_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));") != "1":
+            assert b.poll() is None, "second schedule exited before lock wait"
+            assert time.monotonic() < deadline, "schedule did not wait on event"
+            time.sleep(0.05)
+        send(a, "COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode == 0, a.stderr.read()
+        output, errors = b.communicate(timeout=10)
+        assert b.returncode == 0, errors
+        assert json.loads(output)["idempotent"]
+        assert zombie_revision() == rev + 1
+    finally:
+        for proc in [a, b]:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    print("PASS: concurrent real schedules serialize and advance revision only once")
+
+    # Finalization must protect both match changes and results-only metadata changes.
+    sql("BEGIN;INSERT INTO yoso_approval_private.transition_permits "
+        "SELECT id,txid_current(),auth.uid(),status,'finalized',rules->'resultFlow',"
+        "'{\"status\":\"finalized\"}' FROM public.events WHERE id='zombie-test';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='zombie-test';COMMIT;")
+    before = zombie_snapshot()
+    for statement in [late_schedule(starts="2099-08-21T00:00:00Z"),
+                      late_schedule(fetched="2026-11-17T02:00:00Z")]:
+        sql(service + "SELECT public.test_reject($q$" + statement + "$q$,'55000');")
+        assert zombie_snapshot() == before
+    result = json.loads(sql(service + late_schedule(fetched="2026-11-17T03:00:00Z")))
+    assert result["idempotent"] and zombie_snapshot() == before
+    print("PASS: finalized schedule rejects both write paths but permits exact no-op")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
