@@ -580,6 +580,126 @@ try:
     assert result["idempotent"] and zombie_snapshot() == before
     print("PASS: finalized schedule rejects both write paths but permits exact no-op")
 
+
+    # R1/R2 uses a different, exactly-33-row production RPC.
+    sql((root / "supabase/prototypes/koshien-official-schedule-write.sql").read_text())
+    official_rows = [
+        dict(round_key=r, match_no=n, starts_at="2099-08-01T00:00:00Z",
+             tournament_day_no=1 + i // 4, daily_match_no=1 + i % 4)
+        for i, (r, n) in enumerate(
+            [(r, n) for r, count in [("R1", 17), ("R2", 16)] for n in range(1, count + 1)])
+    ]
+    official_slots = json.dumps({"matches": [
+        {"round": row["round_key"], "match_no": row["match_no"]} for row in official_rows]})
+    sql("BEGIN;INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules) "
+        "VALUES('official-test','koshien','00000000-0000-0000-0000-000000000010',"
+        "'00000000-0000-0000-0000-000000000001','resultWait','{}');"
+        "SELECT yoso_approval_private.issue_write_permit('official-test');"
+        "INSERT INTO public.matches(event_id,round_key,match_no,status,metadata) "
+        "SELECT 'official-test',r,n,'scheduled','{}'::jsonb "
+        "FROM (VALUES('R1',17),('R2',16)) rounds(r,c),generate_series(1,c) n;"
+        "INSERT INTO public.results(event_id,payload) VALUES('official-test','" + official_slots + "');COMMIT;")
+
+    def official_call(rows=None, fetched="2026-11-17T00:00:00Z"):
+        return ("SELECT public.auto_sync_koshien_official_schedule('official-test','" +
+                json.dumps(official_rows if rows is None else rows) +
+                "','https://www.jhbf.or.jp/sensyuken/2026/schedule/','" + fetched + "');")
+
+    def official_revision():
+        return int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='official-test';"))
+
+    before = zombie_snapshot()
+    for role in ["anon", "authenticated"]:
+        sql("SET ROLE " + role + ";SELECT public.test_reject($q$" + official_call() + "$q$,'42501');")
+    for rows in [official_rows[:-1], official_rows[:-1] + [official_rows[0]]]:
+        sql(service + "SELECT public.test_reject($q$" + official_call(rows) + "$q$,'P0001');")
+    assert zombie_snapshot() == before
+    # Fail only at the last JSON slot, after earlier matches have been updated.
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('official-test');"
+        "UPDATE public.results SET payload=payload #- '{matches,32}' WHERE event_id='official-test';COMMIT;")
+    before = zombie_snapshot()
+    sql(service + "SELECT public.test_reject($q$" + official_call() + "$q$,'P0001');")
+    assert zombie_snapshot() == before, "last-slot failure must roll back all 33 writes and revision"
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('official-test');"
+        "UPDATE public.results SET payload='" + official_slots + "' WHERE event_id='official-test';COMMIT;")
+    rev = official_revision()
+    result = json.loads(sql(service + official_call()))
+    assert result == dict(ok=True, count=33, changed=33, idempotent=False), result
+    assert official_revision() == rev + 1
+    assert sql("SELECT count(*) FROM public.results r, jsonb_array_elements(r.payload->'matches') s "
+               "JOIN public.matches m ON m.round_key=s->>'round' AND m.match_no=(s->>'match_no')::int "
+               "WHERE r.event_id='official-test' AND m.event_id=r.event_id "
+               "AND m.starts_at=(s->>'starts_at')::timestamptz;") == "33"
+    before = zombie_snapshot()
+    assert json.loads(sql(service + official_call()))["idempotent"]
+    assert zombie_snapshot() == before
+    result = json.loads(sql(service + official_call(fetched="2026-11-17T01:00:00Z")))
+    assert result["changed"] == 0 and not result["idempotent"]
+    assert official_revision() == rev + 2
+    print("PASS: official 33-row ACL, validation, late-slot rollback, consistency and one revision per batch")
+
+    # A known completed start time is retained even if the source sends a new one.
+    # Synthetic completed card tests the production time branch; no scoring rules changed.
+    before = zombie_snapshot()
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('official-test');"
+        "UPDATE public.matches SET status='completed' WHERE event_id='official-test' AND round_key='R1' AND match_no=1;"
+        + service + official_call([dict(r, starts_at="2000-08-01T00:00:00Z") for r in official_rows]) +
+        "RESET ROLE;SET CONSTRAINTS ALL IMMEDIATE;"
+        "SELECT public.test_assert((SELECT starts_at='2099-08-01T00:00:00Z'::timestamptz FROM public.matches "
+        "WHERE event_id='official-test' AND round_key='R1' AND match_no=1),'completed start retained');"
+        "SELECT public.test_assert((SELECT count(*)=32 FROM public.matches WHERE event_id='official-test' "
+        "AND starts_at='2000-08-01T00:00:00Z'::timestamptz),'scheduled cards accept past official time');ROLLBACK;")
+    assert zombie_snapshot() == before
+    print("PASS: official completed start retained, past scheduled time accepted, transaction rollback clean")
+
+    # An uncommitted schedule blocks another service call; rollback leaves one revision.
+    rev = official_revision()
+    a = subprocess.Popen(PSQL, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, bufsize=1)
+    b = subprocess.Popen(PSQL, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    try:
+        send(a, "SELECT pg_backend_pid();")
+        pid = int(line(a))
+        concurrent = official_call(fetched="2026-11-17T03:00:00Z")
+        send(a, "BEGIN;" + service + concurrent)
+        assert not json.loads(line(a))["idempotent"]
+        send(b, "SET application_name='yoso_official_schedule_b';SET statement_timeout='15s';" + service + concurrent)
+        deadline = time.monotonic() + 8
+        while sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='yoso_official_schedule_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));") != "1":
+            assert b.poll() is None, "second official schedule exited before lock wait"
+            assert time.monotonic() < deadline, "official schedule did not wait"
+            time.sleep(0.05)
+        send(a, "ROLLBACK;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode == 0, a.stderr.read()
+        output, errors = b.communicate(timeout=10)
+        assert b.returncode == 0, errors
+        assert not json.loads(output)["idempotent"]
+        assert official_revision() == rev + 1
+    finally:
+        for proc in [a, b]:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    print("PASS: official concurrent rollback releases waiter and advances once")
+
+    sql("BEGIN;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';"
+        "INSERT INTO yoso_approval_private.transition_permits "
+        "SELECT id,txid_current(),auth.uid(),status,'finalized',rules->'resultFlow',"
+        "'{\"status\":\"finalized\"}' FROM public.events WHERE id='official-test';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='official-test';COMMIT;")
+    before = zombie_snapshot()
+    for statement in [official_call(), official_call([dict(r, starts_at="2099-08-02T00:00:00Z") for r in official_rows])]:
+        sql(service + "SELECT public.test_reject($q$" + statement + "$q$,'55000');")
+        assert zombie_snapshot() == before
+    assert json.loads(sql(service + official_call(fetched="2026-11-17T03:00:00Z")))["idempotent"]
+    assert zombie_snapshot() == before
+    print("PASS: official finalized match and results-only writes denied; exact repeat remains no-op")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
