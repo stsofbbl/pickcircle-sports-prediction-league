@@ -565,7 +565,8 @@ try:
     print("PASS: concurrent real schedules serialize and advance revision only once")
 
     # Finalization must protect both match changes and results-only metadata changes.
-    sql("BEGIN;INSERT INTO yoso_approval_private.transition_permits "
+    sql("BEGIN;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';"
+        "INSERT INTO yoso_approval_private.transition_permits "
         "SELECT id,txid_current(),auth.uid(),status,'finalized',rules->'resultFlow',"
         "'{\"status\":\"finalized\"}' FROM public.events WHERE id='zombie-test';"
         "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
