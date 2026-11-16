@@ -242,6 +242,67 @@ try:
     assert sql("SELECT team1_score FROM public.matches WHERE event_id='auto';") == "3"
     print("PASS: automatic apply rejected when finalized and succeeds after authorized reopen")
 
+    # Real deferred downstream trigger + real scoring body/helpers.
+    sql((root / "tests/sql/result-downstream-scoring-fixture.sql").read_text())
+    sql(AUTH + reopen())
+    base_row = dict(event_id="save", round_key="R2", match_no=1,
+                    team1_id="10000000-0000-0000-0000-000000000001",
+                    team2_id="10000000-0000-0000-0000-000000000002",
+                    team1_score=3, team2_score=1,
+                    winner_team_id="10000000-0000-0000-0000-000000000001",
+                    loser_team_id="10000000-0000-0000-0000-000000000002", status="completed")
+    slots = json.dumps({"matches": [{"round": "R2", "match_no": 1},
+                                   {"round": "R3", "match_no": 1}]})
+
+    def save_round(round_key):
+        rows = json.dumps([dict(base_row, round_key=round_key)])
+        return "SELECT public.save_koshien_result_snapshot('save','" + rows + "','[]','" + slots + "');"
+
+    def phase1():
+        return sql("SELECT phase1_score FROM public.scores WHERE event_id='save';")
+
+    before = snapshot()
+    sql("SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';"
+        "SET ROLE authenticated;SELECT public.test_reject($q$" + save_round("R2") + "$q$,'42501');")
+    assert snapshot() == before
+    # Deadline is already in the past: result entry remains admin-authorized.
+    sql(AUTH + save_round("R2"))
+    assert float(phase1()) == 3.6, phase1()
+    assert sql("SELECT team1_id::text FROM public.matches WHERE event_id='save' AND round_key='R3';") == base_row["team1_id"]
+    assert sql("SELECT payload->'matches'->1->>'team_a_id' FROM public.results WHERE event_id='save';") == "Team A"
+    print("PASS: deferred R2->R3 creation and real captain/multiplier scoring (3.6)")
+
+    cancel_r2 = "SELECT public.cancel_koshien_match_result('save','R2',1,'" + slots + "','[]');"
+    # Cancellation recalculates only supplied score rows; use the real player row.
+    cancel_r2 = cancel_r2.replace("'[]');", "'[{\"event_id\":\"save\",\"player_id\":\"20000000-0000-0000-0000-000000000001\",\"phase1_score\":999}]');")
+    sql(AUTH + cancel_r2)
+    assert float(phase1()) == 2.4, phase1()
+    assert sql("SELECT team1_id IS NULL FROM public.matches WHERE event_id='save' AND round_key='R3';") == "t"
+    assert sql("SELECT payload->'matches'->1->>'team_a_id' FROM public.results WHERE event_id='save';") == ""
+    print("PASS: cancellation clears downstream card and recomputes supplied 999 to 2.4")
+
+    sql(AUTH + save_round("R2"))
+    sql(AUTH + save_round("R3"))
+    assert float(phase1()) == 4.8, phase1()
+    before = snapshot()
+    failed = subprocess.run(PSQL, input="BEGIN;" + AUTH + cancel_r2 + "COMMIT;",
+                            text=True, capture_output=True, timeout=10)
+    assert failed.returncode != 0 and "dependent completed match exists" in failed.stderr, failed.stderr
+    assert snapshot() == before, "deferred failure must roll back result, score, audit and revision"
+    print("PASS: commit-time downstream rejection rolls back all ten tracked tables")
+
+    # Finalized gate with the production trigger bodies installed.
+    sql("BEGIN;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';"
+        "INSERT INTO yoso_approval_private.transition_permits "
+        "SELECT id,txid_current(),auth.uid(),status,'finalized',rules->'resultFlow',"
+        "'{\"status\":\"finalized\"}' FROM public.events WHERE id='save';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='save';COMMIT;")
+    before = snapshot()
+    sql(AUTH + "SELECT public.test_reject($q$" + save_round("R2") + "$q$,'55000');")
+    assert snapshot() == before
+    print("PASS: finalized rejection retains downstream cards and recomputed scores")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
