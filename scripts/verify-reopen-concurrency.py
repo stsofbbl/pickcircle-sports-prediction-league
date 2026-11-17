@@ -824,6 +824,133 @@ try:
     assert zombie_snapshot() == before
     print("PASS: finalized registration rejected without revision, card or payload changes")
 
+
+    # Reuse the real 17-card registration fixture; add 15 R2 starters.
+    sql((root / "supabase/prototypes/koshien-second-round-write.sql").read_text())
+    sql(AUTH + "SELECT public.reopen_koshien_results('registration-test');")
+    r2_teams = [f"72000000-0000-4000-8000-{i:012d}" for i in range(1, 16)]
+    r2_rows = [dict(round_key="R2", match_no=i+1, team1_source_match_no=i+1, team2_id=t)
+               for i, t in enumerate(r2_teams)]
+    r2_rows.append(dict(round_key="R2", match_no=16, team1_source_match_no=16, team2_source_match_no=17))
+    r2_slots = json.dumps([dict(round="R2", match_no=i, status="scheduled") for i in range(1,17)])
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('registration-test');RESET ROLE;"
+        "INSERT INTO public.teams(id,event_id,name,start_round) VALUES " +
+        ",".join("('" + team + "','registration-test','Seed " + str(i) + "',2)"
+                 for i, team in enumerate(r2_teams, 1)) + ";"
+        "UPDATE public.results SET payload=jsonb_set(payload,'{matches}',(payload->'matches')||'" + r2_slots +
+        "'::jsonb) WHERE event_id='registration-test';COMMIT;")
+
+    def register_second(rows=None, source="https://www.jhbf.or.jp/sensyuken/2026/tournament/"):
+        return ("SELECT public.register_koshien_official_second_round_slots('registration-test','" +
+                json.dumps(r2_rows if rows is None else rows) + "','" + source + "','2026-11-17T00:00:00Z');")
+
+    before = zombie_snapshot()
+    for prefix in ["SET ROLE anon;", service,
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';SET ROLE authenticated;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';SET ROLE authenticated;"]:
+        sql(prefix + "SELECT public.test_reject($q$" + register_second() + "$q$,'42501');")
+    for rows in [r2_rows[:-1], r2_rows[:-1]+[dict(r2_rows[-1],team2_source_match_no=16)],
+                 [dict(r2_rows[0],team2_id=registration_teams[0])]+r2_rows[1:]]:
+        sql(AUTH + "SELECT public.test_reject($q$" + register_second(rows) + "$q$,'P0001');")
+    assert zombie_snapshot() == before
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('registration-test');"
+        "UPDATE public.results SET payload=jsonb_set(payload,'{matches,32,match_no}','99') "
+        "WHERE event_id='registration-test';COMMIT;")
+    before = zombie_snapshot()
+    sql(AUTH + "SELECT public.test_reject($q$" + register_second() + "$q$,'P0001');")
+    assert zombie_snapshot() == before, "R2 last-slot failure must roll back earlier inserts"
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('registration-test');"
+        "UPDATE public.results SET payload=jsonb_set(payload,'{matches,32,match_no}','16') "
+        "WHERE event_id='registration-test';COMMIT;")
+    rev = registration_revision()
+    result = json.loads(sql(AUTH + register_second()))
+    assert result == dict(ok=True,count=16,inserted=16,idempotent=False), result
+    assert registration_revision() == rev + 1
+    assert sql("SELECT count(*) FROM public.matches WHERE event_id='registration-test' AND round_key='R2';") == "16"
+    before = zombie_snapshot()
+    assert json.loads(sql(AUTH + register_second()))["idempotent"]
+    assert zombie_snapshot() == before
+    print("PASS: R2 ACL/feeders/starters validation, partial rollback, 16 insertions and exact no-op")
+
+    # Actual R1 completion advances the registered R2 feeder via the real deferred trigger.
+    before = zombie_snapshot()
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('registration-test');"
+        "UPDATE public.matches SET status='completed',team1_score=3,team2_score=1,"
+        "winner_team_id=team1_id,loser_team_id=team2_id WHERE event_id='registration-test' "
+        "AND round_key='R1' AND match_no=1;SET CONSTRAINTS ALL IMMEDIATE;RESET ROLE;"
+        "SELECT public.test_assert((SELECT team1_id='" + registration_teams[0] +
+        "'::uuid FROM public.matches WHERE event_id='registration-test' AND round_key='R2' AND match_no=1),"
+        "'registered R2 receives actual R1 winner');"
+        "SELECT public.test_assert((SELECT payload->'matches'->17->>'team_a_id'='School 1' "
+        "FROM public.results WHERE event_id='registration-test'),'R2 JSON receives winner name');ROLLBACK;")
+    assert zombie_snapshot() == before
+    swapped = [dict(r2_rows[0],team2_id=r2_teams[1]),dict(r2_rows[1],team2_id=r2_teams[0])] + r2_rows[2:]
+    sql(AUTH + "SELECT public.test_reject($q$" + register_second(swapped) + "$q$,'P0001');")
+    assert zombie_snapshot() == before
+    print("PASS: R2 actual winner advancement and payload consistency; different draw rejected")
+
+    # Results-only repair must still receive a versioned permit.
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('registration-test');"
+        "UPDATE public.results SET payload=payload #- '{matches,17,match_id}' WHERE event_id='registration-test';COMMIT;")
+    rev = registration_revision()
+    a = subprocess.Popen(PSQL, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, bufsize=1)
+    b = subprocess.Popen(PSQL, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    try:
+        send(a,"SELECT pg_backend_pid();")
+        pid = int(line(a))
+        send(a,"BEGIN;" + AUTH + register_second())
+        result = json.loads(line(a))
+        assert result["inserted"] == 0 and not result["idempotent"]
+        send(b,"SET application_name='yoso_r2_register_b';SET statement_timeout='15s';" + AUTH + register_second())
+        deadline = time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='yoso_r2_register_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));") != "1":
+            assert b.poll() is None, "second R2 registration exited before lock wait"
+            assert time.monotonic() < deadline, "R2 registration did not wait"
+            time.sleep(0.05)
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode == 0, a.stderr.read()
+        output, errors = b.communicate(timeout=10)
+        assert b.returncode == 0, errors
+        assert json.loads(output)["idempotent"]
+        assert registration_revision() == rev+1
+    finally:
+        for proc in [a,b]:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    print("PASS: R2 concurrent results-only repair advances once; waiter is a real no-op")
+
+
+    before = zombie_snapshot()
+    sql("BEGIN;" + AUTH + "SELECT yoso_approval_private.begin_result_write('registration-test');"
+        "UPDATE public.results SET payload=payload #- '{matches,17,match_id}' WHERE event_id='registration-test';RESET ROLE;"
+        "INSERT INTO yoso_approval_private.transition_permits SELECT id,txid_current(),auth.uid(),status,"
+        "'finalized',rules->'resultFlow','{\"status\":\"finalized\"}' FROM public.events WHERE id='registration-test';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='registration-test';" + AUTH +
+        "SELECT public.test_reject($q$" + register_second() + "$q$,'55000');ROLLBACK;")
+    assert zombie_snapshot() == before
+    print("PASS: R2 finalized results-only repair rejected and rollback restores every tracked table")
+
+    # Exact no-op remains legal when finalized, actual metadata changes do not.
+    sql("BEGIN;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';"
+        "INSERT INTO yoso_approval_private.transition_permits SELECT id,txid_current(),auth.uid(),status,"
+        "'finalized',rules->'resultFlow','{\"status\":\"finalized\"}' FROM public.events WHERE id='registration-test';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='registration-test';COMMIT;")
+    before = zombie_snapshot()
+    assert json.loads(sql(AUTH + register_second()))["idempotent"]
+    assert zombie_snapshot() == before
+    sql(AUTH + "SELECT public.test_reject($q$" +
+        register_second(source="https://jhbf.or.jp/sensyuken/2026/tournament/") + "$q$,'55000');")
+    assert zombie_snapshot() == before
+    print("PASS: R2 finalized no-op allowed, changed metadata rejected without mutation")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
