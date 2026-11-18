@@ -472,6 +472,79 @@ try:
     print("PASS: member refresh mutates round once without approval revision; unauthorized rejected and rollback clean")
 
 
+
+    # A read-state call can transition round/draft deadlines. Members must
+    # advance the shared revision but must never receive a results write permit.
+    sql((root / "supabase/prototypes/koshien-refresh-schedule-write.sql").read_text())
+    refresh_call = ("SELECT coalesce(public.refresh_koshien_phase_schedule("
+                    "'zombie-test')::text,'') || 'ok';")
+    before = zombie_snapshot()
+    rev = int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='zombie-test';"))
+    sql("BEGIN;UPDATE public.koshien_later_rounds SET deadline_at=now()-interval '1 second' "
+        "WHERE event_id='zombie-test';"
+        "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';"
+        "SET ROLE authenticated;" + refresh_call + "RESET ROLE;"
+        "SELECT public.test_assert((SELECT status='locked' AND version=2 "
+        "FROM public.koshien_later_rounds WHERE event_id='zombie-test'),"
+        "'member refresh locks expired round');"
+        "SELECT public.test_assert((SELECT revision=" + str(rev+1) +
+        " FROM yoso_approval_private.revisions WHERE event_id='zombie-test'),"
+        "'member refresh advances once');ROLLBACK;")
+    assert zombie_snapshot() == before, "failed refresh must restore all twelve tables"
+
+    sql("UPDATE public.koshien_later_rounds SET deadline_at=now()-interval '1 second' "
+        "WHERE event_id='zombie-test';")
+    before = zombie_snapshot()
+    permits = sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                  "FROM yoso_approval_private.write_permits t;")
+    for prefix in ["SET ROLE anon;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';"
+                   "SET ROLE authenticated;"]:
+        sql(prefix + "SELECT public.test_reject($q$" + refresh_call + "$q$,'42501');")
+    assert zombie_snapshot() == before
+
+    a = subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,text=True,bufsize=1)
+    b = subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,text=True)
+    try:
+        send(a,"SELECT pg_backend_pid();")
+        pid = int(line(a))
+        member = ("SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';"
+                  "SET ROLE authenticated;")
+        send(a,"BEGIN;" + member + refresh_call)
+        assert line(a)=="ok"
+        send(b,"SET application_name='yoso_member_refresh_b';SET statement_timeout='15s';"
+             + member + refresh_call)
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='yoso_member_refresh_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert b.poll() is None,"member refresh did not wait"
+            assert time.monotonic()<deadline
+            time.sleep(.05)
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        output,errors=b.communicate(timeout=10)
+        assert b.returncode==0 and output.strip()=="ok",errors
+    finally:
+        for proc in (a,b):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    assert sql("SELECT status||':'||version FROM public.koshien_later_rounds "
+               "WHERE event_id='zombie-test';")=="locked:2"
+    assert int(sql("SELECT revision FROM yoso_approval_private.revisions "
+                   "WHERE event_id='zombie-test';"))==rev+1
+    assert sql(AUTH+refresh_call)=="ok"
+    assert int(sql("SELECT revision FROM yoso_approval_private.revisions "
+                   "WHERE event_id='zombie-test';"))==rev+1
+    assert sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+               "FROM yoso_approval_private.write_permits t;")==permits
+    print("PASS: member refresh rollback, ACL, concurrent event wait, single revision, no permit")
+
     # Real service schedule RPC joins the same event/revision/permit boundary.
     sql((root / "supabase/prototypes/koshien-late-schedule-write.sql").read_text())
     # Reset only synthetic fixture state. Expired SF prevents deferred preparation.
