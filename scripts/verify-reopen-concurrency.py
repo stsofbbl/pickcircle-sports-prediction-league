@@ -951,6 +951,140 @@ try:
     assert zombie_snapshot() == before
     print("PASS: R2 finalized no-op allowed, changed metadata rejected without mutation")
 
+
+    # Service-only QF/SF redraw: actual production RPC body with gated writes.
+    sql((root / "supabase/prototypes/koshien-redraw-write.sql").read_text())
+    redraw_teams = [f"73000000-0000-4000-8000-{i:012d}" for i in range(1, 17)]
+    redraw_qf = [dict(round_key="QF", match_no=i+1,
+                      team1_id=redraw_teams[2*i], team2_id=redraw_teams[2*i+1])
+                 for i in range(4)]
+    redraw_sf = [dict(round_key="SF", match_no=i+1,
+                      team1_id=redraw_teams[4*i], team2_id=redraw_teams[4*i+2])
+                 for i in range(2)]
+    redraw_slots = json.dumps({"matches": [
+        dict(round=rnd, match_no=i, status="scheduled")
+        for rnd, n in [("QF", 4), ("SF", 2)] for i in range(1,n+1)]})
+    sql("BEGIN;INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules) "
+        "VALUES('redraw-test','koshien','00000000-0000-0000-0000-000000000010',"
+        "'00000000-0000-0000-0000-000000000001','resultWait','{}');"
+        "SELECT yoso_approval_private.issue_write_permit('redraw-test');"
+        "INSERT INTO public.teams(id,event_id,name,start_round) VALUES " +
+        ",".join("('" + team + "','redraw-test','Redraw " + str(i) + "',1)"
+                 for i,team in enumerate(redraw_teams,1)) + ";"
+        "INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,"
+        "team1_score,team2_score,winner_team_id,loser_team_id,status) VALUES " +
+        ",".join("('redraw-test','R3'," + str(i+1) + ",'" + redraw_teams[i] +
+                 "','" + redraw_teams[i+8] + "',3,1,'" + redraw_teams[i] +
+                 "','" + redraw_teams[i+8] + "','completed')"
+                 for i in range(8)) + ";"
+        "INSERT INTO public.results(event_id,payload) VALUES('redraw-test','" +
+        redraw_slots + "');COMMIT;")
+
+    def redraw_call(round_key="QF", rows=None, source="https://www.jhbf.or.jp/sensyuken/2026/tournament/"):
+        return ("SELECT public.register_koshien_official_redraw_slots('redraw-test','" +
+                round_key + "','" +
+                json.dumps((redraw_qf if round_key=="QF" else redraw_sf) if rows is None else rows) +
+                "','" + source + "','2026-11-18T00:00:00Z');")
+
+    def redraw_revision():
+        return int(sql("SELECT revision FROM yoso_approval_private.revisions WHERE event_id='redraw-test';"))
+
+    before = zombie_snapshot()
+    for role in ["anon", "authenticated"]:
+        sql("SET ROLE " + role + ";SELECT public.test_reject($q$" + redraw_call() + "$q$,'42501');")
+    for bad in [redraw_call("R3"),redraw_call(rows=[]),
+                redraw_call(rows=[dict(redraw_qf[0],team2_id=redraw_teams[9])]+redraw_qf[1:]),
+                redraw_call(source="https://example.com/")]:
+        sql(service + "SELECT public.test_reject($q$" + bad + "$q$,'P0001');")
+    assert zombie_snapshot() == before
+
+    # Force a failure after preceding QF inserts; all 12 tracked tables roll back.
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('redraw-test');"
+        "UPDATE public.results SET payload=jsonb_set(payload,'{matches,3,match_no}','99') "
+        "WHERE event_id='redraw-test';COMMIT;")
+    before = zombie_snapshot()
+    sql(service + "SELECT public.test_reject($q$" + redraw_call() + "$q$,'P0001');")
+    assert zombie_snapshot() == before
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('redraw-test');"
+        "UPDATE public.results SET payload='" + redraw_slots + "' WHERE event_id='redraw-test';COMMIT;")
+    rev = redraw_revision()
+    result = json.loads(sql(service + redraw_call()))
+    assert result == dict(ok=True,round_key="QF",count=4,changed=4,idempotent=False),result
+    assert redraw_revision()==rev+1
+    assert sql("SELECT count(*) FROM public.matches WHERE event_id='redraw-test' AND round_key='QF';")=="4"
+    before = zombie_snapshot()
+    assert json.loads(sql(service + redraw_call()))["idempotent"]
+    assert zombie_snapshot()==before
+    print("PASS: QF service-only ACL/validation, four inserts, no-op and full late rollback")
+
+    # Real row-level lock wait; the second service worker sees only the committed repair.
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('redraw-test');"
+        "UPDATE public.results SET payload=payload #- '{matches,0,match_id}' "
+        "WHERE event_id='redraw-test';COMMIT;")
+    rev=redraw_revision()
+    a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,bufsize=1)
+    b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        send(a,"SELECT pg_backend_pid();")
+        pid=int(line(a))
+        send(a,"BEGIN;"+service+redraw_call())
+        assert not json.loads(line(a))["idempotent"]
+        send(b,"SET application_name='yoso_redraw_b';SET statement_timeout='15s';"+service+redraw_call())
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='yoso_redraw_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert b.poll() is None
+            assert time.monotonic()<deadline,"redraw caller did not wait on event"
+            time.sleep(.05)
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        out,err=b.communicate(timeout=10)
+        assert b.returncode==0,err
+        assert json.loads(out)["idempotent"]
+        assert redraw_revision()==rev+1
+    finally:
+        for proc in [a,b]:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    print("PASS: results-only repair increments once; concurrent repeat is no-op")
+
+    # Complete QF cards, then register the two SF matches from real QF winners.
+    sql("BEGIN;"+AUTH+"SELECT yoso_approval_private.begin_result_write('redraw-test');"
+        "UPDATE public.matches SET status='completed',team1_score=3,team2_score=1,"
+        "winner_team_id=team1_id,loser_team_id=team2_id "
+        "WHERE event_id='redraw-test' AND round_key='QF';COMMIT;")
+    rev=redraw_revision()
+    result=json.loads(sql(service+redraw_call("SF")))
+    assert result==dict(ok=True,round_key="SF",count=2,changed=2,idempotent=False),result
+    assert redraw_revision()==rev+1
+    assert sql("SELECT count(*) FROM public.matches WHERE event_id='redraw-test' AND round_key='SF';")=="2"
+    before=zombie_snapshot()
+    assert json.loads(sql(service+redraw_call("SF")))["idempotent"]
+    assert zombie_snapshot()==before
+    sql(service+"SELECT public.test_reject($q$"+
+        redraw_call("SF",rows=[dict(redraw_sf[0],team2_id=redraw_teams[4]),redraw_sf[1]])+
+        "$q$,'P0001');")
+    assert zombie_snapshot()==before
+    print("PASS: SF from QF winners, exact no-op and competing draw rejection")
+
+    sql("BEGIN;SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';"
+        "INSERT INTO yoso_approval_private.transition_permits SELECT id,txid_current(),auth.uid(),status,"
+        "'finalized',rules->'resultFlow','{\"status\":\"finalized\"}' "
+        "FROM public.events WHERE id='redraw-test';"
+        "UPDATE public.events SET status='finalized',rules='{\"resultFlow\":{\"status\":\"finalized\"}}' "
+        "WHERE id='redraw-test';COMMIT;")
+    before=zombie_snapshot()
+    assert json.loads(sql(service+redraw_call("SF")))["idempotent"]
+    assert zombie_snapshot()==before
+    sql(service+"SELECT public.test_reject($q$"+
+        redraw_call("SF",source="https://jhbf.or.jp/sensyuken/2026/tournament/")+
+        "$q$,'55000');")
+    assert zombie_snapshot()==before
+    print("PASS: finalized redraw no-op allowed, metadata change refused")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
