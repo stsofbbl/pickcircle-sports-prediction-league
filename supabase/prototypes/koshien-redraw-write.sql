@@ -261,7 +261,7 @@ begin
     'idempotent', v_changed = 0 and not v_payload_changed
   );
 end;
-$function$
+$function$;
 
 REVOKE ALL ON FUNCTION public.register_koshien_official_redraw_slots(text,text,jsonb,text,timestamptz) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.register_koshien_official_redraw_slots(text,text,jsonb,text,timestamptz) TO service_role;
