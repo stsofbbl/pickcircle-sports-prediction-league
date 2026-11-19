@@ -1675,6 +1675,63 @@ try:
     membership_race(prediction_call("zombie",request="50",target="1"),
                     "participant zombie prediction")
 
+
+    # Production-catalog RLS policies, not the earlier admin-only synthetic policy.
+    # Each policy is installed inside a single ROLLBACK-only transaction so
+    # the other integration fixtures remain unchanged.
+    prior_policies=sql("SELECT coalesce(string_agg(policyname,',' ORDER BY policyname),'') "
+                       "FROM pg_policies WHERE schemaname='public' AND tablename='results';")
+    before=snapshot()
+    rls_checks = """
+      SET ROLE anon;
+      SELECT public.test_assert(
+        (SELECT count(*)=0 FROM public.results WHERE event_id='save')
+        AND (SELECT count(*)=0 FROM public.events WHERE id='save')
+        AND (SELECT count(*)=0 FROM public.matches WHERE event_id='save')
+        AND (SELECT count(*)=0 FROM public.scores WHERE event_id='save'),
+        'anon cannot SELECT restricted production rows');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT count(*)=0 FROM public.results WHERE event_id='save')
+        AND (SELECT count(*)=0 FROM public.events WHERE id='save')
+        AND (SELECT count(*)=0 FROM public.matches WHERE event_id='save')
+        AND (SELECT count(*)=0 FROM public.scores WHERE event_id='save'),
+        'different league owner cannot SELECT');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM public.results WHERE event_id='save')
+        AND (SELECT count(*)=1 FROM public.events WHERE id='save')
+        AND (SELECT count(*)>0 FROM public.matches WHERE event_id='save')
+        AND (SELECT count(*)>0 FROM public.scores WHERE event_id='save'),
+        'active league member can SELECT own event');
+      UPDATE public.results SET updated_by=auth.uid() WHERE event_id='zombie-test';
+      SELECT public.test_assert(
+        (SELECT updated_by IS DISTINCT FROM auth.uid() FROM public.results
+         WHERE event_id='zombie-test'),
+        'member cannot update result under production RLS');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SELECT yoso_approval_private.begin_result_write('zombie-test');
+      SELECT public.test_reject(
+        $rejected$UPDATE public.results
+        SET updated_by='00000000-0000-0000-0000-000000000002'
+        WHERE event_id='zombie-test'$rejected$,'42501');
+      UPDATE public.results SET updated_by=auth.uid() WHERE event_id='zombie-test';
+      SELECT public.test_assert(
+        (SELECT updated_by=auth.uid() FROM public.results
+         WHERE event_id='zombie-test'),
+        'real admin actor can update result with valid permit and identity');
+      RESET ROLE;
+    """
+    sql("BEGIN;\n"
+        + (root / "tests/sql/result-production-rls-policy-fixture.sql").read_text()
+        + rls_checks + "\nROLLBACK;")
+    assert snapshot()==before, "production RLS contract must not mutate fixture tables"
+    assert sql("SELECT coalesce(string_agg(policyname,',' ORDER BY policyname),'') "
+               "FROM pg_policies WHERE schemaname='public' AND tablename='results';")==prior_policies
+    print("PASS: production SELECT, write and updated_by RLS policies (11) in rollback-only fixture")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
