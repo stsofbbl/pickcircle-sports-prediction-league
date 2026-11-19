@@ -1158,6 +1158,148 @@ try:
     assert zombie_snapshot()==before
     print("PASS: finalized redraw no-op allowed, metadata change refused")
 
+
+    # Manual zombie prepare uses the production internal body and production
+    # admin wrapper; only the large UI state JSON is represented by a stub.
+    sql("CREATE OR REPLACE FUNCTION public.get_koshien_later_phase_state(p_event_id text) "
+        "RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $fn$ "
+        "BEGIN PERFORM public.refresh_koshien_phase_schedule(p_event_id);"
+        "RETURN jsonb_build_object('event_id',p_event_id,'round_count',"
+        "(SELECT count(*) FROM public.koshien_later_rounds WHERE event_id=p_event_id)); "
+        "END $fn$;")
+    sql((root / "supabase/prototypes/koshien-manual-zombie-prepare.sql").read_text())
+    sql((root / "supabase/prototypes/koshien-manual-later-prepare.sql").read_text())
+
+    def seed_manual(event):
+        teams = [f"81000000-0000-4000-8000-{i:012d}" for i in range(1,9)]
+        draft_id = "82000000-0000-4000-8000-00000000000" + ("1" if event=="manual-a" else "2")
+        sql("BEGIN;INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules) "
+            "VALUES('" + event + "','koshien','00000000-0000-0000-0000-000000000010',"
+            "'00000000-0000-0000-0000-000000000001','resultWait','{}');"
+            "INSERT INTO public.teams(id,event_id,name,start_round) VALUES " +
+            ",".join("('" + t + "','" + event + "','M " + str(i) + "',1)"
+                     for i,t in enumerate(teams,1)) + ";"
+            "SELECT yoso_approval_private.issue_write_permit('" + event + "');"
+            "INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,"
+            "team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at) VALUES " +
+            ",".join("('" + event + "','QF'," + str(i+1) + ",'" + teams[i] + "','" +
+                     teams[i+4] + "',3,1,'" + teams[i] + "','" + teams[i+4] +
+                     "','completed',now())" for i in range(4)) + ";"
+            "INSERT INTO public.phase2_drafts(event_id,status,id,ordered_player_ids) VALUES"
+            "('" + event + "','completed','" + draft_id + "',ARRAY["
+            "'20000000-0000-0000-0000-000000000001'::uuid,"
+            "'20000000-0000-0000-0000-000000000002'::uuid]);"
+            "INSERT INTO public.phase2_draft_picks(draft_id,player_id,team_id,pick_no) VALUES " +
+            ",".join("('" + draft_id + "','" + (
+              "20000000-0000-0000-0000-000000000002" if i<4 else
+              "20000000-0000-0000-0000-000000000001") + "','" + teams[i] + "'," +
+              str(i+1) + ")" for i in range(8)) + ";COMMIT;")
+
+    def manual_call(event, wrapped=False, start="2099-08-20T00:00:00Z"):
+        params = ("'" + event + "'," +
+                  ("'zombie'," if wrapped else "") +
+                  "'" + start + "','2099-08-21T00:00:00Z'" +
+                  (",'manual','manual'" if wrapped else ""))
+        rpc = "prepare_koshien_later_phase" if wrapped else "prepare_koshien_zombie_phase"
+        return "SELECT public." + rpc + "(" + params + ");"
+
+    def manual_revision(event):
+        return int(sql("SELECT revision FROM yoso_approval_private.revisions "
+                       "WHERE event_id='" + event + "';"))
+
+    def manual_snapshot():
+        return zombie_snapshot() + [
+            sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                "FROM " + table + " t;")
+            for table in ["public.teams","public.phase2_drafts","public.phase2_draft_picks"]]
+
+    seed_manual("manual-a")
+    seed_manual("manual-b")
+    initial = manual_snapshot()
+    for prefix in ["SET ROLE anon;",
+                   "SET ROLE service_role;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';SET ROLE authenticated;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';SET ROLE authenticated;"]:
+        sql(prefix + "SELECT public.test_reject($q$" + manual_call("manual-a") + "$q$,'42501');")
+        sql(prefix + "SELECT public.test_reject($q$" + manual_call("manual-b",True) + "$q$,'42501');")
+    sql(AUTH + "SELECT public.test_reject($q$" + manual_call("manual-a",start="2099-08-21T00:00:00Z") +
+        "$q$,'P0001');")
+    assert manual_snapshot()==initial
+    print("PASS: manual direct/wrapper ACL and invalid deadline leave all data unchanged")
+
+    rev_a=manual_revision("manual-a")
+    res=json.loads(sql(AUTH + manual_call("manual-a")))
+    assert res["event_id"]=="manual-a" and res["round_count"]==1
+    assert manual_revision("manual-a")==rev_a+1
+    assert sql("SELECT status||':'||version FROM public.koshien_later_rounds "
+               "WHERE event_id='manual-a';")=="ready:0"
+    assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility "
+               "WHERE event_id='manual-a';")=="2"
+    saved=manual_snapshot()
+    sql(AUTH+"SELECT public.test_reject($q$"+manual_call("manual-a")+"$q$,'55000');")
+    assert manual_snapshot()==saved
+    print("PASS: direct manual zombie prepare increments once; duplicate rejected")
+
+    rev_b=manual_revision("manual-b")
+    res=json.loads(sql(AUTH+manual_call("manual-b",True)))
+    assert res["event_id"]=="manual-b" and res["round_count"]==1
+    assert manual_revision("manual-b")==rev_b+1, "outer wrapper cannot double-version nested prepare"
+    assert sql("SELECT status||':'||start_mode||':'||end_mode||':'||version "
+               "FROM public.koshien_later_rounds WHERE event_id='manual-b';")=="ready:manual:manual:1"
+    assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility "
+               "WHERE event_id='manual-b';")=="2"
+    print("PASS: wrapped manual zombie prepare makes round/manual schedule with one revision")
+
+    # Roll back an entire wrapper call (round, eligibility, revision) after a
+    # successful internal preparation, without changing any production event.
+    sql("BEGIN;DELETE FROM public.koshien_zombie_eligibility WHERE event_id='manual-b';"
+        "DELETE FROM public.koshien_later_rounds WHERE event_id='manual-b';"
+        "DELETE FROM yoso_approval_private.revisions WHERE event_id='manual-b';"
+        "RESET ROLE;" + AUTH + manual_call("manual-b",True) + "ROLLBACK;")
+    assert sql("SELECT count(*) FROM public.koshien_later_rounds WHERE event_id='manual-b';")=="1"
+    assert manual_revision("manual-b")==rev_b+1
+    print("PASS: wrapper rollback restores prior round and revision")
+
+    # Two same-event admin prepares: the second must wait on event then reject
+    # duplicate, not race to insert two eligibility/round rows.
+    sql("BEGIN;DELETE FROM public.koshien_zombie_eligibility WHERE event_id='manual-a';"
+        "DELETE FROM public.koshien_later_rounds WHERE event_id='manual-a';"
+        "DELETE FROM yoso_approval_private.revisions WHERE event_id='manual-a';COMMIT;")
+    a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                       text=True,bufsize=1)
+    b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+    try:
+        send(a,"SELECT pg_backend_pid();")
+        pid=int(line(a))
+        send(a,"BEGIN;"+AUTH+manual_call("manual-a"))
+        assert json.loads(line(a))["round_count"]==1
+        send(b,"SET application_name='yoso_manual_prepare_b';SET statement_timeout='15s';"+
+             AUTH+manual_call("manual-a"))
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='yoso_manual_prepare_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert b.poll() is None, "manual waiter exited early"
+            assert time.monotonic()<deadline,"manual prepare lock wait timed out"
+            time.sleep(.05)
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        output,errors=b.communicate(timeout=10)
+        assert b.returncode!=0 and "already prepared" in errors,errors
+    finally:
+        for proc in (a,b):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    assert sql("SELECT count(*) FROM public.koshien_later_rounds "
+               "WHERE event_id='manual-a';")=="1"
+    assert sql("SELECT count(*) FROM public.koshien_zombie_eligibility "
+               "WHERE event_id='manual-a';")=="2"
+    assert manual_revision("manual-a")==1
+    print("PASS: concurrent manual preparations serialize, second rejected, one revision")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
