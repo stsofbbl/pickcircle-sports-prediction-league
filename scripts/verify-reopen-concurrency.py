@@ -2543,6 +2543,184 @@ try:
     assert sql("SELECT to_regclass('auth.users') IS NULL;")=="t"
     print("PASS: real join/role/remove/account-delete RPC bodies, ACL and full rollback")
 
+
+    # The same exact production membership RPC bodies now run concurrently
+    # with a real shared approval vote. All state stays inside the disposable DB.
+    before_live_races=snapshot()
+    before_members=sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                       "FROM public.league_members t;")
+    before_players=sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                       "FROM public.players t;")
+    league_id="00000000-0000-0000-0000-000000000010"
+    owner_id="00000000-0000-0000-0000-000000000001"
+    member_id="00000000-0000-0000-0000-000000000002"
+    request_id="49000000-0000-4000-8000-000000000001"
+    new_uid="59000000-0000-4000-8000-000000000001"
+    member_player="87000000-0000-4000-8000-000000000002"
+    new_player="89000000-0000-4000-8000-000000000001"
+    sql((root / "supabase/prototypes/koshien-real-membership-rpcs.sql").read_text()
+        + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        + (root / "supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
+        + "INSERT INTO auth.users(id) VALUES('"+owner_id+"'),('"+member_id+"');"
+        + "INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES "
+          "('"+owner_id+"','"+owner_id+"','Owner'),"
+          "('"+member_id+"','"+member_id+"','Member');"
+        + "INSERT INTO public.players(id,league_id,profile_id,display_name) "
+          "VALUES('"+member_player+"','"+league_id+"','"+member_id+"','Member');"
+        + "INSERT INTO public.events(id,preset_type,league_id,status,rules,created_by)"
+          " VALUES('rpc-race','koshien','"+league_id+"','resultWait',"
+          "'{\"approvalPolicy\":\"unanimous\",\"resultFlow\":{\"status\":\"none\"}}',"
+          "'"+owner_id+"');"
+        + "SELECT yoso_approval_private.lock_revision('rpc-race');")
+    def create_live_submission():
+        sql("INSERT INTO yoso_approval_private.submissions("
+            "event_id,revision,policy,eligible_user_ids,required_count,"
+            "submitted_by,status,result_snapshot)"
+            "SELECT 'rpc-race',0,'unanimous',"
+            "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
+            "count(DISTINCT p.profile_id)::integer,'"+owner_id+"',"
+            "'submitted','{}'::jsonb "
+            "FROM public.players p JOIN public.league_members lm "
+            "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
+            "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
+            "AND lm.membership_status='active';")
+        return sql("SELECT id FROM yoso_approval_private.submissions "
+                   "WHERE event_id='rpc-race' AND status='submitted';")
+    def live_vote(sid):
+        return (AUTH+"SELECT public.approve_koshien_shared_results("
+                "'rpc-race','"+sid+"',0);")
+    def stale_previous(sid):
+        result=json.loads(sql(live_vote(sid)))
+        assert result["submission_status"]=="stale" and result["requires_resubmission"],result
+        assert sql("SELECT status FROM yoso_approval_private.submissions "
+                   "WHERE id='"+sid+"';")=="superseded"
+    def run_live_race(sid,writer_sql,label,expects_block=True):
+        a=b=None
+        try:
+            a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,text=True,bufsize=1)
+            send(a,"SELECT pg_backend_pid();")
+            first_pid=int(line(a))
+            send(a,"BEGIN;"+live_vote(sid))
+            vote=json.loads(line(a))
+            assert vote["submission_status"]=="submitted",vote
+            b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,text=True)
+            send(b,"SET application_name='yoso_real_rpc_writer';"
+                   "SET statement_timeout='15s';BEGIN;"+writer_sql+"COMMIT;")
+            deadline=time.monotonic()+8
+            while sql("SELECT count(*) FROM pg_stat_activity "
+                      "WHERE application_name='yoso_real_rpc_writer' "
+                      f"AND {first_pid}=ANY(pg_blocking_pids(pid));")!="1":
+                assert b.poll() is None,label+": writer exited before league-lock wait"
+                assert time.monotonic()<deadline,label+": writer did not wait"
+                time.sleep(.05)
+            send(a,"COMMIT;")
+            a.stdin.close()
+            a.wait(timeout=10)
+            assert a.returncode==0,a.stderr.read()
+            out,err=b.communicate(timeout=10)
+            assert b.returncode==0,label+": "+err
+            assert out.strip(),label+": no RPC/update result"
+            return out.strip().splitlines()[-1]
+        finally:
+            for proc in (a,b):
+                if proc is not None and proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+
+    try:
+        # Actual removal RPC: it first locks its member row, then its
+        # membership UPDATE trigger waits for the voting league lock.
+        sid=create_live_submission()
+        removed=json.loads(run_live_race(
+            sid,AUTH+"SELECT public.remove_club_member('"+league_id+"','"+member_id+"');",
+            "remove_club_member"))
+        assert removed["removed"] is True
+        stale_previous(sid)
+        assert sql("SELECT membership_status FROM public.league_members "
+                   "WHERE user_id='"+member_id+"';")=="removed"
+        sql("UPDATE public.league_members SET membership_status='active' "
+            "WHERE league_id='"+league_id+"' AND user_id='"+member_id+"';")
+        print("PASS: real remove_club_member waits on vote; removed member invalidates approval")
+
+        # A real join-review RPC inserts membership, followed by an actual
+        # player row creation in the same second transaction.
+        sql("INSERT INTO public.league_join_requests(id,league_id,requester_id)"
+            " VALUES('"+request_id+"','"+league_id+"','"+new_uid+"');")
+        sid=create_live_submission()
+        joined=run_live_race(
+            sid,AUTH+"SELECT count(*) FROM public.review_club_join_request('"+
+            request_id+"',true);"
+            "INSERT INTO public.players(id,league_id,profile_id,display_name)"
+            " VALUES('"+new_player+"','"+league_id+"','"+new_uid+"','New joiner');",
+            "review_club_join_request")
+        assert joined=="1",joined
+        assert sql("SELECT status FROM public.league_join_requests "
+                   "WHERE id='"+request_id+"';")=="approved"
+        stale_previous(sid)
+        sql("DELETE FROM public.players WHERE id='"+new_player+"';"
+            "DELETE FROM public.league_members WHERE user_id='"+new_uid+"';")
+        print("PASS: real join-review and new player wait on vote; old quorum is invalidated")
+
+        # The real owner admin-role RPC updates a membership role. This must
+        # wait, but an active member's voter identity does not change.
+        sid=create_live_submission()
+        changed=json.loads(run_live_race(
+            sid,AUTH+"SELECT public.manage_league_admin('"+league_id+"','"+
+            member_id+"',true);","manage_league_admin"))
+        assert changed["changed"] is True and changed["role"]=="co_owner",changed
+        still_pending=json.loads(sql(live_vote(sid)))
+        assert still_pending["submission_status"]=="submitted" and still_pending["approved_count"]==1
+        sql("UPDATE yoso_approval_private.submissions SET status='superseded' "
+            "WHERE id='"+sid+"';"
+            "UPDATE public.league_members SET role='member' WHERE user_id='"+member_id+"';")
+        print("PASS: real manage_league_admin waits without invalidating unchanged eligible roster")
+
+        # Actual auth.users AFTER DELETE trigger anonymizes the member,
+        # and its membership-status update must not race an approval vote.
+        sid=create_live_submission()
+        deleted=run_live_race(sid,
+            "DELETE FROM auth.users WHERE id='"+member_id+"' RETURNING id;",
+            "archive_deleted_account")
+        assert deleted==member_id,deleted
+        stale_previous(sid)
+        assert sql("SELECT membership_status FROM public.league_members "
+                   "WHERE user_id='"+member_id+"';")=="removed"
+        assert sql("SELECT display_name LIKE '退会済みメンバー-%' "
+                   "FROM public.players WHERE profile_id='"+member_id+"';")=="t"
+        print("PASS: real auth account-delete trigger waits for vote, anonymizes and invalidates")
+    finally:
+        # Revert every synthetic row and drop only throwaway fixture objects.
+        sql("DELETE FROM public.players WHERE id IN ('"+member_player+"','"+new_player+"');"
+            "DELETE FROM public.league_members WHERE user_id='"+new_uid+"';"
+            "UPDATE public.league_members SET role='member',membership_status='active' "
+            "WHERE league_id='"+league_id+"' AND user_id='"+member_id+"';"
+            "DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
+            "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
+            "DROP TABLE IF EXISTS yoso_approval_private.votes;"
+            "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
+            "DELETE FROM yoso_approval_private.revisions WHERE event_id='rpc-race';"
+            "DELETE FROM public.events WHERE id='rpc-race';"
+            "DROP TABLE IF EXISTS auth.users;"
+            "DROP TABLE IF EXISTS public.profiles;"
+            "DROP FUNCTION IF EXISTS public.archive_deleted_account();"
+            "DROP FUNCTION IF EXISTS public.prevent_owner_account_deletion();"
+            "DROP FUNCTION IF EXISTS public.review_club_join_request(uuid,boolean);"
+            "DROP FUNCTION IF EXISTS public.remove_club_member(uuid,uuid);"
+            "DROP FUNCTION IF EXISTS public.manage_league_admin(uuid,uuid,boolean);"
+            "DROP FUNCTION IF EXISTS public.is_league_owner(uuid);"
+            "DROP TABLE IF EXISTS public.league_join_requests;"
+            "DROP TABLE IF EXISTS public.league_admin_audit;"
+            "ALTER TABLE public.league_members DROP CONSTRAINT IF EXISTS league_members_pkey;")
+    assert snapshot()==before_live_races,"real RPC races must restore tracked event data"
+    assert sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+               "FROM public.league_members t;")==before_members
+    assert sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+               "FROM public.players t;")==before_players
+    assert sql("SELECT to_regprocedure('public.review_club_join_request(uuid,boolean)') IS NULL;")=="t"
+    print("PASS: real membership/auth RPC race suite fully restores isolated fixture")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
