@@ -2360,6 +2360,52 @@ try:
         assert sql("SELECT count(*) FROM yoso_approval_private.votes "
                    "WHERE submission_id='"+sid+"';")=="0"
         print("PASS: vote waits for preceding member INSERT and rejects stale voter set")
+
+        # A league member may already be active before the corresponding
+        # player/profile row is created. That second INSERT is a separate
+        # eligibility-changing path and must block on the same league lock.
+        clear_new_member()
+        sql(add_new_member(with_player=False))
+        sql("INSERT INTO yoso_approval_private.submissions("
+            "event_id,revision,policy,eligible_user_ids,required_count,"
+            "submitted_by,status,result_snapshot) "
+            "SELECT 'roster-race',0,'unanimous',"
+            "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
+            "count(DISTINCT p.profile_id)::integer,'"+admin_uid+"',"
+            "'submitted','{}'::jsonb "
+            "FROM public.players p JOIN public.league_members lm "
+            "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
+            "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
+            "AND lm.membership_status='active';")
+        sid=current_submission()
+        assert sql("SELECT required_count FROM yoso_approval_private.submissions "
+                   "WHERE id='"+sid+"';")=="2"
+        a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True,bufsize=1)
+        send(a,"SELECT pg_backend_pid();")
+        a_pid=int(line(a))
+        send(a,"SET application_name='yoso_player_vote_a';BEGIN;"
+               +vote_statement(sid,admin_uid))
+        data=json.loads(line(a))
+        assert data["submission_status"]=="submitted" and data["approved_count"]==1,data
+        b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True)
+        send(b,"SET application_name='yoso_player_insert_b';"
+               "SET statement_timeout='15s';BEGIN;"
+               "INSERT INTO public.players(id,league_id,profile_id) VALUES("
+               "'"+new_player+"','"+league_id+"','"+new_uid+"');COMMIT;")
+        await_roster_block("yoso_player_insert_b",a_pid)
+        assert sql("SELECT count(*) FROM public.players "
+                   "WHERE id='"+new_player+"';")=="0"
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        out,err=b.communicate(timeout=10)
+        assert b.returncode==0,err
+        stale=json.loads(sql(vote_statement(sid,other_uid)))
+        assert stale["submission_status"]=="stale" and stale["requires_resubmission"],stale
+        print("PASS: standalone player INSERT waits for vote and invalidates stale submission")
     finally:
         for proc in (a,b):
             if proc is not None and proc.poll() is None:
