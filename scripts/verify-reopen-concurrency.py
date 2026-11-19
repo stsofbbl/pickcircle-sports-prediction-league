@@ -1738,6 +1738,36 @@ try:
                "FROM pg_policies WHERE schemaname='public' AND tablename='results';")==prior_policies
     print("PASS: production SELECT, write and updated_by RLS policies (11) in rollback-only fixture")
 
+
+    # Replay production CHECK/FK definitions in a rollback-only transaction.
+    before=snapshot()
+    constraint_checks = """
+      SELECT yoso_approval_private.issue_write_permit('manual-b');
+      SELECT public.test_reject(
+        $invalid$UPDATE public.events SET status='invented' WHERE id='manual-b'$invalid$,
+        '23514');
+      SELECT public.test_reject(
+        $invalid$INSERT INTO public.matches(event_id,round_key,match_no,team1_id,status)
+        VALUES('manual-b','CATALOG',98,'81100000-0000-4000-8000-000000000001','invented')$invalid$,
+        '23514');
+      SELECT public.test_reject(
+        $invalid$INSERT INTO public.matches(event_id,round_key,match_no,team1_id,status)
+        VALUES('manual-b','CATALOG',99,'ffffffff-ffff-4fff-8fff-ffffffffffff','scheduled')$invalid$,
+        '23503');
+      INSERT INTO public.matches(event_id,round_key,match_no,team1_id,status)
+      VALUES('manual-b','CATALOG',100,
+        '81100000-0000-4000-8000-000000000001','scheduled');
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM public.matches
+         WHERE event_id='manual-b' AND round_key='CATALOG'),
+        'valid referenced scheduled match is accepted');
+    """
+    sql("BEGIN;\n"
+        + (root / "tests/sql/result-production-constraints-fixture.sql").read_text()
+        + constraint_checks + "\nROLLBACK;")
+    assert snapshot()==before, "production CHECK/FK fixture must completely roll back"
+    print("PASS: production CHECK/FK constraints (14) reject invalid status/teams, accept valid card")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
