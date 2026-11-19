@@ -1,6 +1,8 @@
 -- ISOLATED 2026-11-20 pg_get_functiondef snapshot; never apply to production.
 -- Reproduce real membership RPC bodies unchanged with minimal dependencies.
 ALTER TABLE public.league_members ADD CONSTRAINT league_members_pkey PRIMARY KEY (league_id,user_id);
+-- Real authenticated role has SELECT on membership; isolated fixture lacked it.
+GRANT SELECT ON public.league_members TO authenticated;
 CREATE TABLE public.league_join_requests(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), league_id uuid NOT NULL,
  requester_id uuid NOT NULL,status text NOT NULL DEFAULT 'pending',
