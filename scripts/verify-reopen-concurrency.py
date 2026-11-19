@@ -1801,11 +1801,11 @@ try:
         $q$SELECT public.get_koshien_shared_approval_state('manual-b')$q$,'42501');
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
       SELECT public.test_assert(
-        (SELECT (s->>'submission_status')='submitted'
-          AND (s->>'approved_count')::int=1 AND (s->>'required_count')::int=2
-          AND (s->>'current_user_voted')::boolean=false
-          AND (s->>'current_user_eligible')::boolean=true
-         FROM public.get_koshien_shared_approval_state('manual-b') s),
+        (SELECT (s.data->>'submission_status')='submitted'
+          AND (s.data->>'approved_count')::int=1 AND (s.data->>'required_count')::int=2
+          AND (s.data->>'current_user_voted')::boolean=false
+          AND (s.data->>'current_user_eligible')::boolean=true
+         FROM (SELECT public.get_koshien_shared_approval_state('manual-b') AS data) s),
         'member sees only shared approval metadata and own vote');
       SELECT public.test_reject(
         $q$SELECT count(*) FROM yoso_approval_private.submissions$q$,'42501');
@@ -1813,9 +1813,9 @@ try:
         $q$SELECT count(*) FROM yoso_approval_private.votes$q$,'42501');
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SELECT public.test_assert(
-        (SELECT (s->>'current_user_voted')::boolean=true
-          AND (s->>'approved_count')::int=1
-         FROM public.get_koshien_shared_approval_state('manual-b') s),
+        (SELECT (s.data->>'current_user_voted')::boolean=true
+          AND (s.data->>'approved_count')::int=1
+         FROM (SELECT public.get_koshien_shared_approval_state('manual-b') AS data) s),
         'owner sees his own vote');
       RESET ROLE;
       SELECT public.test_reject(
@@ -1836,9 +1836,9 @@ try:
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
       SET ROLE authenticated;
       SELECT public.test_assert(
-        (SELECT (s->>'submission_status')='none'
-          AND (s->>'approved_count')::int=0
-         FROM public.get_koshien_shared_approval_state('manual-b') s),
+        (SELECT (s.data->>'submission_status')='none'
+          AND (s.data->>'approved_count')::int=0
+         FROM (SELECT public.get_koshien_shared_approval_state('manual-b') AS data) s),
         'old submission never resurfaces after a revision advance');
       RESET ROLE;
     """
