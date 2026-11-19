@@ -9,6 +9,12 @@ CREATE TABLE yoso_approval_private.submissions (
  required_count integer NOT NULL CHECK (
    required_count >= 1 AND required_count <= cardinality(eligible_user_ids)
  ),
+ -- The server-owned record must not drift from the established approval policy.
+ CHECK (required_count = CASE policy
+    WHEN 'admin' THEN 1
+    WHEN 'half' THEN (cardinality(eligible_user_ids)+1)/2
+    WHEN 'unanimous' THEN cardinality(eligible_user_ids)
+    ELSE NULL END),
  submitted_by uuid NOT NULL,
  status text NOT NULL DEFAULT 'submitted'
    CHECK (status IN ('submitted','finalized','superseded')),

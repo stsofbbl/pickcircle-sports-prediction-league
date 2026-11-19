@@ -1782,7 +1782,7 @@ try:
       INSERT INTO yoso_approval_private.submissions(
         event_id,revision,policy,eligible_user_ids,required_count,
         submitted_by,status,result_snapshot
-      ) SELECT 'manual-b',r.revision,'half',ARRAY[
+      ) SELECT 'manual-b',r.revision,'unanimous',ARRAY[
         '00000000-0000-0000-0000-000000000001'::uuid,
         '00000000-0000-0000-0000-000000000002'::uuid
       ],2,'00000000-0000-0000-0000-000000000001','submitted','{}'::jsonb
@@ -1829,6 +1829,15 @@ try:
         ) SELECT 'manual-b',revision,'unanimous',
          ARRAY['00000000-0000-0000-0000-000000000001'::uuid],2,
          '00000000-0000-0000-0000-000000000001','{}'::jsonb
+        FROM yoso_approval_private.revisions WHERE event_id='manual-b'$q$,'23514');
+      SELECT public.test_reject(
+        $q$INSERT INTO yoso_approval_private.submissions(
+          event_id,revision,policy,eligible_user_ids,required_count,
+          submitted_by,result_snapshot
+        ) SELECT 'manual-b',revision,'admin',
+          ARRAY['00000000-0000-0000-0000-000000000001'::uuid,
+                '00000000-0000-0000-0000-000000000002'::uuid],2,
+          '00000000-0000-0000-0000-000000000001','{}'::jsonb
         FROM yoso_approval_private.revisions WHERE event_id='manual-b'$q$,'23514');
       SELECT yoso_approval_private.advance_revision('manual-b',
         (SELECT revision FROM yoso_approval_private.revisions
