@@ -1517,6 +1517,110 @@ try:
                "FROM yoso_approval_private.write_permits t;")==permits
     print("PASS: concurrent participant saves serialize, no result-write permit or revision")
 
+
+    # Direct best16 setup and its nested later-phase entry are the final manual
+    # get_state parents. Use the real production body and synthetic 16-card/4-player data.
+    sql("ALTER TABLE public.phase2_drafts "
+        "ADD COLUMN IF NOT EXISTS eligible_team_ids uuid[], "
+        "ADD COLUMN IF NOT EXISTS ranking_snapshot jsonb, "
+        "ADD COLUMN IF NOT EXISTS current_pick_no integer, "
+        "ADD COLUMN IF NOT EXISTS starts_at timestamptz;"
+        "ALTER TABLE public.koshien_revenge_eligibility "
+        "ADD COLUMN IF NOT EXISTS fallback_allowed boolean, "
+        "ADD COLUMN IF NOT EXISTS source_results_version bigint;")
+    sql((root / "supabase/prototypes/koshien-manual-best16-prepare.sql").read_text())
+
+    for i in range(1,5):
+        sql("INSERT INTO public.players(id,league_id,profile_id) VALUES("
+            "'28000000-0000-4000-8000-" + f"{i:012d}" +
+            "','00000000-0000-0000-0000-000000000010',"
+            "'29000000-0000-4000-8000-" + f"{i:012d}" + "');")
+
+    def seed_best16(event,prefix):
+        teams=[f"{prefix}-0000-4000-8000-{i:012d}" for i in range(1,17)]
+        sql("BEGIN;INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules) "
+            "VALUES('" + event + "','koshien','00000000-0000-0000-0000-000000000010',"
+            "'00000000-0000-0000-0000-000000000001','resultWait','{}');"
+            "INSERT INTO public.teams(id,event_id,name,start_round) VALUES " +
+            ",".join("('" + team + "','" + event + "','Best " + str(i) + "',1)"
+                     for i,team in enumerate(teams,1)) + ";"
+            "SELECT yoso_approval_private.issue_write_permit('" + event + "');"
+            "INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,status) VALUES "+
+            ",".join("('" + event + "','R3'," + str(i+1) + ",'" + teams[2*i] +
+                     "','" + teams[2*i+1] + "','scheduled')" for i in range(8)) + ";"
+            "INSERT INTO public.phase1_picks(event_id,player_id,team_id,captain) VALUES " +
+            ",".join("('" + event + "','28000000-0000-4000-8000-" + f"{p:012d}" +
+                     "','" + team + "',false)" for p in range(1,5) for team in teams[:8])+
+            ";COMMIT;")
+
+    seed_best16("best16-direct","85000000")
+    seed_best16("best16-wrapped","85100000")
+
+    def best16_call(event,wrapped=False):
+        return ("SELECT public." + ("prepare_koshien_later_phase" if wrapped else
+                 "prepare_koshien_best16_phases") + "('" + event + "'," +
+                ("'best16'," if wrapped else "") +
+                "'2099-08-20T00:00:00Z','2099-08-21T00:00:00Z'" +
+                (",'manual','manual');" if wrapped else ");"))
+
+    def best16_snapshot():
+        return prediction_snapshot() + [
+            sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                "FROM "+table+" t;")
+            for table in ["public.phase1_picks","public.koshien_revenge_eligibility"]]
+
+    before=best16_snapshot()
+    for prefix in ["SET ROLE anon;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';SET ROLE authenticated;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';SET ROLE authenticated;"]:
+        sql(prefix+"SELECT public.test_reject($q$"+best16_call("best16-direct")+"$q$,'42501');")
+    sql(AUTH+"SELECT public.test_reject($q$"+
+        "SELECT public.prepare_koshien_best16_phases('best16-direct',"
+        "'2099-08-21T00:00:00Z','2099-08-21T00:00:00Z');$q$,'P0001');")
+    assert best16_snapshot()==before
+    print("PASS: direct best16 auth and schedule guards preserve fixture state")
+
+    # Early round corruption must fail before creating any draft/round/eligibility.
+    sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('best16-direct');"
+        "UPDATE public.matches SET team2_id=NULL "
+        "WHERE event_id='best16-direct' AND round_key='R3' AND match_no=8;" +
+        AUTH+"SELECT public.test_reject($q$"+best16_call("best16-direct")+"$q$,'P0001');ROLLBACK;")
+    assert best16_snapshot()==before
+    print("PASS: insufficient best16 roster fully rolls back")
+
+    sql("BEGIN;"+AUTH+best16_call("best16-direct")+"ROLLBACK;")
+    assert best16_snapshot()==before
+    print("PASS: successful direct prepare rolls back every table when transaction aborts")
+
+    before_revision=sql("SELECT coalesce(revision,-1) FROM yoso_approval_private.revisions "
+                        "WHERE event_id='best16-direct';")
+    result=json.loads(sql(AUTH+best16_call("best16-direct")))
+    assert result["event_id"]=="best16-direct" and result["round_count"]==1
+    assert sql("SELECT revision FROM yoso_approval_private.revisions "
+               "WHERE event_id='best16-direct';")=="1"
+    assert sql("SELECT status||':'||cardinality(ordered_player_ids)||':'||"
+               "cardinality(eligible_team_ids) FROM public.phase2_drafts "
+               "WHERE event_id='best16-direct';")=="ready:4:16"
+    assert sql("SELECT count(*) FROM public.koshien_revenge_eligibility "
+               "WHERE event_id='best16-direct';")=="4"
+    before=best16_snapshot()
+    sql(AUTH+"SELECT public.test_reject($q$"+best16_call("best16-direct")+"$q$,'55000');")
+    assert best16_snapshot()==before
+    print("PASS: direct best16 four player drafts and eligibility, revision once, duplicate rejected")
+
+    result=json.loads(sql(AUTH+best16_call("best16-wrapped",True)))
+    assert result["event_id"]=="best16-wrapped" and result["round_count"]==1
+    assert sql("SELECT revision FROM yoso_approval_private.revisions "
+               "WHERE event_id='best16-wrapped';")=="1"
+    assert sql("SELECT status||':'||start_mode||':'||end_mode||':'||version "
+               "FROM public.koshien_later_rounds WHERE event_id='best16-wrapped';")=="ready:manual:manual:1"
+    assert sql("SELECT (starts_at='-infinity'::timestamptz AND "
+               "deadline_at='infinity'::timestamptz) FROM public.phase2_drafts "
+               "WHERE event_id='best16-wrapped';")=="t"
+    assert sql("SELECT count(*) FROM public.koshien_revenge_eligibility "
+               "WHERE event_id='best16-wrapped';")=="4"
+    print("PASS: best16 wrapper prepares roster and manual schedule with one revision")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
