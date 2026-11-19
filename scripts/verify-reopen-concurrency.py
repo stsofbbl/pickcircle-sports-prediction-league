@@ -2440,6 +2440,101 @@ try:
     assert snapshot()==before,"new-roster concurrency test must restore all tracked tables"
     print("PASS: roster race data and RPC cleanup restores original PostgreSQL fixture")
 
+
+    # Production function bodies (catalog snapshot) for real membership entry
+    # points. DDL and all mutations exist ONLY inside this isolated transaction.
+    live_rpc_before=snapshot()
+    live_rpc_checks="""
+      INSERT INTO auth.users(id) VALUES
+        ('00000000-0000-0000-0000-000000000001'),
+        ('00000000-0000-0000-0000-000000000002');
+      INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES
+        ('00000000-0000-0000-0000-000000000001',
+         '00000000-0000-0000-0000-000000000001','Owner'),
+        ('00000000-0000-0000-0000-000000000002',
+         '00000000-0000-0000-0000-000000000002','Member');
+      INSERT INTO public.players(id,league_id,profile_id,display_name)
+      VALUES('87000000-0000-4000-8000-000000000002',
+        '00000000-0000-0000-0000-000000000010',
+        '00000000-0000-0000-0000-000000000002','Member');
+      INSERT INTO public.league_join_requests(id,league_id,requester_id)
+      VALUES('49000000-0000-4000-8000-000000000001',
+        '00000000-0000-0000-0000-000000000010',
+        '59000000-0000-4000-8000-000000000001');
+      SET ROLE anon;
+      SELECT public.test_reject(
+       $q$SELECT count(*) FROM public.review_club_join_request(
+        '49000000-0000-4000-8000-000000000001',true)$q$,'42501');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+       $q$SELECT count(*) FROM public.review_club_join_request(
+        '49000000-0000-4000-8000-000000000001',true)$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SELECT public.test_assert(
+       (SELECT request_status='approved' FROM public.review_club_join_request(
+          '49000000-0000-4000-8000-000000000001',true))
+        AND (SELECT role='member' AND membership_status='active'
+         FROM public.league_members WHERE user_id='59000000-0000-4000-8000-000000000001'),
+       'real join-review RPC creates active membership through league trigger');
+      SELECT public.test_reject(
+       $q$SELECT count(*) FROM public.review_club_join_request(
+        '49000000-0000-4000-8000-000000000001',true)$q$,'P0002');
+      SELECT public.test_assert(
+        (SELECT (x->>'changed')::boolean
+         FROM (SELECT public.manage_league_admin(
+          '00000000-0000-0000-0000-000000000010',
+          '00000000-0000-0000-0000-000000000002',true) x) t)
+        AND (SELECT role='co_owner' FROM public.league_members
+          WHERE user_id='00000000-0000-0000-0000-000000000002'),
+       'real admin-role RPC updates membership and player');
+      SELECT public.test_assert(
+        (SELECT (x->>'changed')::boolean
+         FROM (SELECT public.manage_league_admin(
+          '00000000-0000-0000-0000-000000000010',
+          '00000000-0000-0000-0000-000000000002',false) x) t),
+        'real admin-role RPC restores regular member');
+      SELECT public.test_assert(
+        (SELECT (x->>'removed')::boolean
+         FROM (SELECT public.remove_club_member(
+          '00000000-0000-0000-0000-000000000010',
+          '00000000-0000-0000-0000-000000000002') x) t)
+        AND (SELECT membership_status='removed' FROM public.league_members
+          WHERE user_id='00000000-0000-0000-0000-000000000002'),
+       'real member-removal RPC disables member while preserving history');
+      SELECT public.test_reject(
+       $q$SELECT public.remove_club_member(
+          '00000000-0000-0000-0000-000000000010',
+          '00000000-0000-0000-0000-000000000001')$q$,'42501');
+      SELECT public.test_reject(
+       $q$DELETE FROM auth.users
+          WHERE id='00000000-0000-0000-0000-000000000001'$q$,'23503');
+      RESET ROLE;
+      UPDATE public.league_members SET membership_status='active'
+       WHERE user_id='00000000-0000-0000-0000-000000000002';
+      DELETE FROM auth.users WHERE id='00000000-0000-0000-0000-000000000002';
+      SELECT public.test_assert(
+       (SELECT membership_status='removed' FROM public.league_members
+         WHERE user_id='00000000-0000-0000-0000-000000000002')
+       AND (SELECT display_name LIKE '退会済みメンバー-%' AND auth_user_id IS NULL
+         FROM public.profiles WHERE id='00000000-0000-0000-0000-000000000002')
+       AND (SELECT display_name LIKE '退会済みメンバー-%'
+         FROM public.players WHERE profile_id='00000000-0000-0000-0000-000000000002'),
+       'real account-delete triggers anonymize and remove membership');
+      SELECT public.test_assert(
+        (SELECT count(*)=2 FROM public.league_admin_audit),
+        'admin-role changes retain two audit entries');
+    """
+    sql("BEGIN;\n"
+        + (root / "supabase/prototypes/koshien-real-membership-rpcs.sql").read_text()
+        + live_rpc_checks + "\nROLLBACK;")
+    assert snapshot()==live_rpc_before, "real membership RPC fixture must fully roll back"
+    assert sql("SELECT to_regprocedure('public.review_club_join_request(uuid,boolean)') IS NULL;")=="t"
+    assert sql("SELECT to_regprocedure('public.remove_club_member(uuid,uuid)') IS NULL;")=="t"
+    assert sql("SELECT to_regclass('auth.users') IS NULL;")=="t"
+    print("PASS: real join/role/remove/account-delete RPC bodies, ACL and full rollback")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
