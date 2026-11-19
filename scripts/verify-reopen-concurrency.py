@@ -2825,6 +2825,170 @@ try:
     assert sql("SELECT to_regprocedure('public.delete_club(uuid,text)') IS NULL;")=="t"
     print("PASS: real delete_club cascading event and private approval data; full rollback")
 
+
+    # Three real two-session races against production delete_club:
+    # (a) vote first, (b) delete first and COMMIT, (c) delete first and ROLLBACK.
+    # All DDL below lives exclusively in the disposable CI database.
+    before_delete_races=snapshot()
+    club_id="00000000-0000-0000-0000-000000000030"
+    club_event="cascade-concurrent"
+    club_owner="00000000-0000-0000-0000-000000000001"
+    club_member="00000000-0000-0000-0000-000000000002"
+    club_name="Concurrent deletion test"
+    sql("ALTER TABLE public.leagues ADD COLUMN created_by uuid;"
+        "ALTER TABLE public.events ADD CONSTRAINT ci_event_club_fk "
+        "FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;"
+        "ALTER TABLE public.league_members ADD CONSTRAINT ci_member_club_fk "
+        "FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;"
+        "ALTER TABLE public.players ADD CONSTRAINT ci_player_club_fk "
+        "FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;"
+        +(root/"supabase/prototypes/koshien-real-delete-club.sql").read_text()
+        +(root/"supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        +(root/"supabase/prototypes/koshien-shared-approval-approve.sql").read_text())
+
+    def seed_delete_race():
+        sql("INSERT INTO public.leagues(id,name,created_by) "
+            "VALUES('"+club_id+"','"+club_name+"','"+club_owner+"');"
+            "INSERT INTO public.league_members(league_id,user_id,role,membership_status) "
+            "VALUES('"+club_id+"','"+club_owner+"','owner','active'),"
+            "('"+club_id+"','"+club_member+"','member','active');"
+            "INSERT INTO public.players(id,league_id,profile_id,display_name) VALUES"
+            "('88000000-0000-4000-8000-000000000031','"+club_id+"','"+club_owner+"','Owner'),"
+            "('88000000-0000-4000-8000-000000000032','"+club_id+"','"+club_member+"','Member');"
+            "INSERT INTO public.events(id,preset_type,league_id,status,created_by,rules) "
+            "VALUES('"+club_event+"','koshien','"+club_id+"','resultWait','"+club_owner+"',"
+            "'{\"approvalPolicy\":\"unanimous\",\"resultFlow\":{\"status\":\"none\"}}');"
+            "SELECT yoso_approval_private.lock_revision('"+club_event+"');"
+            "INSERT INTO yoso_approval_private.submissions("
+            "event_id,revision,policy,eligible_user_ids,required_count,submitted_by,result_snapshot)"
+            "VALUES('"+club_event+"',0,'unanimous',"
+            "ARRAY['"+club_owner+"'::uuid,'"+club_member+"'::uuid],2,"
+            "'"+club_owner+"','{}'::jsonb);")
+        return sql("SELECT id FROM yoso_approval_private.submissions "
+                   "WHERE event_id='"+club_event+"' AND status='submitted';")
+
+    def vote_delete_race(sid):
+        return (AUTH+"SELECT public.approve_koshien_shared_results('"+
+                club_event+"','"+sid+"',0);")
+
+    def delete_sql():
+        return ("DO $do$ BEGIN PERFORM public.delete_club('"+
+                club_id+"','"+club_name+"'); END $do$;")
+
+    def check_deleted():
+        assert sql("SELECT count(*) FROM public.leagues WHERE id='"+club_id+"';")=="0"
+        assert sql("SELECT count(*) FROM public.events WHERE id='"+club_event+"';")=="0"
+        assert sql("SELECT count(*) FROM public.league_members WHERE league_id='"+club_id+"';")=="0"
+        assert sql("SELECT count(*) FROM public.players WHERE league_id='"+club_id+"';")=="0"
+        assert sql("SELECT count(*) FROM yoso_approval_private.revisions WHERE event_id='"+club_event+"';")=="0"
+        assert sql("SELECT count(*) FROM yoso_approval_private.submissions WHERE event_id='"+club_event+"';")=="0"
+        assert sql("SELECT count(*) FROM yoso_approval_private.votes;")=="0"
+
+    def check_blocked(waiting_name,holder_pid,proc):
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='"+waiting_name+"' "
+                  f"AND {holder_pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert proc.poll() is None,waiting_name+": exited before waiting"
+            assert time.monotonic()<deadline,waiting_name+": no lock wait"
+            time.sleep(.05)
+
+    def new_psql():
+        return subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,text=True,bufsize=1)
+    def end_psql(*procs):
+        for proc in procs:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    a=b=None
+    try:
+        sid=seed_delete_race()
+        a=new_psql()
+        send(a,"SELECT pg_backend_pid();")
+        a_pid=int(line(a))
+        send(a,"BEGIN;"+vote_delete_race(sid))
+        result=json.loads(line(a))
+        assert result["submission_status"]=="submitted" and result["approved_count"]==1,result
+        b=new_psql()
+        send(b,"SET application_name='yoso_delete_waits_vote';"
+               "SET statement_timeout='15s';BEGIN;"+AUTH+delete_sql()+"SELECT 'deleted';COMMIT;")
+        check_blocked("yoso_delete_waits_vote",a_pid,b)
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        output,errors=b.communicate(timeout=10)
+        assert b.returncode==0 and output.strip().splitlines()[-1]=="deleted",errors
+        check_deleted()
+        print("PASS: real delete_club waits behind vote and cascades every approval record")
+        end_psql(a,b)
+        a=b=None
+
+        sid=seed_delete_race()
+        b=new_psql()
+        send(b,"SELECT pg_backend_pid();")
+        b_pid=int(line(b))
+        send(b,"BEGIN;"+AUTH+delete_sql()+"SELECT 'delete-prepared';")
+        assert line(b)=="delete-prepared"
+        a=new_psql()
+        send(a,"SET application_name='yoso_vote_waits_delete';"
+               "SET statement_timeout='15s';BEGIN;"+vote_delete_race(sid)+"COMMIT;")
+        check_blocked("yoso_vote_waits_delete",b_pid,a)
+        send(b,"COMMIT;")
+        b.stdin.close()
+        b.wait(timeout=10)
+        assert b.returncode==0,b.stderr.read()
+        output,errors=a.communicate(timeout=10)
+        assert a.returncode!=0 and "approval league not found" in errors,errors
+        check_deleted()
+        print("PASS: vote waits for committed club deletion then rejects without mutation")
+        end_psql(a,b)
+        a=b=None
+
+        sid=seed_delete_race()
+        b=new_psql()
+        send(b,"SELECT pg_backend_pid();")
+        b_pid=int(line(b))
+        send(b,"BEGIN;"+AUTH+delete_sql()+"SELECT 'delete-prepared';")
+        assert line(b)=="delete-prepared"
+        a=new_psql()
+        send(a,"SET application_name='yoso_vote_after_delete_rollback';"
+               "SET statement_timeout='15s';BEGIN;"+vote_delete_race(sid)+"COMMIT;")
+        check_blocked("yoso_vote_after_delete_rollback",b_pid,a)
+        send(b,"ROLLBACK;")
+        b.stdin.close()
+        b.wait(timeout=10)
+        assert b.returncode==0,b.stderr.read()
+        output,errors=a.communicate(timeout=10)
+        assert a.returncode==0,errors
+        vote=json.loads(output.strip().splitlines()[-1])
+        assert vote["submission_status"]=="submitted" and vote["approved_count"]==1,vote
+        assert sql("SELECT status FROM public.events WHERE id='"+club_event+"';")=="resultWait"
+        assert sql("SELECT count(*) FROM yoso_approval_private.votes;")=="1"
+        sql(AUTH+"SELECT public.delete_club('"+club_id+"','"+club_name+"');")
+        check_deleted()
+        print("PASS: rolled-back club deletion preserves vote and permits subsequent clean deletion")
+    finally:
+        end_psql(a,b)
+        # The failed checks above never touch production; forcibly clean up
+        # only this test's fixed IDs and scoped schema in disposable DB.
+        sql("DELETE FROM public.leagues WHERE id='"+club_id+"';"
+            "DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
+            "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
+            "DROP TABLE IF EXISTS yoso_approval_private.votes;"
+            "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
+            "DROP FUNCTION IF EXISTS public.delete_club(uuid,text);"
+            "DROP FUNCTION IF EXISTS public.is_league_owner(uuid);"
+            "ALTER TABLE public.events DROP CONSTRAINT IF EXISTS ci_event_club_fk;"
+            "ALTER TABLE public.league_members DROP CONSTRAINT IF EXISTS ci_member_club_fk;"
+            "ALTER TABLE public.players DROP CONSTRAINT IF EXISTS ci_player_club_fk;"
+            "ALTER TABLE public.leagues DROP COLUMN created_by;")
+    assert snapshot()==before_delete_races
+    assert sql("SELECT to_regprocedure('public.delete_club(uuid,text)') IS NULL;")=="t"
+    print("PASS: club deletion concurrent race fixture restored with no external changes")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
