@@ -1768,6 +1768,89 @@ try:
     assert snapshot()==before, "production CHECK/FK fixture must completely roll back"
     print("PASS: production CHECK/FK constraints (14) reject invalid status/teams, accept valid card")
 
+
+    # Prototype private shared-approval schema and READ-ONLY member RPC.
+    # The entire schema, rows and RPC disappear on rollback.
+    before=snapshot()
+    tables_before=sql("SELECT count(*) FROM information_schema.tables "
+                      "WHERE table_schema='yoso_approval_private';")
+    read_checks="""
+      SELECT public.test_assert(
+        (SELECT revision>=0 FROM yoso_approval_private.revisions
+         WHERE event_id='manual-b'),
+        'existing revision for shared state');
+      INSERT INTO yoso_approval_private.submissions(
+        event_id,revision,policy,eligible_user_ids,required_count,
+        submitted_by,status,result_snapshot
+      ) SELECT 'manual-b',r.revision,'half',ARRAY[
+        '00000000-0000-0000-0000-000000000001'::uuid,
+        '00000000-0000-0000-0000-000000000002'::uuid
+      ],2,'00000000-0000-0000-0000-000000000001','submitted','{}'::jsonb
+      FROM yoso_approval_private.revisions r WHERE r.event_id='manual-b';
+      INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
+      SELECT id,'00000000-0000-0000-0000-000000000001'
+      FROM yoso_approval_private.submissions WHERE event_id='manual-b';
+
+      SET ROLE anon;
+      SELECT public.test_reject(
+        $q$SELECT public.get_koshien_shared_approval_state('manual-b')$q$,'42501');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.get_koshien_shared_approval_state('manual-b')$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SELECT public.test_assert(
+        (SELECT (s->>'submission_status')='submitted'
+          AND (s->>'approved_count')::int=1 AND (s->>'required_count')::int=2
+          AND (s->>'current_user_voted')::boolean=false
+          AND (s->>'current_user_eligible')::boolean=true
+         FROM public.get_koshien_shared_approval_state('manual-b') s),
+        'member sees only shared approval metadata and own vote');
+      SELECT public.test_reject(
+        $q$SELECT count(*) FROM yoso_approval_private.submissions$q$,'42501');
+      SELECT public.test_reject(
+        $q$SELECT count(*) FROM yoso_approval_private.votes$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SELECT public.test_assert(
+        (SELECT (s->>'current_user_voted')::boolean=true
+          AND (s->>'approved_count')::int=1
+         FROM public.get_koshien_shared_approval_state('manual-b') s),
+        'owner sees his own vote');
+      RESET ROLE;
+      SELECT public.test_reject(
+        $q$INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
+        SELECT id,'00000000-0000-0000-0000-000000000001'
+        FROM yoso_approval_private.submissions WHERE event_id='manual-b'$q$,'23505');
+      SELECT public.test_reject(
+        $q$INSERT INTO yoso_approval_private.submissions(
+         event_id,revision,policy,eligible_user_ids,required_count,
+         submitted_by,result_snapshot
+        ) SELECT 'manual-b',revision,'unanimous',
+         ARRAY['00000000-0000-0000-0000-000000000001'::uuid],2,
+         '00000000-0000-0000-0000-000000000001','{}'::jsonb
+        FROM yoso_approval_private.revisions WHERE event_id='manual-b'$q$,'23514');
+      SELECT yoso_approval_private.advance_revision('manual-b',
+        (SELECT revision FROM yoso_approval_private.revisions
+         WHERE event_id='manual-b'));
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (s->>'submission_status')='none'
+          AND (s->>'approved_count')::int=0
+         FROM public.get_koshien_shared_approval_state('manual-b') s),
+        'old submission never resurfaces after a revision advance');
+      RESET ROLE;
+    """
+    sql("BEGIN;\n"
+        + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        + read_checks + "\nROLLBACK;")
+    assert snapshot()==before, "shared approval read test must not alter existing event or revision"
+    assert sql("SELECT count(*) FROM information_schema.tables "
+               "WHERE table_schema='yoso_approval_private';")==tables_before
+    assert sql("SELECT to_regprocedure('public.get_koshien_shared_approval_state(text)') IS NULL;")=="t"
+    print("PASS: private submissions/votes, authenticated read, duplicate protection, stale revision, rollback")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
