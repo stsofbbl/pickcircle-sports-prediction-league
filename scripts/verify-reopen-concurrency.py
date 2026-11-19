@@ -2228,8 +2228,13 @@ try:
     new_uid="39000000-0000-4000-8000-000000000001"
     new_player="89000000-0000-4000-8000-000000000001"
     admin_uid="00000000-0000-0000-0000-000000000001"
-    other_uid="29000000-0000-4000-8000-000000000001"
+    other_uid="00000000-0000-0000-0000-000000000002"
     league_id="00000000-0000-0000-0000-000000000010"
+    # The four 290... participant profiles from the earlier test were
+    # deliberately rolled back. Seed an actual second active player here.
+    sql("INSERT INTO public.players(id,league_id,profile_id) VALUES("
+        "'87000000-0000-4000-8000-000000000002',"
+        "'"+league_id+"','"+other_uid+"');")
     setup_shared=(
         "BEGIN;"
         +(root/"supabase/prototypes/koshien-shared-approval-read.sql").read_text()
@@ -2253,7 +2258,7 @@ try:
         "COMMIT;")
     sql(setup_shared)
     assert sql("SELECT required_count FROM yoso_approval_private.submissions "
-               "WHERE event_id='roster-race' AND status='submitted';")=="5"
+               "WHERE event_id='roster-race' AND status='submitted';")=="2"
     def current_submission():
         return sql("SELECT id FROM yoso_approval_private.submissions "
                    "WHERE event_id='roster-race' AND status='submitted';")
@@ -2338,7 +2343,8 @@ try:
         send(b,"SELECT pg_backend_pid();")
         b_pid=int(line(b))
         send(b,"SET application_name='yoso_insert_first_b';BEGIN;"
-               +add_new_member())
+               +add_new_member()+"SELECT 'member-inserted';")
+        assert line(b)=="member-inserted", "membership writer failed to take the first lock"
         send(a,"SET application_name='yoso_vote_after_insert_a';"
                "SET statement_timeout='15s';BEGIN;"
                +vote_statement(sid,admin_uid)+"COMMIT;")
@@ -2360,6 +2366,8 @@ try:
                 proc.kill()
                 proc.wait()
         clear_new_member()
+        sql("DELETE FROM public.players "
+            "WHERE id='87000000-0000-4000-8000-000000000002';")
         sql("DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
