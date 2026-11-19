@@ -1385,6 +1385,138 @@ try:
                "WHERE event_id='manual-a' AND phase_key='zombie';")=="locked:2"
     print("PASS: admin manual open/lock versioned, duplicate rejected, no child-to-event inversion")
 
+
+    # Participant writers originally locked phase rows, wrote picks, then called
+    # get_state -> refresh(event). Reuse their exact production bodies with
+    # event-first serialization, not admin result-write permissions.
+    sql("ALTER TABLE public.players ADD COLUMN IF NOT EXISTS profile_id uuid;"
+        "UPDATE public.players SET profile_id='00000000-0000-0000-0000-000000000001' "
+        "WHERE id='20000000-0000-0000-0000-000000000001';"
+        "CREATE TABLE public.koshien_later_prediction_requests("
+        "event_id text,player_id uuid,phase_key text,request_id uuid,payload jsonb,"
+        "UNIQUE(event_id,player_id,phase_key,request_id));"
+        "CREATE TABLE public.koshien_revenge_eligibility("
+        "event_id text,player_id uuid,eligible boolean,allowed_team_ids uuid[]);"
+        "ALTER TABLE public.revenge_picks ADD COLUMN IF NOT EXISTS request_id uuid;"
+        "ALTER TABLE public.revenge_picks ADD COLUMN IF NOT EXISTS payload jsonb;"
+        "ALTER TABLE public.revenge_picks ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();"
+        "CREATE UNIQUE INDEX test_revenge_unique ON public.revenge_picks(event_id,player_id);"
+        "ALTER TABLE public.zombie_predictions ADD COLUMN IF NOT EXISTS player_id uuid;"
+        "ALTER TABLE public.zombie_predictions ADD COLUMN IF NOT EXISTS request_id uuid;"
+        "ALTER TABLE public.zombie_predictions ADD COLUMN IF NOT EXISTS payload jsonb;"
+        "ALTER TABLE public.zombie_predictions ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();"
+        "CREATE UNIQUE INDEX test_zombie_unique ON public.zombie_predictions(event_id,player_id);"
+        "ALTER TABLE public.final_score_predictions ADD COLUMN IF NOT EXISTS champion_team_id uuid;"
+        "ALTER TABLE public.final_score_predictions ADD COLUMN IF NOT EXISTS runner_up_team_id uuid;"
+        "ALTER TABLE public.final_score_predictions ADD COLUMN IF NOT EXISTS request_id uuid;"
+        "ALTER TABLE public.final_score_predictions ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();"
+        "CREATE UNIQUE INDEX test_phase3_unique ON public.final_score_predictions(event_id,player_id);")
+    for path in ["supabase/prototypes/save-koshien-zombie-prediction.sql",
+                 "supabase/prototypes/save-koshien-revenge-pick.sql",
+                 "supabase/prototypes/save-koshien-phase3-prediction.sql"]:
+        sql((root / path).read_text())
+
+    # Round setup uses the already-tested real admin phase status RPC.
+    sql(AUTH+"SELECT public.set_koshien_later_phase_status('manual-b','zombie','open');")
+    sql(AUTH+"SELECT public.set_koshien_later_phase_status('manual-b','phase3','open');")
+    sql("INSERT INTO public.koshien_later_rounds(event_id,phase_key,status,"
+        "opens_at,deadline_at,start_mode,end_mode,version) VALUES"
+        "('manual-b','revenge','open',now()-interval '1 day',now()+interval '1 day',"
+        "'manual','manual',1);"
+        "INSERT INTO public.koshien_revenge_eligibility("
+        "event_id,player_id,eligible,allowed_team_ids) VALUES "
+        "('manual-b','20000000-0000-0000-0000-000000000001',true,"
+        "ARRAY['81100000-0000-4000-8000-000000000001'::uuid]);")
+
+    def prediction_snapshot():
+        return manual_snapshot() + [
+            sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                "FROM "+table+" t;")
+            for table in ["public.koshien_later_prediction_requests",
+                          "public.revenge_picks","public.zombie_predictions",
+                          "public.final_score_predictions","public.koshien_revenge_eligibility"]]
+
+    def prediction_call(phase,request="1",target="1",version=None):
+        round_key = "zombie" if phase=="zombie" else ("revenge" if phase=="revenge" else "phase3")
+        if version is None:
+            version=int(sql("SELECT version FROM public.koshien_later_rounds "
+                            "WHERE event_id='manual-b' AND phase_key='"+round_key+"';"))
+        request_id = "91000000-0000-4000-8000-" + f"{int(request):012d}"
+        if phase=="phase3":
+            return ("SELECT public.save_koshien_phase3_prediction('manual-b',2,1,3,1," +
+                    str(version) + ",'" + request_id + "');")
+        function = "save_koshien_zombie_prediction" if phase=="zombie" else "save_koshien_revenge_pick"
+        team_id = "81100000-0000-4000-8000-" + f"{int(target):012d}"
+        return ("SELECT public." + function + "('manual-b','" + team_id + "'," +
+                str(version) + ",'" + request_id + "');")
+
+    before=prediction_snapshot()
+    for phase in ("zombie","revenge","phase3"):
+        for prefix in ["SET ROLE anon;",
+                       "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';SET ROLE authenticated;"]:
+            sql(prefix+"SELECT public.test_reject($q$"+prediction_call(phase)+"$q$,'42501');")
+    assert prediction_snapshot()==before
+    permits=sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+                "FROM yoso_approval_private.write_permits t;")
+    rev=manual_revision("manual-b")
+    for phase,req in [("zombie","11"),("revenge","12"),("phase3","13")]:
+        result=json.loads(sql(AUTH+prediction_call(phase,request=req)))
+        assert result["event_id"]=="manual-b"
+        assert json.loads(sql(AUTH+prediction_call(phase,request=req)))==result
+    assert manual_revision("manual-b")==rev
+    assert sql("SELECT count(*) FROM public.koshien_later_prediction_requests "
+               "WHERE event_id='manual-b';")=="3"
+    assert sql("SELECT count(*) FROM public.zombie_predictions "
+               "WHERE event_id='manual-b';")=="1"
+    assert sql("SELECT count(*) FROM public.revenge_picks "
+               "WHERE event_id='manual-b';")=="1"
+    assert sql("SELECT count(*) FROM public.final_score_predictions "
+               "WHERE event_id='manual-b';")=="1"
+    before=prediction_snapshot()
+    sql(AUTH+"SELECT public.test_reject($q$"+
+        prediction_call("zombie",request="11",target="2")+"$q$,'23505');")
+    sql(AUTH+"SELECT public.test_reject($q$"+
+        prediction_call("zombie",request="14",version=0)+"$q$,'40001');")
+    assert prediction_snapshot()==before
+    print("PASS: three real participant saves, replay idempotence, ACL/conflict, no approval revision")
+
+    # Actual concurrent participant writes serialize on event instead of taking
+    # a phase/child lock before read-triggered refresh.
+    a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE,text=True,bufsize=1)
+    b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+    try:
+        send(a,"SELECT pg_backend_pid();")
+        pid=int(line(a))
+        send(a,"BEGIN;"+AUTH+prediction_call("zombie",request="15",target="2"))
+        assert json.loads(line(a))["event_id"]=="manual-b"
+        send(b,"SET application_name='yoso_prediction_b';SET statement_timeout='15s';"+
+             AUTH+prediction_call("zombie",request="16",target="3"))
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='yoso_prediction_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert b.poll() is None
+            assert time.monotonic()<deadline,"participant writer did not wait on event"
+            time.sleep(.05)
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        output,errors=b.communicate(timeout=10)
+        assert b.returncode==0,errors
+        assert json.loads(output)["event_id"]=="manual-b"
+    finally:
+        for proc in (a,b):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    assert sql("SELECT team_id::text FROM public.zombie_predictions "
+               "WHERE event_id='manual-b';")=="81100000-0000-4000-8000-000000000003"
+    assert manual_revision("manual-b")==rev
+    assert sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "
+               "FROM yoso_approval_private.write_permits t;")==permits
+    print("PASS: concurrent participant saves serialize, no result-write permit or revision")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
