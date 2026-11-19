@@ -1304,7 +1304,8 @@ try:
 
     # The direct phase3 preparer and two admin round controls have the same
     # state-refresh descendant; all must own event/revision before child locks.
-    sql("ALTER TABLE public.koshien_later_rounds ADD COLUMN IF NOT EXISTS team_a_id uuid;"
+    sql("ALTER TABLE public.koshien_later_rounds ADD COLUMN IF NOT EXISTS id uuid DEFAULT gen_random_uuid();"
+        "ALTER TABLE public.koshien_later_rounds ADD COLUMN IF NOT EXISTS team_a_id uuid;"
         "ALTER TABLE public.koshien_later_rounds ADD COLUMN IF NOT EXISTS team_b_id uuid;")
     for event,prefix in [("manual-a","81000000"),("manual-b","81100000")]:
         sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('" + event + "');"
