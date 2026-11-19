@@ -1771,7 +1771,11 @@ try:
 
     # Production-like shared league row: approvals lock FOR SHARE and every
     # membership/player DML trigger locks FOR UPDATE (including fresh INSERT).
-    sql("CREATE TABLE public.leagues(id uuid PRIMARY KEY, name text DEFAULT 'fixture');"
+    sql("ALTER TABLE public.players ADD COLUMN IF NOT EXISTS display_name text;"
+        "ALTER TABLE public.players ADD COLUMN IF NOT EXISTS is_admin boolean DEFAULT false;"
+        "ALTER TABLE public.players ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();"
+        "ALTER TABLE public.league_members ADD COLUMN IF NOT EXISTS joined_at timestamptz DEFAULT now();"
+        "CREATE TABLE public.leagues(id uuid PRIMARY KEY, name text DEFAULT 'fixture');"
         "INSERT INTO public.leagues(id) VALUES "
         "('00000000-0000-0000-0000-000000000010'),"
         "('00000000-0000-0000-0000-000000000020');")
@@ -2393,6 +2397,14 @@ try:
         assert sql("UPDATE public.leagues SET name='renamed-during-vote' "
                    "WHERE id='"+league_id+"' RETURNING name;")=="renamed-during-vote"
         sql("UPDATE public.leagues SET name='fixture' WHERE id='"+league_id+"';")
+        # Profile display and membership timestamps do not affect voting
+        # eligibility. These updates must not wait for the league roster lock.
+        assert sql("UPDATE public.players SET display_name='cosmetic-edit' "
+                   "WHERE id='87000000-0000-4000-8000-000000000002' "
+                   "RETURNING display_name;")=="cosmetic-edit"
+        assert sql("UPDATE public.league_members SET joined_at=now() "
+                   "WHERE league_id='"+league_id+"' AND user_id='"+other_uid+"' "
+                   "RETURNING role;")=="member"
         b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE,text=True)
         send(b,"SET application_name='yoso_player_insert_b';"

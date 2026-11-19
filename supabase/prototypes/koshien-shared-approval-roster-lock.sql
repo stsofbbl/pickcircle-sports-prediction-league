@@ -1,6 +1,7 @@
 -- PROTOTYPE ONLY. NOT A PRODUCTION MIGRATION.
--- All membership/player eligibility writes must acquire a common league row
--- lock to serialize INSERT (including absent rows), UPDATE and DELETE with
+-- Only eligibility/identity-changing writes acquire a common league lock:
+-- all INSERT/DELETE and UPDATE of membership role/status or player identity.
+-- This serializes absent rows and relevant UPDATE/DELETE with
 -- Koshien submissions and votes. Install all triggers and RPC changes together.
 CREATE FUNCTION yoso_approval_private.lock_shared_approval_roster_write()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''
@@ -37,8 +38,8 @@ $function$;
 REVOKE ALL ON FUNCTION yoso_approval_private.lock_shared_approval_roster_write()
  FROM PUBLIC,anon,authenticated,service_role;
 CREATE TRIGGER yoso_lock_shared_approval_membership
- BEFORE INSERT OR UPDATE OR DELETE ON public.league_members
+ BEFORE INSERT OR DELETE OR UPDATE OF league_id,user_id,role,membership_status ON public.league_members
  FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.lock_shared_approval_roster_write();
 CREATE TRIGGER yoso_lock_shared_approval_player
- BEFORE INSERT OR UPDATE OR DELETE ON public.players
+ BEFORE INSERT OR DELETE OR UPDATE OF id,league_id,profile_id ON public.players
  FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.lock_shared_approval_roster_write();
