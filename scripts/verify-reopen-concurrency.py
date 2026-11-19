@@ -2220,6 +2220,155 @@ try:
     assert manual_revision("manual-b")==rev
     print("PASS: existing member removal waits on shared league roster lock")
 
+
+    # Serialize a NEW member + player INSERT, not only updates to existing
+    # rows. A pending vote must not finalize from a stale eligible-user list.
+    before=snapshot()
+    event_id="roster-race"
+    new_uid="39000000-0000-4000-8000-000000000001"
+    new_player="89000000-0000-4000-8000-000000000001"
+    admin_uid="00000000-0000-0000-0000-000000000001"
+    other_uid="29000000-0000-4000-8000-000000000001"
+    league_id="00000000-0000-0000-0000-000000000010"
+    setup_shared=(
+        "BEGIN;"
+        +(root/"supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        +(root/"supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
+        +"INSERT INTO public.events(id,preset_type,league_id,status,rules,created_by)"
+         "VALUES('roster-race','koshien','"+league_id+"','resultWait',"
+         "'{\"approvalPolicy\":\"unanimous\",\"resultFlow\":{\"status\":\"none\"}}',"
+         "'"+admin_uid+"');"
+         "SELECT yoso_approval_private.lock_revision('roster-race');"
+         "INSERT INTO yoso_approval_private.submissions("
+         "event_id,revision,policy,eligible_user_ids,required_count,"
+         "submitted_by,status,result_snapshot)"
+         "SELECT 'roster-race',0,'unanimous',"
+         "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
+         "count(DISTINCT p.profile_id)::integer,'"+admin_uid+"',"
+         "'submitted','{}'::jsonb "
+         "FROM public.players p JOIN public.league_members lm "
+         "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
+         "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
+         "AND lm.membership_status='active';"
+        "COMMIT;")
+    sql(setup_shared)
+    assert sql("SELECT required_count FROM yoso_approval_private.submissions "
+               "WHERE event_id='roster-race' AND status='submitted';")=="5"
+    def current_submission():
+        return sql("SELECT id FROM yoso_approval_private.submissions "
+                   "WHERE event_id='roster-race' AND status='submitted';")
+    def vote_statement(submission_id,uid):
+        return ("SET request.jwt.claim.sub='"+uid+"';SET ROLE authenticated;"
+                "SELECT public.approve_koshien_shared_results("
+                "'roster-race','"+submission_id+"',0);")
+    def add_new_member(with_player=True):
+        x=("INSERT INTO public.league_members(league_id,user_id,role,membership_status)"
+           " VALUES('"+league_id+"','"+new_uid+"','member','active');")
+        if with_player:
+            x+=("INSERT INTO public.players(id,league_id,profile_id)"
+                " VALUES('"+new_player+"','"+league_id+"','"+new_uid+"');")
+        return x
+    def clear_new_member():
+        sql("DELETE FROM public.players WHERE id='"+new_player+"';"
+            "DELETE FROM public.league_members WHERE league_id='"+league_id+"' "
+            "AND user_id='"+new_uid+"';")
+    def await_roster_block(waiter_app,holder_pid):
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='"+waiter_app+"' "
+                  f"AND {holder_pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert time.monotonic()<deadline, "new roster writer did not wait"
+            time.sleep(.05)
+
+    a=b=None
+    try:
+        # Vote goes first. INSERT of a member that did not exist when the
+        # original submission was created must block until vote commits.
+        sid=current_submission()
+        a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True,bufsize=1)
+        send(a,"SELECT pg_backend_pid();")
+        a_pid=int(line(a))
+        send(a,"SET application_name='yoso_insert_vote_a';BEGIN;"
+               +vote_statement(sid,admin_uid))
+        status=json.loads(line(a))
+        assert status["submission_status"]=="submitted" and status["approved_count"]==1,status
+        b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True)
+        send(b,"SET application_name='yoso_insert_member_b';"
+               "SET statement_timeout='15s';BEGIN;"
+               +add_new_member()+"COMMIT;")
+        await_roster_block("yoso_insert_member_b",a_pid)
+        assert sql("SELECT count(*) FROM public.league_members "
+                   "WHERE user_id='"+new_uid+"';")=="0"
+        send(a,"COMMIT;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        out,err=b.communicate(timeout=10)
+        assert b.returncode==0,err
+        assert sql("SELECT count(*) FROM public.players "
+                   "WHERE profile_id='"+new_uid+"';")=="1"
+        stale=json.loads(sql(vote_statement(sid,other_uid)))
+        assert stale["submission_status"]=="stale" and stale["requires_resubmission"],stale
+        assert sql("SELECT count(*) FROM yoso_approval_private.votes "
+                   "WHERE submission_id='"+sid+"';")=="1"
+        print("PASS: new member+player INSERT waits for committed vote; roster drift supersedes approval")
+        clear_new_member()
+
+        # Reverse order: a new member is already being inserted (uncommitted)
+        # when the vote begins. The vote must wait for that transaction, then
+        # read the newly committed roster and reject the old eligible set.
+        sql("INSERT INTO yoso_approval_private.submissions("
+            "event_id,revision,policy,eligible_user_ids,required_count,"
+            "submitted_by,status,result_snapshot) "
+            "SELECT 'roster-race',0,'unanimous',"
+            "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
+            "count(DISTINCT p.profile_id)::integer,'"+admin_uid+"',"
+            "'submitted','{}'::jsonb "
+            "FROM public.players p JOIN public.league_members lm "
+            "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
+            "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
+            "AND lm.membership_status='active';")
+        sid=current_submission()
+        a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True)
+        b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True,bufsize=1)
+        send(b,"SELECT pg_backend_pid();")
+        b_pid=int(line(b))
+        send(b,"SET application_name='yoso_insert_first_b';BEGIN;"
+               +add_new_member())
+        send(a,"SET application_name='yoso_vote_after_insert_a';"
+               "SET statement_timeout='15s';BEGIN;"
+               +vote_statement(sid,admin_uid)+"COMMIT;")
+        await_roster_block("yoso_vote_after_insert_a",b_pid)
+        send(b,"COMMIT;")
+        b.stdin.close()
+        b.wait(timeout=10)
+        assert b.returncode==0,b.stderr.read()
+        out,err=a.communicate(timeout=10)
+        assert a.returncode==0,err
+        stale=json.loads(out.strip().splitlines()[-1])
+        assert stale["submission_status"]=="stale" and stale["requires_resubmission"],stale
+        assert sql("SELECT count(*) FROM yoso_approval_private.votes "
+                   "WHERE submission_id='"+sid+"';")=="0"
+        print("PASS: vote waits for preceding member INSERT and rejects stale voter set")
+    finally:
+        for proc in (a,b):
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        clear_new_member()
+        sql("DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
+            "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
+            "DROP TABLE IF EXISTS yoso_approval_private.votes;"
+            "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
+            "DELETE FROM yoso_approval_private.revisions WHERE event_id='roster-race';"
+            "DELETE FROM public.events WHERE id='roster-race';")
+    assert snapshot()==before,"new-roster concurrency test must restore all tracked tables"
+    print("PASS: roster race data and RPC cleanup restores original PostgreSQL fixture")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
