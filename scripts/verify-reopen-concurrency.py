@@ -1860,6 +1860,128 @@ try:
     assert sql("SELECT to_regprocedure('public.get_koshien_shared_approval_state(text)') IS NULL;")=="t"
     print("PASS: private submissions/votes, authenticated read, duplicate protection, stale revision, rollback")
 
+
+    # Submission prototype: synthetic complete 48-match Koshien with four
+    # active members (but five league player rows). No finalize or real votes.
+    before=snapshot()
+    submit_checks="""
+      INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules,prediction_deadline)
+      VALUES('submit-probe','koshien','00000000-0000-0000-0000-000000000010',
+        '00000000-0000-0000-0000-000000000001','resultWait',
+        '{"approvalPolicy":"unanimous","resultFlow":{"status":"none"}}',
+        now()-interval '1 day');
+      INSERT INTO public.league_members(league_id,user_id,role,membership_status)
+      SELECT '00000000-0000-0000-0000-000000000010',
+        ('29000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,'member','active'
+      FROM generate_series(1,3) i;
+      INSERT INTO public.teams(id,event_id,name,start_round) VALUES
+        ('86000000-0000-4000-8000-000000000001','submit-probe','Seed A',1),
+        ('86000000-0000-4000-8000-000000000002','submit-probe','Seed B',1);
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      -- Seed synthetic historical cards without firing progression side effects.
+      -- Re-enable every user trigger before invoking the actual submission RPC.
+      ALTER TABLE public.matches DISABLE TRIGGER USER;
+      INSERT INTO public.matches(
+         event_id,round_key,match_no,team1_id,team2_id,
+         team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at
+      )
+      SELECT 'submit-probe',rr.round_key,i,
+        '86000000-0000-4000-8000-000000000001',
+        '86000000-0000-4000-8000-000000000002',3,1,
+        '86000000-0000-4000-8000-000000000001',
+        '86000000-0000-4000-8000-000000000002','completed',now()
+      FROM (VALUES ('R1',17),('R2',16),('R3',8),('QF',4),('SF',2),('F',1))
+       rr(round_key,n),LATERAL generate_series(1,rr.n) i;
+      ALTER TABLE public.matches ENABLE TRIGGER USER;
+      INSERT INTO public.results(event_id,payload,updated_by)
+      SELECT 'submit-probe',jsonb_build_object('matches',jsonb_agg(
+          jsonb_build_object('round',m.round_key,'match_no',m.match_no)
+          ORDER BY m.round_key,m.match_no)),
+          '00000000-0000-0000-0000-000000000001'
+      FROM public.matches m WHERE m.event_id='submit-probe';
+      INSERT INTO public.scores(event_id,player_id)
+      VALUES ('submit-probe','20000000-0000-0000-0000-000000000001'),
+             ('submit-probe','28000000-0000-4000-8000-000000000001'),
+             ('submit-probe','28000000-0000-4000-8000-000000000002'),
+             ('submit-probe','28000000-0000-4000-8000-000000000003');
+      SELECT public.test_assert(
+        (SELECT count(*)=48 FROM public.matches WHERE event_id='submit-probe')
+        AND (SELECT count(*)=4 FROM public.scores WHERE event_id='submit-probe'),
+        '48 valid cards and four active scorers seeded');
+      SET ROLE anon;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'42501');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',123)$q$,'40001');
+      SELECT public.test_assert(
+        (SELECT (x->>'required_count')::int=4
+            AND (x->>'approved_count')::int=1
+            AND (x->>'idempotent')::boolean=false
+         FROM (SELECT public.submit_koshien_shared_results('submit-probe',0) AS x) s),
+        'authorized owner creates unanimous submission with four eligible');
+      SELECT public.test_assert(
+        (SELECT (x->>'idempotent')::boolean=true
+         FROM (SELECT public.submit_koshien_shared_results('submit-probe',0) AS x) s),
+        'repeated submission is idempotent');
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe')
+        AND (SELECT count(*)=1 FROM yoso_approval_private.votes),
+        'repeat creates no duplicate submission or votes');
+      RESET ROLE;
+      SELECT public.test_assert(
+        (SELECT count(*)=4 FROM
+          yoso_approval_private.submissions s,
+          LATERAL jsonb_array_elements(s.result_snapshot->'scores') v
+         WHERE s.event_id='submit-probe')
+        AND (SELECT count(*)=48 FROM
+          yoso_approval_private.submissions s,
+          LATERAL jsonb_array_elements(s.result_snapshot->'matches') v
+         WHERE s.event_id='submit-probe'),
+        'private audit snapshot contains four scores and 48 cards');
+      SAVEPOINT invalid_snapshot;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      UPDATE public.matches SET status='scheduled' WHERE
+        event_id='submit-probe' AND round_key='F' AND match_no=1;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT invalid_snapshot;
+      SELECT yoso_approval_private.advance_revision('submit-probe',0);
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'idempotent')::boolean=false
+         FROM (SELECT public.submit_koshien_shared_results('submit-probe',1) AS x) s),
+        'new revision creates new submission and one fresh vote');
+      RESET ROLE;
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe' AND status='superseded')
+        AND (SELECT count(*)=1 FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe' AND status='submitted')
+        AND (SELECT count(*)=2 FROM yoso_approval_private.votes),
+        'old submission superseded and votes never reused');
+    """
+    sql("BEGIN;\n"
+        + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        + (root / "supabase/prototypes/koshien-shared-approval-submit.sql").read_text()
+        + submit_checks + "\nROLLBACK;")
+    assert snapshot()==before, "submit prototype must not mutate existing fixture"
+    assert sql("SELECT to_regprocedure('public.submit_koshien_shared_results(text,bigint)') IS NULL;")=="t"
+    print("PASS: shared result submission ACL, 48-card readiness, idempotent replay, stale invalidation, rollback")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
