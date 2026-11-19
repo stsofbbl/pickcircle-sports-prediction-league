@@ -2644,24 +2644,40 @@ try:
             "WHERE league_id='"+league_id+"' AND user_id='"+member_id+"';")
         print("PASS: real remove_club_member waits on vote; removed member invalidates approval")
 
-        # A real join-review RPC inserts membership, followed by an actual
-        # player row creation in the same second transaction.
-        sql("INSERT INTO public.league_join_requests(id,league_id,requester_id)"
+        # Actual join approval grants membership only. Player registration
+        # is a separate authenticated action BY THE NEW USER, not by the owner.
+        sql("INSERT INTO auth.users(id) VALUES('"+new_uid+"');"
+            "INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES("
+            "'"+new_uid+"','"+new_uid+"','New joiner');"
+            "INSERT INTO public.league_join_requests(id,league_id,requester_id)"
             " VALUES('"+request_id+"','"+league_id+"','"+new_uid+"');")
         sid=create_live_submission()
         joined=run_live_race(
             sid,AUTH+"SELECT count(*) FROM public.review_club_join_request('"+
-            request_id+"',true);"
-            "INSERT INTO public.players(id,league_id,profile_id,display_name)"
-            " VALUES('"+new_player+"','"+league_id+"','"+new_uid+"','New joiner');",
-            "review_club_join_request")
+            request_id+"',true);","review_club_join_request")
         assert joined=="1",joined
         assert sql("SELECT status FROM public.league_join_requests "
                    "WHERE id='"+request_id+"';")=="approved"
+        # Without a player identity, the new member is not yet a voter.
+        unchanged=json.loads(sql(live_vote(sid)))
+        assert unchanged["submission_status"]=="submitted" and unchanged["approved_count"]==1
+        sql("SET request.jwt.claim.sub='"+owner_id+"';SET ROLE authenticated;"
+            "SELECT public.test_reject($q$INSERT INTO public.players("
+            "id,league_id,profile_id,display_name) VALUES("
+            "'"+new_player+"','"+league_id+"','"+new_uid+"','Impersonated')"
+            "$q$,'42501');")
+        # Self-registration now contends on the same league row, and changes
+        # the eligible roster only AFTER the approval lock is released.
+        registered=run_live_race(
+            sid,"SET request.jwt.claim.sub='"+new_uid+"';SET ROLE authenticated;"
+            "INSERT INTO public.players(id,league_id,profile_id,display_name)"
+            " VALUES('"+new_player+"','"+league_id+"','"+new_uid+"','New joiner');"
+            "SELECT 'registered';","new_member_self_register")
+        assert registered=="registered",registered
         stale_previous(sid)
         sql("DELETE FROM public.players WHERE id='"+new_player+"';"
             "DELETE FROM public.league_members WHERE user_id='"+new_uid+"';")
-        print("PASS: real join-review and new player wait on vote; old quorum is invalidated")
+        print("PASS: real join approval waits; only new member may add player; stale quorum rejected")
 
         # The real owner admin-role RPC updates a membership role. This must
         # wait, but an active member's voter identity does not change.
@@ -2712,6 +2728,9 @@ try:
             "DROP FUNCTION IF EXISTS public.is_league_owner(uuid);"
             "DROP TABLE IF EXISTS public.league_join_requests;"
             "DROP TABLE IF EXISTS public.league_admin_audit;"
+            "DROP POLICY IF EXISTS yoso_fixture_players_insert_self ON public.players;"
+            "ALTER TABLE public.players DISABLE ROW LEVEL SECURITY;"
+            "REVOKE INSERT ON public.players FROM authenticated;"
             "ALTER TABLE public.league_members DROP CONSTRAINT IF EXISTS league_members_pkey;")
     assert snapshot()==before_live_races,"real RPC races must restore tracked event data"
     assert sql("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]') "

@@ -14,6 +14,13 @@ CREATE TABLE public.profiles(
  id uuid PRIMARY KEY,auth_user_id uuid,display_name text NOT NULL DEFAULT '',
  deleted_at timestamptz,updated_at timestamptz DEFAULT now());
 CREATE TABLE auth.users(id uuid PRIMARY KEY);
+-- Mirror live players_insert_self_member RLS: only the applicant can create
+-- their own player identity after a manager has approved membership.
+GRANT INSERT ON public.players TO authenticated;
+ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
+CREATE POLICY yoso_fixture_players_insert_self ON public.players
+ FOR INSERT TO authenticated
+ WITH CHECK (profile_id = auth.uid() AND public.is_league_member(league_id));
 CREATE OR REPLACE FUNCTION public.is_league_owner(p_league_id uuid)
  RETURNS boolean
  LANGUAGE sql

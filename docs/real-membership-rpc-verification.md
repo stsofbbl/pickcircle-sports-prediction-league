@@ -7,3 +7,5 @@
 主要な未検証事項：2接続で実関数を同時呼出した際のデッドロック・待機/再試行、複数リーグの一括退会、実本番全RLS/FK/ACL、負荷。トリガーは会員・プレイヤーの承認資格が変わるDMLにだけ限定。PR #47 Draft、本番migration/merge/deployなし。
 
 2026-11-20 追加：実RPCを隔離DBへトランザクション外ロードし、shared approval voteとの本物の2接続競合を検証。会員削除RPC、加入承認RPC＋players登録、管理者ロール変更RPC、auth.users退会AFTER DELETEトリガーを別セッションで実行する。いずれも投票のリーグ行ロックが保持されている間はDMLが待機し、コミット後に進む。対象者集合が変わる削除・加入・退会では旧提出を無効化し、単なる権限昇格では対象者集合が変わらず承認を維持する。private・audit・イベント・membership・playersの全後片付けと原状比較を実施。デッドロックの未発生はテストした組合せに限る。
+
+2026-11-20修正：加入承認RPCの実装はmembership追加だけで、players追加は本人の操作。隔離fixtureに本番`players_insert_self_member`相当のINSERT RLSを組み込み、管理者の代理INSERTを42501で拒否。承認後は本人の別セッションでplayersをINSERTする競合を検証する。加入直後でプレイヤー未作成の時点では、投票資格人数を増やさない。
