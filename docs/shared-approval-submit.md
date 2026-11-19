@@ -5,3 +5,5 @@
 同じ提出者の同revision再送は同じ提出扱い。結果改訂でrevisionが進んだ後は旧提出をsupersededにし、旧票を再利用せず新規提出とする。異なる提出者による重複開始は拒否。
 隔離DBでは合成48試合をseed（setup中だけ自動進行trigger停止、RPC検証前に再有効化）し、anon/他リーグ/非管理者拒否、stale revision、正常提出、同再送、4人と48件の監査snapshot、不完全な結果JSON・不足得点の拒否、revision更新→新提出、巻戻しを検証。
 **未実装・本番適用禁止**：承認/投票/確定RPC、再開とsubmission無効化の完全結合、現在の全得点・予想・メンバー変更の同時競合、全本番制約/RLS/trigger・UI。admin=1票もこの段階では自動確定せず、次のapprove/finalizeに委ねる。PR Draft維持、本番DB/得点/デプロイは無変更。復旧は試作commit revert。
+
+2026-11-19追補：admin=1票は提出と同一transaction内で確定、同じ提出のネットワーク再送はfinalizedをidempotentで返す。half=2/4票、unanimous=4/4票を隔離検証。提出済み再送の承認数は実際の票数を返す。

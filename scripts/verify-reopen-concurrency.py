@@ -1950,6 +1950,56 @@ try:
          FROM (SELECT public.get_koshien_shared_approval_state('submit-probe') AS x) t),
         'reopen revision invalidates previous finalized approval');
       RESET ROLE;
+      -- admin=1 must finalize in the same transaction, including its retry.
+      UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}','"admin"'::jsonb,true)
+      WHERE id='submit-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+       (SELECT (x->>'submission_status')='finalized'
+         AND (x->>'approved_count')::int=1
+         AND (x->>'required_count')::int=1
+         AND (x->>'idempotent')::boolean=false
+        FROM (SELECT public.submit_koshien_shared_results('submit-probe',2) x) r),
+       'admin policy first vote finalizes atomically');
+      SELECT public.test_assert(
+       (SELECT (x->>'idempotent')::boolean=true
+        FROM (SELECT public.submit_koshien_shared_results('submit-probe',2) x) r),
+       'repeated finalized admin submission returns idempotently');
+      RESET ROLE;
+      SELECT public.test_assert(
+       (SELECT status='finalized' FROM public.events WHERE id='submit-probe')
+       AND (SELECT count(*)=1 FROM yoso_approval_private.submissions
+        WHERE event_id='submit-probe' AND revision=2 AND status='finalized'),
+       'admin submit created one final approval');
+      -- half=ceil(4/2)=2: initial admin submit remains pending until another member.
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.reopen_koshien_results('submit-probe');
+      RESET ROLE;
+      UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}','"half"'::jsonb,true)
+      WHERE id='submit-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+       (SELECT (x->>'submission_status')='submitted'
+         AND (x->>'required_count')::int=2
+         AND (x->>'approved_count')::int=1
+        FROM (SELECT public.submit_koshien_shared_results('submit-probe',3) x) r),
+       'half policy awaits second voter');
+      RESET ROLE;
+      SELECT set_config('yoso.fixture_submission_id',(
+        SELECT id::text FROM yoso_approval_private.submissions
+        WHERE event_id='submit-probe' AND revision=3),false);
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+       (SELECT (x->>'submission_status')='finalized'
+         AND (x->>'approved_count')::int=2
+        FROM (SELECT public.approve_koshien_shared_results(
+           'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,3) x) r),
+       'half policy finalizes at two of four members');
+      RESET ROLE;
     """
 
     submit_checks="""

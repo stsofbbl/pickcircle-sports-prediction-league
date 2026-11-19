@@ -16,6 +16,9 @@ DECLARE
  v_cards jsonb;
  v_scored integer;
  v_existing yoso_approval_private.submissions;
+ v_finalized yoso_approval_private.submissions;
+ v_approved bigint;
+ v_auto_result jsonb;
  v_id uuid;
 BEGIN
  IF v_uid IS NULL THEN
@@ -26,17 +29,33 @@ BEGIN
  IF v_event.id IS NULL OR NOT public.is_league_admin(v_event.league_id) THEN
    RAISE EXCEPTION 'active league admin permission is required' USING ERRCODE='42501';
  END IF;
- IF v_event.status<>'resultWait'
-    OR v_event.rules->'resultFlow'->>'status'='finalized' THEN
-   RAISE EXCEPTION 'result submission requires resultWait' USING ERRCODE='55000';
- END IF;
- IF v_event.prediction_deadline IS NULL
-    OR v_event.prediction_deadline > pg_catalog.clock_timestamp() THEN
-   RAISE EXCEPTION 'prediction deadline has not passed' USING ERRCODE='55000';
- END IF;
  v_revision := yoso_approval_private.lock_revision(p_event_id);
  IF p_expected_revision IS NULL OR p_expected_revision<>v_revision THEN
    RAISE EXCEPTION 'stale approval revision' USING ERRCODE='40001';
+ END IF;
+ -- Network retries after finalized admin submission must not issue new votes.
+ IF v_event.status='finalized'
+   AND v_event.rules->'resultFlow'->>'status'='finalized' THEN
+   SELECT s.* INTO v_finalized FROM yoso_approval_private.submissions s
+   WHERE s.event_id=p_event_id AND s.revision=v_revision
+     AND s.status='finalized' AND s.submitted_by=v_uid
+   ORDER BY s.submitted_at DESC LIMIT 1;
+   IF v_finalized.id IS NOT NULL THEN
+     SELECT count(*) INTO v_approved FROM yoso_approval_private.votes
+     WHERE submission_id=v_finalized.id;
+     RETURN jsonb_build_object('submission_id',v_finalized.id,
+       'revision',v_revision,'submission_status','finalized',
+       'required_count',v_finalized.required_count,
+       'approved_count',v_approved,'idempotent',true);
+   END IF;
+ END IF;
+ IF v_event.status<>'resultWait'
+   OR v_event.rules->'resultFlow'->>'status'='finalized' THEN
+   RAISE EXCEPTION 'result submission requires resultWait' USING ERRCODE='55000';
+ END IF;
+ IF v_event.prediction_deadline IS NULL
+   OR v_event.prediction_deadline > pg_catalog.clock_timestamp() THEN
+   RAISE EXCEPTION 'prediction deadline has not passed' USING ERRCODE='55000';
  END IF;
  v_policy := v_event.rules->>'approvalPolicy';
  IF v_policy NOT IN ('admin','half','unanimous') OR v_policy IS NULL THEN
@@ -111,9 +130,11 @@ BEGIN
       AND v_existing.policy=v_policy
       AND v_existing.eligible_user_ids=v_eligible
       AND v_existing.required_count=v_required THEN
+     SELECT count(*) INTO v_approved FROM yoso_approval_private.votes
+     WHERE submission_id=v_existing.id;
      RETURN jsonb_build_object('submission_id',v_existing.id,
        'revision',v_revision,'submission_status','submitted',
-       'required_count',v_required,'approved_count',1,'idempotent',true);
+       'required_count',v_required,'approved_count',v_approved,'idempotent',true);
    END IF;
    RAISE EXCEPTION 'another active submission already exists' USING ERRCODE='55000';
  END IF;
@@ -125,6 +146,11 @@ BEGIN
   'scores',v_scores)) RETURNING id INTO v_id;
  INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
  VALUES(v_id,v_uid);
+ -- Preserve legacy admin=1 policy: submission and finalization are atomic.
+ IF v_required=1 THEN
+   v_auto_result := public.approve_koshien_shared_results(p_event_id,v_id,v_revision);
+   RETURN v_auto_result || jsonb_build_object('idempotent',false);
+ END IF;
  RETURN jsonb_build_object('submission_id',v_id,'revision',v_revision,
    'submission_status','submitted','required_count',v_required,
    'approved_count',1,'idempotent',false);
