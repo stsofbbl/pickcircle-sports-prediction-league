@@ -2474,10 +2474,12 @@ try:
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SELECT public.test_assert(
        (SELECT request_status='approved' FROM public.review_club_join_request(
-          '49000000-0000-4000-8000-000000000001',true))
-        AND (SELECT role='member' AND membership_status='active'
+          '49000000-0000-4000-8000-000000000001',true)),
+       'real join-review RPC returns approved');
+      SELECT public.test_assert(
+       (SELECT role='member' AND membership_status='active'
          FROM public.league_members WHERE user_id='59000000-0000-4000-8000-000000000001'),
-       'real join-review RPC creates active membership through league trigger');
+       'join-review persists active membership through league trigger');
       SELECT public.test_reject(
        $q$SELECT count(*) FROM public.review_club_join_request(
         '49000000-0000-4000-8000-000000000001',true)$q$,'P0002');
@@ -2485,10 +2487,12 @@ try:
         (SELECT (x->>'changed')::boolean
          FROM (SELECT public.manage_league_admin(
           '00000000-0000-0000-0000-000000000010',
-          '00000000-0000-0000-0000-000000000002',true) x) t)
-        AND (SELECT role='co_owner' FROM public.league_members
+          '00000000-0000-0000-0000-000000000002',true) x) t),
+       'real admin-role RPC reports change');
+      SELECT public.test_assert(
+        (SELECT role='co_owner' FROM public.league_members
           WHERE user_id='00000000-0000-0000-0000-000000000002'),
-       'real admin-role RPC updates membership and player');
+       'admin-role RPC persists role change');
       SELECT public.test_assert(
         (SELECT (x->>'changed')::boolean
          FROM (SELECT public.manage_league_admin(
@@ -2499,18 +2503,22 @@ try:
         (SELECT (x->>'removed')::boolean
          FROM (SELECT public.remove_club_member(
           '00000000-0000-0000-0000-000000000010',
-          '00000000-0000-0000-0000-000000000002') x) t)
-        AND (SELECT membership_status='removed' FROM public.league_members
+          '00000000-0000-0000-0000-000000000002') x) t),
+       'real member-removal RPC reports removal');
+      SELECT public.test_assert(
+        (SELECT membership_status='removed' FROM public.league_members
           WHERE user_id='00000000-0000-0000-0000-000000000002'),
-       'real member-removal RPC disables member while preserving history');
+       'member-removal persists removed status without deleting history');
       SELECT public.test_reject(
        $q$SELECT public.remove_club_member(
           '00000000-0000-0000-0000-000000000010',
           '00000000-0000-0000-0000-000000000001')$q$,'42501');
+      -- Actual account deletion is run by the auth service/owner, not by an
+      -- ordinary authenticated SQL role without DELETE permission.
+      RESET ROLE;
       SELECT public.test_reject(
        $q$DELETE FROM auth.users
           WHERE id='00000000-0000-0000-0000-000000000001'$q$,'23503');
-      RESET ROLE;
       UPDATE public.league_members SET membership_status='active'
        WHERE user_id='00000000-0000-0000-0000-000000000002';
       DELETE FROM auth.users WHERE id='00000000-0000-0000-0000-000000000002';
