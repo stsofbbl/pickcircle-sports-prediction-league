@@ -2135,6 +2135,85 @@ try:
     assert sql("SELECT to_regprocedure('public.approve_koshien_shared_results(text,uuid,bigint)') IS NULL;")=="t"
     print("PASS: result submission, quorum voting, guarded finalize, reopen and rollback")
 
+
+    # Real two-session race: approval must hold existing membership row SHARE
+    # locks until commit/rollback, so removing a voter cannot sneak in between
+    # active-roster verification and finalization. New member INSERTs are NOT
+    # protected by these row locks; their RPC integration remains a release gate.
+    race_member = "00000000-0000-0000-0000-000000000002"
+    before_member_status=sql("SELECT membership_status FROM public.league_members "
+                             "WHERE league_id='00000000-0000-0000-0000-000000000010' "
+                             f"AND user_id='{race_member}';")
+    assert before_member_status=="active"
+    rev=manual_revision("manual-b")
+    a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE,text=True,bufsize=1)
+    b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE,text=True)
+    try:
+        send(a,"SELECT pg_backend_pid();")
+        pid=int(line(a))
+        setup=("BEGIN;"
+          +(root/"supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+          +(root/"supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
+          +"INSERT INTO public.players(id,league_id,profile_id) "
+           "VALUES('87000000-0000-4000-8000-000000000002',"
+           "'00000000-0000-0000-0000-000000000010',"
+           "'00000000-0000-0000-0000-000000000002');"
+           "UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}',"
+           "'\"unanimous\"'::jsonb,true) WHERE id='manual-b';"
+          +"INSERT INTO yoso_approval_private.submissions("
+           "event_id,revision,policy,eligible_user_ids,required_count,"
+           "submitted_by,status,result_snapshot) VALUES('manual-b',"+
+           str(rev)+",'unanimous',ARRAY["
+           "'00000000-0000-0000-0000-000000000001'::uuid,"
+           "'00000000-0000-0000-0000-000000000002'::uuid],2,"
+           "'00000000-0000-0000-0000-000000000001','submitted','{}'::jsonb);"
+           "INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id) "
+           "SELECT id,'00000000-0000-0000-0000-000000000001' "
+           "FROM yoso_approval_private.submissions WHERE event_id='manual-b';"
+           "DO $block$ BEGIN PERFORM set_config('yoso.test_sub_id',"
+           "(SELECT id::text FROM yoso_approval_private.submissions "
+           "WHERE event_id='manual-b'),true); END $block$;"
+           +AUTH+
+           "SELECT public.approve_koshien_shared_results('manual-b',"
+           "current_setting('yoso.test_sub_id')::uuid,"+str(rev)+");")
+        send(a,setup)
+        response=json.loads(line(a))
+        assert response["submission_status"]=="submitted" and response["approved_count"]==1,response
+        send(b,"SET application_name='yoso_membership_vote_b';"
+             "SET statement_timeout='15s';"
+             "UPDATE public.league_members SET membership_status='inactive' "
+             "WHERE league_id='00000000-0000-0000-0000-000000000010' "
+             f"AND user_id='{race_member}';")
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='yoso_membership_vote_b' "
+                  f"AND {pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert b.poll() is None,"member update escaped vote lock"
+            assert time.monotonic()<deadline,"member update not waiting on voter"
+            time.sleep(.05)
+        send(a,"ROLLBACK;")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode==0,a.stderr.read()
+        out,err=b.communicate(timeout=10)
+        assert b.returncode==0,err
+        assert sql("SELECT membership_status FROM public.league_members "
+                   "WHERE league_id='00000000-0000-0000-0000-000000000010' "
+                   f"AND user_id='{race_member}';")=="inactive"
+    finally:
+        for proc in (a,b):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        sql("UPDATE public.league_members SET membership_status='active' "
+            "WHERE league_id='00000000-0000-0000-0000-000000000010' "
+            f"AND user_id='{race_member}';")
+    assert sql("SELECT to_regprocedure('public.approve_koshien_shared_results(text,uuid,bigint)') IS NULL;")=="t"
+    assert manual_revision("manual-b")==rev
+    print("PASS: vote holds existing member row lock, concurrent removal waits then resumes")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":

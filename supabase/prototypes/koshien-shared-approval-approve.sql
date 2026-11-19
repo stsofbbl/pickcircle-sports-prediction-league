@@ -23,7 +23,17 @@ BEGIN
  END IF;
  SELECT e.* INTO v_event FROM public.events e
  WHERE e.id=p_event_id AND e.preset_type='koshien' FOR UPDATE;
- IF v_event.id IS NULL OR NOT public.is_league_member(v_event.league_id) THEN
+ IF v_event.id IS NULL THEN
+   RAISE EXCEPTION 'Koshien event is required' USING ERRCODE='42501';
+ END IF;
+ -- A member removal/role update must wait until this transaction completes.
+ -- Lock every existing membership row, including inactive rows (reactivation).
+ PERFORM 1 FROM public.league_members lm
+ WHERE lm.league_id=v_event.league_id ORDER BY lm.user_id FOR SHARE;
+ -- Changes to existing player/profile bindings cannot race the voter snapshot.
+ PERFORM 1 FROM public.players p
+ WHERE p.league_id=v_event.league_id ORDER BY p.id FOR SHARE;
+ IF NOT public.is_league_member(v_event.league_id) THEN
    RAISE EXCEPTION 'active league membership is required' USING ERRCODE='42501';
  END IF;
  v_revision := yoso_approval_private.lock_revision(p_event_id);
