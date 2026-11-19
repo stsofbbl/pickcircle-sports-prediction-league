@@ -26,7 +26,7 @@ AS $function$
       and lm.membership_status = 'active'
       and lm.role = 'owner'
   );
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.review_club_join_request(p_request_id uuid, p_approve boolean)
  RETURNS TABLE(request_id uuid, request_status text, league_id uuid, requester_id uuid)
@@ -73,7 +73,7 @@ begin
          v_request.league_id,
          v_request.requester_id;
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.manage_league_admin(p_league_id uuid, p_user_id uuid, p_make_admin boolean)
  RETURNS jsonb
@@ -150,7 +150,7 @@ begin
     'changed', true
   );
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.remove_club_member(p_league_id uuid, p_user_id uuid)
  RETURNS jsonb
@@ -205,7 +205,7 @@ begin
     'history_preserved', true
   );
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.archive_deleted_account()
  RETURNS trigger
@@ -236,7 +236,7 @@ begin
 
   return old;
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.prevent_owner_account_deletion()
  RETURNS trigger
@@ -257,7 +257,7 @@ begin
   end if;
   return old;
 end;
-$function$
+$function$;
 
 REVOKE ALL ON FUNCTION public.is_league_owner(uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.is_league_owner(uuid) TO authenticated;
