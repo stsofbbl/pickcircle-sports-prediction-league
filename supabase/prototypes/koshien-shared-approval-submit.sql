@@ -101,7 +101,9 @@ BEGIN
 
  -- Revision changes supersede older submissions, without reusing their votes.
  UPDATE yoso_approval_private.submissions SET status='superseded'
- WHERE event_id=p_event_id AND status='submitted' AND revision<>v_revision;
+ WHERE event_id=p_event_id AND status='submitted'
+   AND (revision<>v_revision OR policy<>v_policy
+     OR eligible_user_ids<>v_eligible OR required_count<>v_required);
  SELECT s.* INTO v_existing FROM yoso_approval_private.submissions s
  WHERE s.event_id=p_event_id AND s.status='submitted' FOR UPDATE;
  IF v_existing.id IS NOT NULL THEN

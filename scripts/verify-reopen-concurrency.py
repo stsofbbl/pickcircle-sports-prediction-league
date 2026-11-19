@@ -1864,6 +1864,94 @@ try:
     # Submission prototype: synthetic complete 48-match Koshien with four
     # active members (but five league player rows). No finalize or real votes.
     before=snapshot()
+
+    approve_checks="""
+      SELECT set_config('yoso.fixture_submission_id',(
+        SELECT id::text FROM yoso_approval_private.submissions
+        WHERE event_id='submit-probe' AND status='submitted'),false);
+      SET ROLE anon;
+      SELECT public.test_reject(
+        $q$SELECT public.approve_koshien_shared_results(
+        'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,1)$q$,'42501');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.approve_koshien_shared_results(
+        'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,1)$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SELECT public.test_reject(
+        $q$SELECT public.approve_koshien_shared_results(
+        'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,1)$q$,'42501');
+      RESET ROLE;
+      SAVEPOINT roster_changed;
+      UPDATE public.league_members SET membership_status='inactive'
+      WHERE user_id='29000000-0000-4000-8000-000000000003';
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='stale'
+         FROM (SELECT public.approve_koshien_shared_results('submit-probe',
+           current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'membership change invalidates unfinalized approval');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT roster_changed;
+
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='submitted'
+            AND (x->>'approved_count')::int=2
+         FROM (SELECT public.approve_koshien_shared_results('submit-probe',
+           current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'second voter is individually identified');
+      SELECT public.test_assert(
+        (SELECT (x->>'approved_count')::int=2 AND (x->>'idempotent')::boolean=true
+         FROM (SELECT public.approve_koshien_shared_results('submit-probe',
+           current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'same voter repeat creates no extra vote');
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000002';
+      SELECT public.test_assert(
+        (SELECT (x->>'approved_count')::int=3
+         FROM (SELECT public.approve_koshien_shared_results('submit-probe',
+           current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'third vote remains submitted under unanimity');
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000003';
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='finalized'
+           AND (x->>'approved_count')::int=4
+         FROM (SELECT public.approve_koshien_shared_results('submit-probe',
+           current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'fourth vote finalizes through exact transition permit');
+      RESET ROLE;
+      SELECT public.test_assert(
+        (SELECT status='finalized' AND rules->'resultFlow'->>'status'='finalized'
+          FROM public.events WHERE id='submit-probe')
+        AND (SELECT status='finalized' AND finalized_at IS NOT NULL
+          FROM yoso_approval_private.submissions WHERE event_id='submit-probe'
+            AND revision=1)
+        AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.transition_permits
+          WHERE event_id='submit-probe'),
+        'event and submission finalized; transition permit consumed');
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000003';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='finalized'
+           AND (x->>'idempotent')::boolean=true
+         FROM (SELECT public.approve_koshien_shared_results('submit-probe',
+           current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'replayed vote after finalized is read-only');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.reopen_koshien_results('submit-probe');
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='none'
+         FROM (SELECT public.get_koshien_shared_approval_state('submit-probe') AS x) t),
+        'reopen revision invalidates previous finalized approval');
+      RESET ROLE;
+    """
+
     submit_checks="""
       INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules,prediction_deadline)
       VALUES('submit-probe','koshien','00000000-0000-0000-0000-000000000010',
@@ -1990,10 +2078,12 @@ try:
     sql("BEGIN;\n"
         + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
         + (root / "supabase/prototypes/koshien-shared-approval-submit.sql").read_text()
-        + submit_checks + "\nROLLBACK;")
-    assert snapshot()==before, "submit prototype must not mutate existing fixture"
+        + (root / "supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
+        + submit_checks + approve_checks + "\nROLLBACK;")
+    assert snapshot()==before, "shared approval submit/vote must roll back all changes"
     assert sql("SELECT to_regprocedure('public.submit_koshien_shared_results(text,bigint)') IS NULL;")=="t"
-    print("PASS: shared result submission ACL, 48-card readiness, idempotent replay, stale invalidation, rollback")
+    assert sql("SELECT to_regprocedure('public.approve_koshien_shared_results(text,uuid,bigint)') IS NULL;")=="t"
+    print("PASS: result submission, quorum voting, guarded finalize, reopen and rollback")
 
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
