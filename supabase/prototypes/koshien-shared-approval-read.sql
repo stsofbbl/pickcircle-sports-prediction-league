@@ -27,7 +27,7 @@ CREATE TABLE yoso_approval_private.submissions (
 CREATE UNIQUE INDEX active_koshien_submission_per_event
  ON yoso_approval_private.submissions(event_id) WHERE status='submitted';
 CREATE TABLE yoso_approval_private.votes (
- submission_id uuid NOT NULL REFERENCES yoso_approval_private.submissions(id) ON DELETE RESTRICT,
+ submission_id uuid NOT NULL REFERENCES yoso_approval_private.submissions(id) ON DELETE CASCADE,
  voter_user_id uuid NOT NULL,
  approved_at timestamptz NOT NULL DEFAULT pg_catalog.now(),
  PRIMARY KEY(submission_id,voter_user_id)

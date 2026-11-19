@@ -1,10 +1,11 @@
 -- PROTOTYPE ONLY: not a migration; no production writers use it yet.
--- Public RPCs must authorize first. All writers must lock event before results.
+-- Public RPCs must authorize first. Revision writers lock event before results.
+-- Shared approval callers lock league before event to coexist with club deletion.
 CREATE SCHEMA yoso_approval_private;
 REVOKE ALL ON SCHEMA yoso_approval_private FROM PUBLIC;
 
 CREATE TABLE yoso_approval_private.revisions (
-  event_id text PRIMARY KEY REFERENCES public.events(id),
+  event_id text PRIMARY KEY REFERENCES public.events(id) ON DELETE CASCADE,
   revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0)
 );
 REVOKE ALL ON yoso_approval_private.revisions FROM PUBLIC;

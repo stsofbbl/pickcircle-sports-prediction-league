@@ -2740,6 +2740,91 @@ try:
     assert sql("SELECT to_regprocedure('public.review_club_join_request(uuid,boolean)') IS NULL;")=="t"
     print("PASS: real membership/auth RPC race suite fully restores isolated fixture")
 
+
+    # Real club deletion acquires parent league FOR UPDATE before cascade.
+    # This transaction adds only disposable FK relationships and private
+    # approval rows, then ROLLBACKs all effects.
+    before_cascade=snapshot()
+    revisions_before=sql("SELECT count(*) FROM yoso_approval_private.revisions;")
+    cascade_checks="""
+      ALTER TABLE public.leagues ADD COLUMN created_by uuid;
+      ALTER TABLE public.events ADD CONSTRAINT fixture_events_league_fk
+        FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;
+      ALTER TABLE public.league_members ADD CONSTRAINT fixture_members_league_fk
+        FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;
+      ALTER TABLE public.players ADD CONSTRAINT fixture_players_league_fk
+        FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;
+
+      INSERT INTO public.leagues(id,name,created_by)
+        VALUES('00000000-0000-0000-0000-000000000030','Cascade club',
+          '00000000-0000-0000-0000-000000000001');
+      INSERT INTO public.league_members(league_id,user_id,role,membership_status)
+        VALUES('00000000-0000-0000-0000-000000000030',
+          '00000000-0000-0000-0000-000000000001','owner','active');
+      INSERT INTO public.players(id,league_id,profile_id,display_name)
+        VALUES('88000000-0000-4000-8000-000000000030',
+          '00000000-0000-0000-0000-000000000030',
+          '00000000-0000-0000-0000-000000000001','Club owner');
+      INSERT INTO public.events(id,preset_type,league_id,status,created_by,rules)
+        VALUES('cascade-event','koshien',
+          '00000000-0000-0000-0000-000000000030','resultWait',
+          '00000000-0000-0000-0000-000000000001','{}');
+      SELECT yoso_approval_private.lock_revision('cascade-event');
+      INSERT INTO yoso_approval_private.submissions(
+        event_id,revision,policy,eligible_user_ids,required_count,
+        submitted_by,result_snapshot
+      ) VALUES('cascade-event',0,'admin',
+        ARRAY['00000000-0000-0000-0000-000000000001'::uuid],1,
+        '00000000-0000-0000-0000-000000000001','{}'::jsonb);
+      INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
+        SELECT id,'00000000-0000-0000-0000-000000000001'
+        FROM yoso_approval_private.submissions WHERE event_id='cascade-event';
+
+      SET ROLE anon;
+      SELECT public.test_reject(
+        $q$SELECT public.delete_club(
+        '00000000-0000-0000-0000-000000000030','Cascade club')$q$,'42501');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.delete_club(
+        '00000000-0000-0000-0000-000000000030','Cascade club')$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SELECT public.test_reject(
+        $q$SELECT public.delete_club(
+        '00000000-0000-0000-0000-000000000030','Wrong club name')$q$,'22023');
+      SELECT public.delete_club(
+        '00000000-0000-0000-0000-000000000030','Cascade club');
+      RESET ROLE;
+      SELECT public.test_assert(
+        NOT EXISTS(SELECT 1 FROM public.leagues
+          WHERE id='00000000-0000-0000-0000-000000000030')
+        AND NOT EXISTS(SELECT 1 FROM public.events WHERE id='cascade-event')
+        AND NOT EXISTS(SELECT 1 FROM public.league_members
+          WHERE league_id='00000000-0000-0000-0000-000000000030')
+        AND NOT EXISTS(SELECT 1 FROM public.players
+          WHERE league_id='00000000-0000-0000-0000-000000000030')
+        AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.revisions
+          WHERE event_id='cascade-event')
+        AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.submissions
+          WHERE event_id='cascade-event')
+        AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.votes),
+        'real club deletion cascades event, roster, revision and private votes');
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM public.leagues
+          WHERE id='00000000-0000-0000-0000-000000000010'),
+        'other leagues are unaffected by isolated club deletion');
+    """
+    sql("BEGIN;\n"
+        + (root / "supabase/prototypes/koshien-real-delete-club.sql").read_text()
+        + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        + cascade_checks + "\nROLLBACK;")
+    assert snapshot()==before_cascade, "club deletion fixture must leave tracked state unchanged"
+    assert sql("SELECT count(*) FROM yoso_approval_private.revisions;")==revisions_before
+    assert sql("SELECT to_regprocedure('public.delete_club(uuid,text)') IS NULL;")=="t"
+    print("PASS: real delete_club cascading event and private approval data; full rollback")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":

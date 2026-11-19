@@ -27,6 +27,9 @@ BEGIN
  LOOP
    PERFORM 1 FROM public.leagues l WHERE l.id=v_league FOR UPDATE;
    IF NOT FOUND THEN
+     -- During a parent league's ON DELETE CASCADE, child DELETE may no
+     -- longer see the parent; do not block the valid club deletion.
+     IF TG_OP='DELETE' THEN CONTINUE; END IF;
      RAISE EXCEPTION 'league must exist for shared approval roster write'
        USING ERRCODE='23503';
    END IF;

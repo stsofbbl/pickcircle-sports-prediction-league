@@ -7,6 +7,7 @@ AS $function$
 DECLARE
  v_uid uuid := auth.uid();
  v_event public.events;
+ v_league_id uuid;
  v_revision bigint;
  v_submission yoso_approval_private.submissions;
  v_current_eligible uuid[];
@@ -21,17 +22,22 @@ BEGIN
  IF v_uid IS NULL THEN
    RAISE EXCEPTION 'authentication is required' USING ERRCODE='42501';
  END IF;
- SELECT e.* INTO v_event FROM public.events e
- WHERE e.id=p_event_id AND e.preset_type='koshien' FOR UPDATE;
- IF v_event.id IS NULL THEN
+ -- delete_club locks league FOR UPDATE before cascading to event rows;
+ -- obtain league KEY SHARE before event FOR UPDATE to avoid inversion.
+ SELECT e.league_id INTO v_league_id FROM public.events e
+ WHERE e.id=p_event_id AND e.preset_type='koshien';
+ IF v_league_id IS NULL THEN
    RAISE EXCEPTION 'Koshien event is required' USING ERRCODE='42501';
  END IF;
- -- Match the league row locked by membership/player INSERT/UPDATE/DELETE
- -- BEFORE triggers, so even a previously absent roster row cannot appear
- -- between eligibility selection and submission/finalization.
- PERFORM 1 FROM public.leagues l WHERE l.id=v_event.league_id FOR KEY SHARE;
+ PERFORM 1 FROM public.leagues l WHERE l.id=v_league_id FOR KEY SHARE;
  IF NOT FOUND THEN
    RAISE EXCEPTION 'approval league not found' USING ERRCODE='23503';
+ END IF;
+ SELECT e.* INTO v_event FROM public.events e
+ WHERE e.id=p_event_id AND e.preset_type='koshien' FOR UPDATE;
+ IF v_event.id IS NULL OR v_event.league_id IS DISTINCT FROM v_league_id THEN
+   RAISE EXCEPTION 'approval event changed while locking league'
+     USING ERRCODE='40001';
  END IF;
  IF NOT public.is_league_member(v_event.league_id) THEN
    RAISE EXCEPTION 'active league membership is required' USING ERRCODE='42501';
