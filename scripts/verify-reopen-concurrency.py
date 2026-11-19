@@ -1301,6 +1301,89 @@ try:
     assert manual_revision("manual-a")==1
     print("PASS: concurrent manual preparations serialize, second rejected, one revision")
 
+
+    # The direct phase3 preparer and two admin round controls have the same
+    # state-refresh descendant; all must own event/revision before child locks.
+    sql("ALTER TABLE public.koshien_later_rounds ADD COLUMN IF NOT EXISTS team_a_id uuid;"
+        "ALTER TABLE public.koshien_later_rounds ADD COLUMN IF NOT EXISTS team_b_id uuid;")
+    for event,prefix in [("manual-a","81000000"),("manual-b","81100000")]:
+        sql("BEGIN;SELECT yoso_approval_private.issue_write_permit('" + event + "');"
+            "INSERT INTO public.matches(event_id,round_key,match_no,team1_id,team2_id,status) "
+            "VALUES('" + event + "','F',1,'" + prefix + "-0000-4000-8000-000000000001','" +
+            prefix + "-0000-4000-8000-000000000002','scheduled');COMMIT;")
+    sql((root / "supabase/prototypes/koshien-manual-phase3-prepare.sql").read_text())
+    sql((root / "supabase/prototypes/koshien-manual-phase-status.sql").read_text())
+    sql((root / "supabase/prototypes/koshien-manual-phase-schedule.sql").read_text())
+
+    def phase3_call(event,wrap=False):
+        begin = ("SELECT public.prepare_koshien_later_phase('" + event + "','phase3',"
+                 if wrap else "SELECT public.prepare_koshien_phase3('" + event + "',")
+        return begin + "'2099-08-22T00:00:00Z','2099-08-23T00:00:00Z'" + (
+               ",'manual','manual');" if wrap else ");")
+
+    def status_call(event,action):
+        return ("SELECT public.set_koshien_later_phase_status('" + event +
+                "','zombie','" + action + "');")
+
+    def schedule_call(event,start="2099-08-20T00:00:00Z",end="2099-08-24T00:00:00Z"):
+        return ("SELECT public.update_koshien_later_phase_schedule('" + event +
+                "','zombie','" + start + "','" + end + "','manual','manual');")
+
+    before=manual_snapshot()
+    for prefix in ["SET ROLE anon;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';SET ROLE authenticated;",
+                   "SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';SET ROLE authenticated;"]:
+        for call in [phase3_call("manual-a"),status_call("manual-b","open"),
+                     schedule_call("manual-b")]:
+            sql(prefix+"SELECT public.test_reject($q$"+call+"$q$,'42501');")
+    assert manual_snapshot()==before
+    print("PASS: phase3 preparation, status and schedule controls reject unauthorized callers")
+
+    rev_a=manual_revision("manual-a")
+    result=json.loads(sql(AUTH+phase3_call("manual-a")))
+    assert result["event_id"]=="manual-a" and result["round_count"]==2
+    assert manual_revision("manual-a")==rev_a+1
+    before=manual_snapshot()
+    sql(AUTH+"SELECT public.test_reject($q$"+phase3_call("manual-a")+"$q$,'55000');")
+    assert manual_snapshot()==before
+    print("PASS: direct phase3 preparation records exactly one revision, duplicate rejected")
+
+    rev_b=manual_revision("manual-b")
+    result=json.loads(sql(AUTH+phase3_call("manual-b",True)))
+    assert result["event_id"]=="manual-b" and result["round_count"]==2
+    assert manual_revision("manual-b")==rev_b+1
+    assert sql("SELECT status||':'||start_mode||':'||end_mode||':'||version "
+               "FROM public.koshien_later_rounds WHERE event_id='manual-b' "
+               "AND phase_key='phase3';")=="ready:manual:manual:1"
+    print("PASS: wrapped phase3 prepare creates schedule without double revision")
+
+    rev_b=manual_revision("manual-b")
+    result=json.loads(sql(AUTH+schedule_call("manual-b")))
+    assert result["event_id"]=="manual-b"
+    assert manual_revision("manual-b")==rev_b+1
+    assert sql("SELECT version FROM public.koshien_later_rounds WHERE event_id='manual-b' "
+               "AND phase_key='zombie';")=="2"
+    before=manual_snapshot()
+    sql(AUTH+"SELECT public.test_reject($q$"+
+        schedule_call("manual-b",start="2099-08-25T00:00:00Z")+
+        "$q$,'P0001');")
+    assert manual_snapshot()==before
+    print("PASS: admin schedule update versioned once; invalid times roll back every table")
+
+    rev_a=manual_revision("manual-a")
+    result=json.loads(sql(AUTH+status_call("manual-a","open")))
+    assert result["event_id"]=="manual-a" and manual_revision("manual-a")==rev_a+1
+    assert sql("SELECT status||':'||version FROM public.koshien_later_rounds "
+               "WHERE event_id='manual-a' AND phase_key='zombie';")=="open:1"
+    before=manual_snapshot()
+    sql(AUTH+"SELECT public.test_reject($q$"+status_call("manual-a","open")+"$q$,'55000');")
+    assert manual_snapshot()==before
+    result=json.loads(sql(AUTH+status_call("manual-a","lock")))
+    assert result["event_id"]=="manual-a" and manual_revision("manual-a")==rev_a+2
+    assert sql("SELECT status||':'||version FROM public.koshien_later_rounds "
+               "WHERE event_id='manual-a' AND phase_key='zombie';")=="locked:2"
+    print("PASS: admin manual open/lock versioned, duplicate rejected, no child-to-event inversion")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
