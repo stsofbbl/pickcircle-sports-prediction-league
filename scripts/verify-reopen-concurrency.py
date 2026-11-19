@@ -1621,6 +1621,60 @@ try:
                "WHERE event_id='best16-wrapped';")=="4"
     print("PASS: best16 wrapper prepares roster and manual schedule with one revision")
 
+
+    # A caller may start while authorized but wait on an event row. Ensure that
+    # membership deactivation committed during the wait rejects both the admin
+    # state transition and the participant save, without partial side effects.
+    def membership_race(call, label):
+        before=prediction_snapshot()
+        before_revision=manual_revision("manual-b")
+        a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True,bufsize=1)
+        b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True)
+        try:
+            send(a,"SELECT pg_backend_pid();")
+            pid=int(line(a))
+            send(a,"BEGIN;SELECT id FROM public.events WHERE id='manual-b' FOR UPDATE;"
+                 "UPDATE public.league_members SET membership_status='inactive' "
+                 "WHERE league_id='00000000-0000-0000-0000-000000000010' "
+                 "AND user_id='00000000-0000-0000-0000-000000000001';"
+                 "SELECT 'deactivated';")
+            assert line(a)=="manual-b"
+            assert line(a)=="deactivated"
+            send(b,"SET application_name='yoso_membership_race';"
+                 "SET statement_timeout='15s';"+AUTH+call)
+            deadline=time.monotonic()+8
+            while sql("SELECT count(*) FROM pg_stat_activity "
+                      "WHERE application_name='yoso_membership_race' "
+                      f"AND {pid}=ANY(pg_blocking_pids(pid));")!="1":
+                assert b.poll() is None,"membership race exited before event wait"
+                assert time.monotonic()<deadline,"membership race did not wait"
+                time.sleep(.05)
+            send(a,"COMMIT;")
+            a.stdin.close()
+            a.wait(timeout=10)
+            assert a.returncode==0,a.stderr.read()
+            output,errors=b.communicate(timeout=10)
+            assert b.returncode!=0, "deactivated actor unexpectedly wrote: "+output
+            assert "permission" in errors or "membership" in errors, errors
+        finally:
+            for proc in (a,b):
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+            # Restore only the isolated fixture admin; no production writes.
+            sql("UPDATE public.league_members SET membership_status='active' "
+                "WHERE league_id='00000000-0000-0000-0000-000000000010' "
+                "AND user_id='00000000-0000-0000-0000-000000000001';")
+        assert prediction_snapshot()==before, label+" leaked a write on authorization loss"
+        assert manual_revision("manual-b")==before_revision
+        print("PASS: "+label+" rejects deactivated actor after event lock wait; complete rollback")
+
+    membership_race(status_call("manual-b","lock"),"admin phase lock")
+    membership_race(prediction_call("zombie",request="50",target="1"),
+                    "participant zombie prediction")
+
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
     if sql("SELECT count(*) FROM pg_roles WHERE rolname='service_role';") == "1":
