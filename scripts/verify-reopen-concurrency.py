@@ -1171,7 +1171,8 @@ try:
     sql((root / "supabase/prototypes/koshien-manual-later-prepare.sql").read_text())
 
     def seed_manual(event):
-        teams = [f"81000000-0000-4000-8000-{i:012d}" for i in range(1,9)]
+        prefix = "81000000" if event == "manual-a" else "81100000"
+        teams = [f"{prefix}-0000-4000-8000-{i:012d}" for i in range(1,9)]
         draft_id = "82000000-0000-4000-8000-00000000000" + ("1" if event=="manual-a" else "2")
         sql("BEGIN;INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules) "
             "VALUES('" + event + "','koshien','00000000-0000-0000-0000-000000000010',"
