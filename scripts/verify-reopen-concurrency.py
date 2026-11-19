@@ -1951,14 +1951,26 @@ try:
         'private audit snapshot contains four scores and 48 cards');
       SAVEPOINT invalid_snapshot;
       SELECT yoso_approval_private.issue_write_permit('submit-probe');
-      UPDATE public.matches SET status='scheduled' WHERE
-        event_id='submit-probe' AND round_key='F' AND match_no=1;
+      UPDATE public.results
+        SET payload=jsonb_set(payload,'{matches}','[]'::jsonb,false)
+        WHERE event_id='submit-probe';
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_reject(
         $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
       RESET ROLE;
       ROLLBACK TO SAVEPOINT invalid_snapshot;
+      SAVEPOINT missing_score;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      DELETE FROM public.scores
+        WHERE event_id='submit-probe'
+        AND player_id='28000000-0000-4000-8000-000000000003';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT missing_score;
       SELECT yoso_approval_private.advance_revision('submit-probe',0);
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
