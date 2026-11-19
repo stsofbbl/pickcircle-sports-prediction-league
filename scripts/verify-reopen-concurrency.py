@@ -1730,7 +1730,7 @@ try:
           "'00000000-0000-0000-0000-000000000001','resultWait','{}');"
           "SELECT yoso_approval_private.issue_write_permit('rls-probe');"
           "INSERT INTO public.results(event_id,payload) "
-          "VALUES('rls-probe','{\\\"matches\\\":[]}');"
+          "VALUES('rls-probe',jsonb_build_object('matches','[]'::jsonb));"
         + (root / "tests/sql/result-production-rls-policy-fixture.sql").read_text()
         + rls_checks + "\nROLLBACK;")
     assert snapshot()==before, "production RLS contract must not mutate fixture tables"
