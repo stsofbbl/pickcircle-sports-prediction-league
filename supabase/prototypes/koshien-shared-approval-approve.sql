@@ -29,7 +29,7 @@ BEGIN
  -- Match the league row locked by membership/player INSERT/UPDATE/DELETE
  -- BEFORE triggers, so even a previously absent roster row cannot appear
  -- between eligibility selection and submission/finalization.
- PERFORM 1 FROM public.leagues l WHERE l.id=v_event.league_id FOR SHARE;
+ PERFORM 1 FROM public.leagues l WHERE l.id=v_event.league_id FOR KEY SHARE;
  IF NOT FOUND THEN
    RAISE EXCEPTION 'approval league not found' USING ERRCODE='23503';
  END IF;

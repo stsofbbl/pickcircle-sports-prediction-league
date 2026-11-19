@@ -1771,7 +1771,7 @@ try:
 
     # Production-like shared league row: approvals lock FOR SHARE and every
     # membership/player DML trigger locks FOR UPDATE (including fresh INSERT).
-    sql("CREATE TABLE public.leagues(id uuid PRIMARY KEY);"
+    sql("CREATE TABLE public.leagues(id uuid PRIMARY KEY, name text DEFAULT 'fixture');"
         "INSERT INTO public.leagues(id) VALUES "
         "('00000000-0000-0000-0000-000000000010'),"
         "('00000000-0000-0000-0000-000000000020');")
@@ -2388,6 +2388,11 @@ try:
                +vote_statement(sid,admin_uid))
         data=json.loads(line(a))
         assert data["submission_status"]=="submitted" and data["approved_count"]==1,data
+        # KEY SHARE protects against the roster trigger's FOR UPDATE, but
+        # permits unrelated non-key league metadata edits (NO KEY UPDATE).
+        assert sql("UPDATE public.leagues SET name='renamed-during-vote' "
+                   "WHERE id='"+league_id+"' RETURNING name;")=="renamed-during-vote"
+        sql("UPDATE public.leagues SET name='fixture' WHERE id='"+league_id+"';")
         b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE,text=True)
         send(b,"SET application_name='yoso_player_insert_b';"
