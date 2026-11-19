@@ -1769,6 +1769,14 @@ try:
     print("PASS: production CHECK/FK constraints (14) reject invalid status/teams, accept valid card")
 
 
+    # Production-like shared league row: approvals lock FOR SHARE and every
+    # membership/player DML trigger locks FOR UPDATE (including fresh INSERT).
+    sql("CREATE TABLE public.leagues(id uuid PRIMARY KEY);"
+        "INSERT INTO public.leagues(id) VALUES "
+        "('00000000-0000-0000-0000-000000000010'),"
+        "('00000000-0000-0000-0000-000000000020');")
+    sql((root / "supabase/prototypes/koshien-shared-approval-roster-lock.sql").read_text())
+
     # Prototype private shared-approval schema and READ-ONLY member RPC.
     # The entire schema, rows and RPC disappear on rollback.
     before=snapshot()
@@ -2136,10 +2144,8 @@ try:
     print("PASS: result submission, quorum voting, guarded finalize, reopen and rollback")
 
 
-    # Real two-session race: approval must hold existing membership row SHARE
-    # locks until commit/rollback, so removing a voter cannot sneak in between
-    # active-roster verification and finalization. New member INSERTs are NOT
-    # protected by these row locks; their RPC integration remains a release gate.
+    # Actual membership UPDATE has to wait on the league row shared by
+    # approvals and DML triggers; no individual member-row locks are needed.
     race_member = "00000000-0000-0000-0000-000000000002"
     before_member_status=sql("SELECT membership_status FROM public.league_members "
                              "WHERE league_id='00000000-0000-0000-0000-000000000010' "
@@ -2212,7 +2218,7 @@ try:
             f"AND user_id='{race_member}';")
     assert sql("SELECT to_regprocedure('public.approve_koshien_shared_results(text,uuid,bigint)') IS NULL;")=="t"
     assert manual_revision("manual-b")==rev
-    print("PASS: vote holds existing member row lock, concurrent removal waits then resumes")
+    print("PASS: existing member removal waits on shared league roster lock")
 
 finally:
     sql("DROP OWNED BY authenticated,anon; DROP ROLE authenticated,anon;")
