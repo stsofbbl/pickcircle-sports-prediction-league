@@ -342,6 +342,7 @@ let koshienPhase2DraftMessage = "";
 let koshienPhase2DraftMessageKind = "";
 let koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
 let koshienOnlineRankingView = { eventId: "", loadedFromDb: false, members: [], players: [], scores: [] };
+let koshienSharedApprovalView = { eventId: "", loadedFromDb: false };
 let koshienLaterPhaseLoading = false;
 let koshienLaterPhaseSaving = false;
 let koshienLaterAdminSaving = "";
@@ -1716,6 +1717,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
         await Promise.all([
           refreshKoshienPhase2DraftState({ renderAfter: false }),
           refreshKoshienLaterPhaseState({ renderAfter: false }),
+          refreshKoshienSharedApprovalState({ renderAfter: false }),
         ]);
         loadedKoshienOnlineEventId = String(snapshot.event?.id || "");
         render();
@@ -1746,6 +1748,31 @@ function applyKoshienPhase2DraftResponse(response, eventId = state.event?.id) {
     loadedFromDb: true,
   };
   return koshienPhase2DraftView;
+}
+
+async function refreshKoshienSharedApprovalState({ renderAfter = true } = {}) {
+  const eventId = String(state.event?.id || "");
+  const service = window.YosoDataService?.koshien;
+  koshienSharedApprovalView = { eventId, loadedFromDb: false };
+  if (!eventId || baseTemplateId(state.event?.templateId) !== "koshien"
+      || !service?.loadSharedApprovalState || !currentAuthUser()) {
+    if (renderAfter) render();
+    return koshienSharedApprovalView;
+  }
+  try {
+    const response = await service.loadSharedApprovalState(eventId);
+    if (String(state.event?.id || "") !== eventId) return koshienSharedApprovalView;
+    if (String(response?.event_id || "") !== eventId) throw new Error("共有承認状態のevent_idが一致しません。");
+    koshienSharedApprovalView = { ...response, eventId, loadedFromDb: true };
+  } catch (error) {
+    // The RPC is not yet deployed: never re-enable the old local vote controls.
+    console.warn("Shared approval state unavailable", error);
+    if (String(state.event?.id || "") === eventId) {
+      koshienSharedApprovalView = { eventId, loadedFromDb: false };
+    }
+  }
+  if (renderAfter) render();
+  return koshienSharedApprovalView;
 }
 
 async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
@@ -4553,9 +4580,25 @@ function renderPresetDescription() {
 
 function resultFlowPanel() {
   if (baseTemplateId(state.event.templateId) === "worldCup") return "";
-  if (isOnlineKoshienResultFlow() && !isResultFinalized(state.event)) {
+  if (isOnlineKoshienResultFlow()) {
     if (state.event.status === "open") return "";
-    return '<div class="entry-block result-flow-panel"><h3>大会全体の結果確定</h3><p class="helper-text">大会全体の提出・承認はオンライン共有に未対応です。試合結果の保存は引き続き利用できます。</p></div>';
+    const flow = koshienSharedApprovalView.loadedFromDb
+      && koshienSharedApprovalView.eventId === String(state.event?.id || "")
+      ? koshienSharedApprovalView : null;
+    if (!flow) {
+      return '<div class="entry-block result-flow-panel"><h3>大会全体の結果確定</h3><p class="helper-text">大会全体の提出・承認はオンライン共有に未対応です。試合結果の保存は引き続き利用できます。</p></div>';
+    }
+    const status = flow.submission_status === "finalized" ? "確定済み"
+      : flow.submission_status === "submitted" ? "承認待ち" : "未提出";
+    const approved = Number.isInteger(Number(flow.approved_count)) ? Math.max(0, Number(flow.approved_count)) : 0;
+    const required = Number.isInteger(Number(flow.required_count)) ? Math.max(0, Number(flow.required_count)) : 0;
+    const mine = flow.current_user_voted === true ? "承認済み"
+      : flow.current_user_eligible === true ? "未承認" : "承認対象外";
+    return `<div class="entry-block result-flow-panel">
+      <h3>大会全体の結果確定：${escapeHtml(status)}</h3>
+      <div class="result-flow-meta"><span>承認：${approved} / ${required}人</span><span>あなた：${escapeHtml(mine)}</span></div>
+      <p class="helper-text">オンライン共有の承認状況です。提出・承認の操作は安全確認が完了するまで無効です。</p>
+    </div>`;
   }
   ensureResultFlow();
   const flow = state.event.resultFlow;

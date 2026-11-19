@@ -6,10 +6,12 @@ const path = require("node:path");
 const source = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
 function fixture({ online = true, templateId = "koshien", policy = "admin" } = {}) {
   const state = { participants: ["Owner", "Member"], approvalPolicy: policy, event: {
-    templateId, status: "resultWait", approvalPolicy: policy,
+    id: "evt", templateId, status: "resultWait", approvalPolicy: policy,
     resultFlow: { status: "none", approvals: {}, submittedAt: "", finalizedAt: "" },
   } };
   const context = { state, Date, renders: 0,
+    koshienSharedApprovalView: { eventId: "", loadedFromDb: false },
+    escapeHtml: (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"),
     window: { YosoDataService: { shouldAutoSaveKoshien: () => online } },
     baseTemplateId: id => id, currentParticipantName: () => "Owner",
     normalizeResultFlow: flow => flow, createResultFlow: () => ({ status: "none", approvals: {} }),
@@ -65,4 +67,26 @@ test("online result panel explains unavailable sharing and offers no local appro
   assert.doesNotMatch(html, /data-result-submit|data-result-approve|data-result-approver/);
   c.state.event.status = "open";
   assert.equal(c.resultFlowPanel(), "");
+});
+
+test("online panel renders shared server progress read-only and rejects another event's data", () => {
+  const c = fixture();
+  const start = source.indexOf("function resultFlowPanel()");
+  const end = source.indexOf("function resultFlowMessage()", start);
+  vm.runInContext(source.slice(start, end), c);
+  c.koshienSharedApprovalView = {
+    eventId: "evt", loadedFromDb: true, submission_status: "submitted",
+    approved_count: 2, required_count: 4,
+    current_user_voted: false, current_user_eligible: true,
+  };
+  const html = c.resultFlowPanel();
+  assert.match(html, /承認待ち/);
+  assert.match(html, /2 \/ 4人/);
+  assert.match(html, /あなた：未承認/);
+  assert.doesNotMatch(html, /data-result-submit|data-result-approve|data-result-reopen/);
+  c.state.event.status = "finalized";
+  c.koshienSharedApprovalView.submission_status = "finalized";
+  assert.match(c.resultFlowPanel(), /確定済み/);
+  c.koshienSharedApprovalView.eventId = "other-event";
+  assert.match(c.resultFlowPanel(), /オンライン共有に未対応/);
 });
