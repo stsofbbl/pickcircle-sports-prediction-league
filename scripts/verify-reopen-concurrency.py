@@ -1706,25 +1706,31 @@ try:
         AND (SELECT count(*)>0 FROM public.matches WHERE event_id='save')
         AND (SELECT count(*)>0 FROM public.scores WHERE event_id='save'),
         'active league member can SELECT own event');
-      UPDATE public.results SET updated_by=auth.uid() WHERE event_id='zombie-test';
+      UPDATE public.results SET updated_by=auth.uid() WHERE event_id='rls-probe';
       SELECT public.test_assert(
         (SELECT updated_by IS DISTINCT FROM auth.uid() FROM public.results
-         WHERE event_id='zombie-test'),
+         WHERE event_id='rls-probe'),
         'member cannot update result under production RLS');
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
-      SELECT yoso_approval_private.begin_result_write('zombie-test');
+      SELECT yoso_approval_private.begin_result_write('rls-probe');
       SELECT public.test_reject(
         $rejected$UPDATE public.results
         SET updated_by='00000000-0000-0000-0000-000000000002'
-        WHERE event_id='zombie-test'$rejected$,'42501');
-      UPDATE public.results SET updated_by=auth.uid() WHERE event_id='zombie-test';
+        WHERE event_id='rls-probe'$rejected$,'42501');
+      UPDATE public.results SET updated_by=auth.uid() WHERE event_id='rls-probe';
       SELECT public.test_assert(
         (SELECT updated_by=auth.uid() FROM public.results
-         WHERE event_id='zombie-test'),
+         WHERE event_id='rls-probe'),
         'real admin actor can update result with valid permit and identity');
       RESET ROLE;
     """
     sql("BEGIN;\n"
+        + "INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules) "
+          "VALUES('rls-probe','koshien','00000000-0000-0000-0000-000000000010',"
+          "'00000000-0000-0000-0000-000000000001','resultWait','{}');"
+          "SELECT yoso_approval_private.issue_write_permit('rls-probe');"
+          "INSERT INTO public.results(event_id,payload) "
+          "VALUES('rls-probe','{\\\"matches\\\":[]}');"
         + (root / "tests/sql/result-production-rls-policy-fixture.sql").read_text()
         + rls_checks + "\nROLLBACK;")
     assert snapshot()==before, "production RLS contract must not mutate fixture tables"
