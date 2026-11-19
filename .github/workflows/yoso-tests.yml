@@ -91,6 +91,11 @@ jobs:
           set +e
           node --test tests/*.test.js tests/*.test.mjs > test-output.txt 2>&1
           status=$?
+          if [ "$status" -ne 0 ]; then
+            # Keep the failure and its assertion details visible even when
+            # it occurs before the last 160 lines of the full test report.
+            grep -n -A 35 -B 2 '^not ok ' test-output.txt || true
+          fi
           tail -n 160 test-output.txt
           exit $status
       - name: Upload Node test output
