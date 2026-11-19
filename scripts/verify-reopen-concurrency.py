@@ -1932,6 +1932,7 @@ try:
         (SELECT (x->>'idempotent')::boolean=true
          FROM (SELECT public.submit_koshien_shared_results('submit-probe',0) AS x) s),
         'repeated submission is idempotent');
+      RESET ROLE;
       SELECT public.test_assert(
         (SELECT count(*)=1 FROM yoso_approval_private.submissions
          WHERE event_id='submit-probe')
