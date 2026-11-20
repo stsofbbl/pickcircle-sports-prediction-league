@@ -2547,6 +2547,8 @@ try:
         sql("DELETE FROM public.players "
             "WHERE id='87000000-0000-4000-8000-000000000002';")
         sql("DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
+            "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
@@ -2828,6 +2830,8 @@ try:
             "UPDATE public.league_members SET role='member',membership_status='active' "
             "WHERE league_id='"+league_id+"' AND user_id='"+member_id+"';"
             "DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
+            "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
@@ -3091,6 +3095,8 @@ try:
         # only this test's fixed IDs and scoped schema in disposable DB.
         sql("DELETE FROM public.leagues WHERE id='"+club_id+"';"
             "DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
+            "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
