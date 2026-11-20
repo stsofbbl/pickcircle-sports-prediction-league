@@ -1788,6 +1788,43 @@ try:
         "('00000000-0000-0000-0000-000000000020');")
     sql((root / "supabase/prototypes/koshien-shared-approval-roster-lock.sql").read_text())
 
+    # Match the real submit RPC's complete private audit envelope when
+    # seeding synthetic submissions for two-session membership/deletion races.
+    # Empty '{}' submissions are deliberately no longer accepted by approve.
+    sql("""
+      CREATE FUNCTION public.test_shared_approval_snapshot(p_event_id text)
+      RETURNS jsonb LANGUAGE sql SET search_path='' AS $fn$
+      SELECT jsonb_build_object(
+        'event_context',jsonb_build_object(
+          'rules',coalesce(e.rules,'{}'::jsonb) - 'approvalPolicy' - 'resultFlow',
+          'rules_config',e.rules_config,
+          'current_phase',e.current_phase,
+          'prediction_deadline',e.prediction_deadline,
+          'sport_type',e.sport_type,
+          'season',e.season
+        ),
+        'teams',coalesce((
+          SELECT jsonb_agg(to_jsonb(t) - 'created_at' - 'updated_at'
+            ORDER BY t.id)
+          FROM public.teams t WHERE t.event_id=e.id
+        ),'[]'::jsonb),
+        'matches',coalesce((
+          SELECT jsonb_agg(to_jsonb(m) ORDER BY m.round_key,m.match_no)
+          FROM public.matches m WHERE m.event_id=e.id
+        ),'[]'::jsonb),
+        'results',(SELECT r.payload FROM public.results r WHERE r.event_id=e.id),
+        'scores',coalesce((
+          SELECT jsonb_agg(to_jsonb(sc) ORDER BY sc.player_id)
+          FROM public.scores sc JOIN public.players p ON p.id=sc.player_id
+          JOIN public.league_members lm
+            ON lm.league_id=e.league_id AND lm.user_id=p.profile_id
+          WHERE sc.event_id=e.id AND p.league_id=e.league_id
+            AND lm.membership_status='active'
+        ),'[]'::jsonb)
+      ) FROM public.events e WHERE e.id=p_event_id
+      $fn$;
+    """)
+
     # Prototype private shared-approval schema and READ-ONLY member RPC.
     # The entire schema, rows and RPC disappear on rollback.
     before=snapshot()
@@ -2374,7 +2411,7 @@ try:
            str(rev+1)+",'unanimous',ARRAY["
            "'00000000-0000-0000-0000-000000000001'::uuid,"
            "'00000000-0000-0000-0000-000000000002'::uuid],2,"
-           "'00000000-0000-0000-0000-000000000001','submitted','{}'::jsonb);"
+           "'00000000-0000-0000-0000-000000000001','submitted',public.test_shared_approval_snapshot('manual-b'));"
            "INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id) "
            "SELECT id,'00000000-0000-0000-0000-000000000001' "
            "FROM yoso_approval_private.submissions WHERE event_id='manual-b';"
@@ -2450,7 +2487,7 @@ try:
          "SELECT 'roster-race',0,'unanimous',"
          "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
          "count(DISTINCT p.profile_id)::integer,'"+admin_uid+"',"
-         "'submitted','{}'::jsonb "
+         "'submitted',public.test_shared_approval_snapshot('roster-race') "
          "FROM public.players p JOIN public.league_members lm "
          "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
          "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
@@ -2530,7 +2567,7 @@ try:
             "SELECT 'roster-race',0,'unanimous',"
             "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
             "count(DISTINCT p.profile_id)::integer,'"+admin_uid+"',"
-            "'submitted','{}'::jsonb "
+            "'submitted',public.test_shared_approval_snapshot('roster-race') "
             "FROM public.players p JOIN public.league_members lm "
             "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
             "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
@@ -2572,7 +2609,7 @@ try:
             "SELECT 'roster-race',0,'unanimous',"
             "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
             "count(DISTINCT p.profile_id)::integer,'"+admin_uid+"',"
-            "'submitted','{}'::jsonb "
+            "'submitted',public.test_shared_approval_snapshot('roster-race') "
             "FROM public.players p JOIN public.league_members lm "
             "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
             "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
@@ -2777,7 +2814,7 @@ try:
             "SELECT 'rpc-race',0,'unanimous',"
             "array_agg(DISTINCT p.profile_id ORDER BY p.profile_id),"
             "count(DISTINCT p.profile_id)::integer,'"+owner_id+"',"
-            "'submitted','{}'::jsonb "
+            "'submitted',public.test_shared_approval_snapshot('rpc-race') "
             "FROM public.players p JOIN public.league_members lm "
             "ON lm.league_id=p.league_id AND lm.user_id=p.profile_id "
             "WHERE p.league_id='"+league_id+"' AND p.profile_id IS NOT NULL "
@@ -3063,7 +3100,7 @@ try:
             "event_id,revision,policy,eligible_user_ids,required_count,submitted_by,result_snapshot)"
             "VALUES('"+club_event+"',0,'unanimous',"
             "ARRAY['"+club_owner+"'::uuid,'"+club_member+"'::uuid],2,"
-            "'"+club_owner+"','{}'::jsonb);")
+            "'"+club_owner+"',public.test_shared_approval_snapshot('"+club_event+"'));")
         return sql("SELECT id FROM yoso_approval_private.submissions "
                    "WHERE event_id='"+club_event+"' AND status='submitted';")
 
