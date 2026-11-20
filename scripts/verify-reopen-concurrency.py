@@ -2192,7 +2192,7 @@ try:
       VALUES('submit-probe','koshien','00000000-0000-0000-0000-000000000010',
         '00000000-0000-0000-0000-000000000001','resultWait',
         '{"approvalPolicy":"unanimous","resultFlow":{"status":"none"},'
-         || '"config":{"phase2Points":{"best16":20}}}',
+         || '"config":{"phase2Points":{"best16":20}}}'::jsonb,
         now()-interval '1 day');
       UPDATE public.events SET rules_config='{"phase2Points":{"best16":20}}'
       WHERE id='submit-probe';
