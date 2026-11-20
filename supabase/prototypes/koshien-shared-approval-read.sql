@@ -95,3 +95,38 @@ END;
 $function$;
 REVOKE ALL ON FUNCTION public.get_koshien_shared_approval_state(text) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.get_koshien_shared_approval_state(text) TO authenticated;
+
+-- Atomic companion guard: no silent status reset while a vote is pending.
+-- Existing approval-state permit still owns the resultWait -> finalized transition.
+-- This also rejects newly inserted pre-finalized Koshien events that would
+-- otherwise bypass the approval RPC through the ordinary events INSERT policy.
+CREATE FUNCTION yoso_approval_private.protect_shared_approval_event_status()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''
+AS $function$
+BEGIN
+ IF TG_OP='INSERT' THEN
+   IF NEW.preset_type='koshien' AND
+     (NEW.status='finalized' OR NEW.rules->'resultFlow'->>'status'='finalized') THEN
+     RAISE EXCEPTION 'Koshien results require shared approval before finalization'
+       USING ERRCODE='42501';
+   END IF;
+   RETURN NEW;
+ END IF;
+ IF (OLD.preset_type='koshien' OR NEW.preset_type='koshien')
+   AND NEW.status IS DISTINCT FROM OLD.status
+   AND NEW.status IS DISTINCT FROM 'finalized'
+   AND EXISTS (
+     SELECT 1 FROM yoso_approval_private.submissions s
+     WHERE s.event_id=OLD.id AND s.status='submitted'
+   ) THEN
+   RAISE EXCEPTION 'pending result approval blocks changing event status'
+     USING ERRCODE='55000';
+ END IF;
+ RETURN NEW;
+END;
+$function$;
+REVOKE ALL ON FUNCTION yoso_approval_private.protect_shared_approval_event_status()
+ FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER yoso_protect_shared_approval_event_status
+ BEFORE INSERT OR UPDATE OF status ON public.events
+ FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_shared_approval_event_status();

@@ -18,12 +18,15 @@ test("completed Koshien matches expose a guarded atomic cancel action", () => {
 test("finalized event results can be reopened by an admin", () => {
   assert.match(app, /data-result-reopen/);
   assert.match(app, /async function reopenFinalizedResults/);
-  assert.match(app, /await window\.YosoDataService\.koshien\.reopenKoshienResults/);
+  assert.match(app, /await service\.reopenKoshienResults\(eventId\)/);
   const reopenStart = app.indexOf("async function reopenFinalizedResults");
   const reopenEnd = app.indexOf("function updatePresetSummary", reopenStart);
   assert.notEqual(reopenStart, -1);
   assert.notEqual(reopenEnd, -1);
   assert.doesNotMatch(app.slice(reopenStart, reopenEnd), /saveKoshienOnlineNow/);
+  assert.match(app.slice(reopenStart, reopenEnd), /loadKoshienOnlineState\(\{ force: true \}\)/);
+  assert.match(app.slice(reopenStart, reopenEnd), /state\.event\.resultFlow = normalizeResultFlow\(response\.result_flow/);
+  assert.doesNotMatch(app.slice(reopenStart, reopenEnd), /state\.event\.status = previousStatus/);
   assert.match(app, /resultFlow\.status\s*=\s*"none"/);
   assert.match(app, /state\.event\.status\s*=\s*"resultWait"/);
   assert.match(app, /state\.event\.status\s*=\s*"finalized"/);

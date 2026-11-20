@@ -11,7 +11,7 @@
 ## 原子的な導入に必要な依存関係（実施前に独立レビュー）
 1. イベント・結果保存の既存RPCとRLS/FKをバックアップ／比較する。**既存の得点・会員権限の振る舞いを維持**する。
 2. private revisions、event identity/approval-state guard、single-use transition permits、結果書込みpermit/確定保護を準備する。後続SQLが既存関数を `CREATE OR REPLACE` する場合、実本番定義との差分を事前確認する。
-3. private submissions / votes とread RPC、資格変更用のleague_members / playersトリガーを一括導入する。ロック順は**league → event → revision → submission**。加入・退会・admin変更・アカウント削除・クラブ削除の組合せが対象。
+3. private submissions / votes とread RPC、承認待ちの状態巻き戻し・確定済みINSERT拒否ガード、資格変更用のleague_members / playersトリガーを一括導入する。ロック順は**league → event → revision → submission**。加入・退会・admin変更・アカウント削除・クラブ削除の組合せが対象。
 4. submit / approve / set-policy RPCと、reopen・結果保存のversion/transition guardを接続する。実行時の権限をauthenticated本人に限定し、anon / 無関係リーグを拒否する。
 5. 状態遷移・ルール・RLS・permissions・トリガー・関数定義が想定どおりであることを確認する。**公開機能をDBだけ・UIだけ先行有効化しない。**
 
@@ -22,6 +22,7 @@
 - 2接続でsubmit / vote / policy更新 / reopen / 結果編集、加入/退会/role変更/プレイヤー作成、アカウント・クラブ削除の競合順序と、deadlock / stale revision / 完全ROLLBACKを確認。
 - 48試合の勝敗整合、対象者ごとのscores、admin/half/unanimousの必要票数、冪等再送、承認後の旧票・再提出の扱いを確認。
 - 承認・取消操作が成功したが再取得だけ失敗する場合に、端末上の確定状態がDBと矛盾しないことを確認。
+- 旧提出／票が有効なままイベントを「resultWait→open/archive/draft」に変更する直接UPDATEと、Koshienイベントを確定済みで直接INSERTする経路を拒否。通常の承認によるresultWait→finalizedおよび取消は維持する。
 - 全変更は差分のある関連テストのみを追加する。独立レビューと実認証複数端末E2EはCIとは別の完了条件。
 
 ## ロールバック設計で守ること

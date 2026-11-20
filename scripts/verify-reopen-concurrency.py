@@ -1877,6 +1877,14 @@ try:
     # invalidation, and must not leak from a rollback-only fixture.
     before=snapshot()
     policy_checks="""
+      -- A Koshien event cannot start life as finalized via ordinary INSERT.
+      SELECT public.test_reject(
+        $q$INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules)
+        VALUES('approval-bypass-probe','koshien',
+          '00000000-0000-0000-0000-000000000010',
+          '00000000-0000-0000-0000-000000000001','finalized',
+          '{"approvalPolicy":"admin","resultFlow":{"status":"finalized"}}')$q$,
+        '42501');
       INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules)
       VALUES('approval-policy-probe','koshien',
        '00000000-0000-0000-0000-000000000010',
@@ -1899,6 +1907,16 @@ try:
       INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
       SELECT id,'00000000-0000-0000-0000-000000000001'
       FROM yoso_approval_private.submissions WHERE event_id='approval-policy-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET status='open'
+          WHERE id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_assert(
+        (SELECT status='resultWait' FROM public.events
+          WHERE id='approval-policy-probe'),
+        'pending approval blocks reverting event to prediction entry');
+      RESET ROLE;
       SET ROLE anon;
       SELECT public.test_reject(
         $q$SELECT public.set_koshien_shared_approval_policy(
@@ -1952,6 +1970,12 @@ try:
            'approval-policy-probe','unanimous',1) AS d) s),
         'idempotent repeat does not advance revision');
       RESET ROLE;
+      UPDATE public.events SET status='open'
+      WHERE id='approval-policy-probe';
+      SELECT public.test_assert(
+        (SELECT status='open' FROM public.events
+          WHERE id='approval-policy-probe'),
+        'event can reopen only after pending approval was superseded');
     """
     sql("BEGIN;\n"
         + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
