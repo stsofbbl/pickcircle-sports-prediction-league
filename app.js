@@ -4263,14 +4263,17 @@ async function runKoshienSharedApprovalAction(kind) {
     // Reload both the event and its server-owned approval state, never set a local vote.
     const snapshot = await loadKoshienOnlineState({ force: true });
     if (!snapshot?.ok) await refreshKoshienSharedApprovalState({ renderAfter: false });
-    const message = response?.requires_resubmission
-      ? "結果または参加者が変更されました。最新情報を確認し、管理者が再提出してください。"
+    const stale = response?.submission_status === "stale" || response?.requires_resubmission === true;
+    const message = stale
+      ? "採点設定・代表校・試合結果または参加者が変更され、以前の承認票は無効になりました。最新情報を確認し、管理者が結果を再提出してください。"
       : !snapshot?.ok
         ? "操作は受理されましたが、最新の大会情報を再取得できませんでした。再読み込みしてください。"
         : response?.submission_status === "finalized"
           ? "大会結果がオンラインで確定しました。"
           : submit ? "大会結果を提出しました。参加者の承認を待っています。" : "本人の承認を記録しました。";
-    koshienSharedApprovalNotice = { eventId, message, kind: snapshot?.ok ? "success" : "error" };
+    koshienSharedApprovalNotice = {
+      eventId, message, kind: stale || !snapshot?.ok ? "error" : "success",
+    };
   } catch (error) {
     if (String(state.event?.id || "") === eventId) {
       await refreshKoshienSharedApprovalState({ renderAfter: false });

@@ -151,3 +151,60 @@ test("non-admin and unconfirmed in-progress policy changes never call the server
   assert.equal(unconfirmed.requests.length, 0);
   assert.equal(unconfirmed.context.state.event.approvalPolicy, "half");
 });
+
+
+function approvalActionHarness(response) {
+  const calls = [];
+  const ctx = {
+    state: { event: { id: "event-A", templateId: "koshien", status: "resultWait",
+      resultFlow: { status: "submitted", approvals: {} } } },
+    koshienSharedApprovalView: {
+      eventId: "event-A", loadedFromDb: true, revision: 4,
+      event_status: "resultWait", submission_status: "submitted",
+      current_user_eligible: true, current_user_voted: false,
+      submission_id: "39d5e3be-7ec3-41ee-b8cd-f1ef75e82e5b",
+    },
+    koshienSharedApprovalBusy: false,
+    koshienSharedApprovalNotice: { eventId: "", message: "", kind: "" },
+    currentAuthUser: () => ({ id: "member" }),
+    isCurrentUserAdmin: () => false,
+    render() {},
+    async loadKoshienOnlineState() { return { ok: true }; },
+    async refreshKoshienSharedApprovalState() {},
+    window: {
+      confirm: () => true,
+      YosoDataService: { koshien: {
+        async submitSharedApprovalResults() { throw new Error("unexpected submit"); },
+        async approveSharedApprovalResults(...args) { calls.push(args); return response; },
+      } },
+    },
+  };
+  vm.createContext(ctx);
+  const begin = appSource.indexOf("async function runKoshienSharedApprovalAction(");
+  const end = appSource.indexOf("\nasync function", begin + 10);
+  assert.ok(begin >= 0 && end > begin);
+  vm.runInContext(appSource.slice(begin, end), ctx);
+  return { ctx, calls };
+}
+
+test("stale shared vote is an error, never displayed as a successful approval", async () => {
+  const { ctx, calls } = approvalActionHarness({
+    submission_status: "stale", requires_resubmission: true, revision: 4,
+  });
+  await ctx.runKoshienSharedApprovalAction("approve");
+  assert.equal(calls.length, 1);
+  assert.equal(ctx.koshienSharedApprovalNotice.kind, "error");
+  assert.match(ctx.koshienSharedApprovalNotice.message, /採点設定・代表校/);
+  assert.match(ctx.koshienSharedApprovalNotice.message, /再提出/);
+  assert.equal(ctx.state.event.resultFlow.status, "submitted");
+  assert.equal(ctx.koshienSharedApprovalBusy, false);
+});
+
+test("a newly accepted shared vote still reports success", async () => {
+  const { ctx } = approvalActionHarness({
+    submission_status: "submitted", approved_count: 2, required_count: 4,
+  });
+  await ctx.runKoshienSharedApprovalAction("approve");
+  assert.equal(ctx.koshienSharedApprovalNotice.kind, "success");
+  assert.match(ctx.koshienSharedApprovalNotice.message, /本人の承認を記録しました/);
+});
