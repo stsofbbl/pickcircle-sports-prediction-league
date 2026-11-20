@@ -27,9 +27,12 @@ test("finalized event results can be reopened by an admin", () => {
   assert.match(app.slice(reopenStart, reopenEnd), /loadKoshienOnlineState\(\{ force: true \}\)/);
   assert.match(app.slice(reopenStart, reopenEnd), /state\.event\.resultFlow = normalizeResultFlow\(response\.result_flow/);
   assert.doesNotMatch(app.slice(reopenStart, reopenEnd), /state\.event\.status = previousStatus/);
-  assert.match(app, /resultFlow\.status\s*=\s*"none"/);
-  assert.match(app, /state\.event\.status\s*=\s*"resultWait"/);
-  assert.match(app, /state\.event\.status\s*=\s*"finalized"/);
+  const reopen = app.slice(reopenStart, reopenEnd);
+  assert.match(reopen, /state\.event\.resultFlow = createResultFlow\(\)/);
+  assert.match(reopen, /state\.event\.status = response\.status/);
+  assert.match(reopen, /state\.event\.resultFlow = normalizeResultFlow\(response\.result_flow/);
+  assert.match(reopen, /koshienSharedApprovalView = \{ eventId, loadedFromDb: false \}/);
+  assert.doesNotMatch(reopen, /state\.event\.status = "finalized"/);
 });
 
 test("settings include online league administrator management", () => {
