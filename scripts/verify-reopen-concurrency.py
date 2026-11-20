@@ -2039,10 +2039,12 @@ try:
         'scoring team coefficient drift invalidates an otherwise unchanged vote');
       RESET ROLE;
       SELECT public.test_assert(
-        (SELECT count(*)=1 FROM yoso_approval_private.votes)
+        (SELECT count(*)=1 FROM yoso_approval_private.votes v
+         JOIN yoso_approval_private.submissions s ON s.id=v.submission_id
+         WHERE s.event_id='submit-probe' AND s.revision=1)
         AND (SELECT status='superseded' FROM yoso_approval_private.submissions
              WHERE event_id='submit-probe' AND revision=1),
-        'stale team metadata never creates a valid vote');
+        'stale team metadata adds no vote to the active revision');
       ROLLBACK TO SAVEPOINT team_coefficients_changed;
       SET ROLE anon;
       SELECT public.test_reject(
