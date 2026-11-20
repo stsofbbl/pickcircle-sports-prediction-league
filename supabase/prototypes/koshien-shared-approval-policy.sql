@@ -55,7 +55,16 @@ BEGIN
  END IF;
 
  -- All changes are atomic: neither an outdated vote nor an old resubmission
- -- can finalize under a different quorum.
+ -- can finalize under a different quorum. The policy-only transition permit
+ -- is consumed by the event trigger in this same transaction.
+ INSERT INTO yoso_approval_private.transition_permits(
+   event_id,transaction_id,actor_id,old_status,new_status,
+   old_flow,new_flow,old_policy,new_policy
+ ) VALUES(
+   p_event_id,pg_catalog.txid_current(),v_uid,v_event.status,v_event.status,
+   v_event.rules->'resultFlow',v_event.rules->'resultFlow',
+   v_event.rules->>'approvalPolicy',p_policy
+ );
  UPDATE public.events SET
    rules=pg_catalog.jsonb_set(coalesce(v_event.rules,'{}'::jsonb),
      '{approvalPolicy}',pg_catalog.to_jsonb(p_policy),true),

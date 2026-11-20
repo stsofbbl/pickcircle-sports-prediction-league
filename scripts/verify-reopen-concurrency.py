@@ -1883,6 +1883,13 @@ try:
        '00000000-0000-0000-0000-000000000001','resultWait',
        '{"approvalPolicy":"half","resultFlow":{"status":"none"},"keepMe":"untouched"}');
       SELECT yoso_approval_private.lock_revision('approval-policy-probe');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET
+          rules=jsonb_set(rules,'{approvalPolicy}','"admin"',true)
+          WHERE id='approval-policy-probe'$q$,'42501');
+      RESET ROLE;
       INSERT INTO yoso_approval_private.submissions(
         event_id,revision,policy,eligible_user_ids,required_count,submitted_by,result_snapshot
       ) VALUES('approval-policy-probe',0,'half',ARRAY[
@@ -1919,6 +1926,7 @@ try:
          FROM (SELECT public.set_koshien_shared_approval_policy(
            'approval-policy-probe','unanimous',0) AS d) s),
         'changing policy increases revision');
+      RESET ROLE;
       SELECT public.test_assert(
         (SELECT rules->>'approvalPolicy'='unanimous'
           AND rules->>'keepMe'='untouched'
@@ -1928,10 +1936,13 @@ try:
           WHERE event_id='approval-policy-probe')
         AND (SELECT status='superseded' FROM yoso_approval_private.submissions
           WHERE event_id='approval-policy-probe')
+        AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.transition_permits
+          WHERE event_id='approval-policy-probe')
         AND (SELECT (d->>'submission_status')='none'
           FROM (SELECT public.get_koshien_shared_approval_state(
             'approval-policy-probe') AS d) s),
         'policy preserves unrelated rules and makes old votes uncountable');
+      SET ROLE authenticated;
       SELECT public.test_reject(
         $q$SELECT public.set_koshien_shared_approval_policy(
           'approval-policy-probe','admin',0)$q$,'40001');
