@@ -11,6 +11,10 @@ function fixture({ online = true, templateId = "koshien", policy = "admin" } = {
   } };
   const context = { state, Date, renders: 0,
     koshienSharedApprovalView: { eventId: "", loadedFromDb: false },
+    koshienSharedApprovalBusy: false,
+    koshienSharedApprovalNotice: { eventId: "", message: "", kind: "" },
+    currentAuthUser: () => null,
+    isCurrentUserAdmin: () => true,
     escapeHtml: (value) => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"),
     window: { YosoDataService: { shouldAutoSaveKoshien: () => online } },
     baseTemplateId: id => id, currentParticipantName: () => "Owner",
@@ -89,4 +93,27 @@ test("online panel renders shared server progress read-only and rejects another 
   assert.match(c.resultFlowPanel(), /確定済み/);
   c.koshienSharedApprovalView.eventId = "other-event";
   assert.match(c.resultFlowPanel(), /オンライン共有に未対応/);
+});
+
+test("online panel offers submit only when not submitted and own vote only when eligible", () => {
+  const c = fixture();
+  const start = source.indexOf("function resultFlowPanel()");
+  const end = source.indexOf("function resultFlowMessage()", start);
+  vm.runInContext(source.slice(start, end), c);
+  c.koshienSharedApprovalView = {
+    eventId: "evt", loadedFromDb: true, event_status: "resultWait",
+    submission_status: "none", revision: 0,
+  };
+  assert.match(c.resultFlowPanel(), /data-result-submit/);
+  assert.doesNotMatch(c.resultFlowPanel(), /data-result-approve/);
+  c.koshienSharedApprovalView = {
+    ...c.koshienSharedApprovalView, submission_status: "submitted",
+    current_user_eligible: true, current_user_voted: false,
+  };
+  assert.match(c.resultFlowPanel(), /data-result-approve/);
+  assert.doesNotMatch(c.resultFlowPanel(), /data-result-submit/);
+  c.koshienSharedApprovalView.current_user_voted = true;
+  assert.doesNotMatch(c.resultFlowPanel(), /data-result-approve/);
+  c.koshienSharedApprovalBusy = true;
+  assert.match(c.resultFlowPanel(), /data-shared-approval-refresh disabled/);
 });

@@ -343,6 +343,8 @@ let koshienPhase2DraftMessageKind = "";
 let koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
 let koshienOnlineRankingView = { eventId: "", loadedFromDb: false, members: [], players: [], scores: [] };
 let koshienSharedApprovalView = { eventId: "", loadedFromDb: false };
+let koshienSharedApprovalBusy = false;
+let koshienSharedApprovalNotice = { eventId: "", message: "", kind: "" };
 let koshienLaterPhaseLoading = false;
 let koshienLaterPhaseSaving = false;
 let koshienLaterAdminSaving = "";
@@ -1712,6 +1714,8 @@ async function loadKoshienOnlineState({ force = false } = {}) {
     try {
       const snapshot = await window.YosoDataService.koshien.loadSnapshot({ eventId: selectedEventId });
       if (snapshot?.ok) {
+        // A delayed response must never replace a different selected event.
+        if (selectedEventId && String(state.activeEventId || state.event?.id || "") !== selectedEventId) return null;
         applyKoshienOnlineSnapshot(snapshot);
         lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
         await Promise.all([
@@ -4015,6 +4019,9 @@ function bindActiveEventManagerInputs() {
   root.querySelectorAll("[data-result-reopen]").forEach((button) => {
     button.addEventListener("click", reopenFinalizedResults);
   });
+  root.querySelectorAll("[data-shared-approval-refresh]").forEach((button) => {
+    button.addEventListener("click", reloadKoshienSharedApproval);
+  });
 }
 
 function tournamentCardMarkup(event, { status, statusClass, actionLabel, missingCount, showDeadline, showManageActions = false }) {
@@ -4213,8 +4220,81 @@ function isResultFinalized(event = state.event) {
   return event?.resultFlow?.status === "finalized";
 }
 
+async function runKoshienSharedApprovalAction(kind) {
+  if (koshienSharedApprovalBusy || !currentAuthUser()) return;
+  const eventId = String(state.event?.id || "");
+  const flow = koshienSharedApprovalView;
+  const revision = Number(flow.revision);
+  if (!eventId || !flow.loadedFromDb || flow.eventId !== eventId
+      || !Number.isSafeInteger(revision) || revision < 0) return;
+  const submit = kind === "submit";
+  const allowed = submit
+    ? flow.event_status === "resultWait" && flow.submission_status === "none" && isCurrentUserAdmin()
+    : kind === "approve" && flow.event_status === "resultWait"
+      && flow.submission_status === "submitted" && flow.current_user_eligible === true
+      && flow.current_user_voted !== true && Boolean(flow.submission_id);
+  if (!allowed) return;
+  const service = window.YosoDataService?.koshien;
+  if (!service?.submitSharedApprovalResults || !service?.approveSharedApprovalResults) return;
+  const confirmation = submit
+    ? "保存済みの全48試合と得点を大会結果として提出しますか？"
+    : "本人の承認票を送信しますか？必要票数に達すると大会結果が確定します。";
+  if (!window.confirm(confirmation)) return;
+  koshienSharedApprovalBusy = true;
+  koshienSharedApprovalNotice = { eventId, message: "", kind: "" };
+  render();
+  try {
+    const response = submit
+      ? await service.submitSharedApprovalResults(eventId, revision)
+      : await service.approveSharedApprovalResults(eventId, flow.submission_id, revision);
+    if (String(state.event?.id || "") !== eventId) return;
+    // Reload both the event and its server-owned approval state, never set a local vote.
+    const snapshot = await loadKoshienOnlineState({ force: true });
+    if (!snapshot?.ok) await refreshKoshienSharedApprovalState({ renderAfter: false });
+    const message = response?.requires_resubmission
+      ? "結果または参加者が変更されました。最新情報を確認し、管理者が再提出してください。"
+      : !snapshot?.ok
+        ? "操作は受理されましたが、最新の大会情報を再取得できませんでした。再読み込みしてください。"
+        : response?.submission_status === "finalized"
+          ? "大会結果がオンラインで確定しました。"
+          : submit ? "大会結果を提出しました。参加者の承認を待っています。" : "本人の承認を記録しました。";
+    koshienSharedApprovalNotice = { eventId, message, kind: snapshot?.ok ? "success" : "error" };
+  } catch (error) {
+    if (String(state.event?.id || "") === eventId) {
+      await refreshKoshienSharedApprovalState({ renderAfter: false });
+      koshienSharedApprovalNotice = {
+        eventId, message: error?.message || "操作に失敗しました。最新状態をご確認ください。", kind: "error",
+      };
+    }
+  } finally {
+    koshienSharedApprovalBusy = false;
+    if (String(state.event?.id || "") === eventId) render();
+  }
+}
+
+async function reloadKoshienSharedApproval() {
+  if (koshienSharedApprovalBusy || !currentAuthUser()) return;
+  const eventId = String(state.event?.id || "");
+  koshienSharedApprovalBusy = true;
+  render();
+  try {
+    const snapshot = await loadKoshienOnlineState({ force: true });
+    if (!snapshot?.ok) throw new Error("最新の大会情報を取得できませんでした。");
+    if (String(state.event?.id || "") === eventId) {
+      koshienSharedApprovalNotice = { eventId, message: "最新の承認状況を取得しました。", kind: "success" };
+    }
+  } catch (error) {
+    if (String(state.event?.id || "") === eventId) {
+      koshienSharedApprovalNotice = { eventId, message: error?.message || "再取得できませんでした。", kind: "error" };
+    }
+  } finally {
+    koshienSharedApprovalBusy = false;
+    if (String(state.event?.id || "") === eventId) render();
+  }
+}
+
 function submitResults() {
-  if (isOnlineKoshienResultFlow()) return;
+  if (isOnlineKoshienResultFlow()) return runKoshienSharedApprovalAction("submit");
   ensureResultFlow();
   const name = currentParticipantName();
   state.event.resultFlow.status = "submitted";
@@ -4226,7 +4306,7 @@ function submitResults() {
 }
 
 function approveResults(name) {
-  if (isOnlineKoshienResultFlow()) return;
+  if (isOnlineKoshienResultFlow()) return runKoshienSharedApprovalAction("approve");
   ensureResultFlow();
   const approver = name || currentParticipantName();
   if (!approver) return;
@@ -4594,10 +4674,26 @@ function resultFlowPanel() {
     const required = Number.isInteger(Number(flow.required_count)) ? Math.max(0, Number(flow.required_count)) : 0;
     const mine = flow.current_user_voted === true ? "承認済み"
       : flow.current_user_eligible === true ? "未承認" : "承認対象外";
+    const waiting = flow.event_status === "resultWait";
+    const canSubmit = waiting && flow.submission_status === "none" && isCurrentUserAdmin();
+    const canApprove = waiting && flow.submission_status === "submitted"
+      && flow.current_user_eligible === true && flow.current_user_voted !== true;
+    const canReopen = flow.event_status === "finalized"
+      && isResultFinalized(state.event) && isCurrentUserAdmin();
+    const busy = koshienSharedApprovalBusy ? "disabled" : "";
+    const notice = koshienSharedApprovalNotice.eventId === flow.eventId
+      ? koshienSharedApprovalNotice : null;
     return `<div class="entry-block result-flow-panel">
       <h3>大会全体の結果確定：${escapeHtml(status)}</h3>
       <div class="result-flow-meta"><span>承認：${approved} / ${required}人</span><span>あなた：${escapeHtml(mine)}</span></div>
-      <p class="helper-text">オンライン共有の承認状況です。提出・承認の操作は安全確認が完了するまで無効です。</p>
+      <div class="result-flow-actions">
+        ${canSubmit ? `<button type="button" class="primary-button" data-result-submit ${busy}>結果を提出</button>` : ""}
+        ${canApprove ? `<button type="button" class="primary-button" data-result-approve ${busy}>本人として承認</button>` : ""}
+        ${canReopen ? `<button type="button" class="ghost-button danger-action" data-result-reopen ${busy}>結果確定を取り消す</button>` : ""}
+        <button type="button" class="ghost-button" data-shared-approval-refresh ${busy}>最新状態を確認</button>
+      </div>
+      ${notice?.message ? `<p class="helper-text" role="status">${escapeHtml(notice.message)}</p>` : ""}
+      <p class="helper-text">提出・承認はログイン中の本人としてオンライン保存されます。</p>
     </div>`;
   }
   ensureResultFlow();
@@ -4683,6 +4779,7 @@ async function reopenFinalizedResults() {
       await window.YosoDataService.koshien.reopenKoshienResults(String(state.event.id));
     }
     applyReopenedState();
+    if (shouldSaveOnline) await refreshKoshienSharedApprovalState({ renderAfter: false });
     setKoshienMatchMessage("大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。", "success");
   } catch (error) {
     state.event.status = previousStatus;
@@ -6228,6 +6325,9 @@ function bindGenericInputs() {
   });
   els.eventForm.querySelectorAll("[data-result-reopen]").forEach((button) => {
     button.addEventListener("click", reopenFinalizedResults);
+  });
+  els.eventForm.querySelectorAll("[data-shared-approval-refresh]").forEach((button) => {
+    button.addEventListener("click", reloadKoshienSharedApproval);
   });
   els.eventForm.querySelectorAll("[data-result-index]").forEach((input) => {
     input.addEventListener("change", () => {

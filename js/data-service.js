@@ -385,6 +385,31 @@
     }, "shared_approval_read");
   }
 
+  async function submitSharedApprovalResults(eventId, revision) {
+    const id = String(eventId || "").trim();
+    if (!id || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("大会IDと承認revisionを再取得してください。");
+    }
+    return laterPhaseRpc("submit_koshien_shared_results", {
+      p_event_id: id,
+      p_expected_revision: revision,
+    }, "shared_approval_submit");
+  }
+
+  async function approveSharedApprovalResults(eventId, submissionId, revision) {
+    const id = String(eventId || "").trim();
+    const submission = String(submissionId || "").trim();
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(submission)
+        || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("承認対象を最新状態から再取得してください。");
+    }
+    return laterPhaseRpc("approve_koshien_shared_results", {
+      p_event_id: id,
+      p_submission_id: submission,
+      p_expected_revision: revision,
+    }, "shared_approval_vote");
+  }
+
   async function reopenKoshienResults(eventId) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("結果確定取消のevent_idが必要です。");
@@ -1381,6 +1406,8 @@
       cancelKoshienMatchResult,
       reopenKoshienResults,
       loadSharedApprovalState,
+      submitSharedApprovalResults,
+      approveSharedApprovalResults,
     },
     local: {
       loadState: loadLocalState,
