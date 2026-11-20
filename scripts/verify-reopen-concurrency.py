@@ -150,6 +150,7 @@ GRANT EXECUTE ON FUNCTION yoso_approval_private.begin_result_write(text) TO auth
 ALTER TABLE public.events ADD COLUMN status text DEFAULT 'resultWait';
 ALTER TABLE public.events ADD COLUMN rules jsonb DEFAULT '{}';
 -- Mirror production event scoring columns for the shared approval fixtures.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS name text;
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS rules_config jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS current_phase text NOT NULL DEFAULT 'setup';
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS sport_type text;
