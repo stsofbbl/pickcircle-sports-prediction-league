@@ -16,6 +16,8 @@ DECLARE
  v_cards jsonb;
  v_results jsonb;
  v_scores jsonb;
+ v_teams jsonb;
+ v_event_context jsonb;
  v_flow jsonb;
  v_finalized_at timestamptz;
 BEGIN
@@ -83,6 +85,27 @@ BEGIN
  IF NOT v_uid=ANY(v_submission.eligible_user_ids) THEN
    RAISE EXCEPTION 'voter is not eligible' USING ERRCODE='42501';
  END IF;
+ -- Each vote verifies the same scoring definition and team coefficients
+ -- that the submitting administrator signed. A direct metadata change must
+ -- invalidate old votes even when matches and stored scores look identical.
+ v_event_context := jsonb_build_object(
+   'rules',coalesce(v_event.rules,'{}'::jsonb) - 'approvalPolicy' - 'resultFlow',
+   'rules_config',v_event.rules_config,
+   'current_phase',v_event.current_phase,
+   'prediction_deadline',v_event.prediction_deadline,
+   'sport_type',v_event.sport_type,
+   'season',v_event.season
+ );
+ SELECT coalesce(jsonb_agg(to_jsonb(t) - 'created_at' - 'updated_at'
+    ORDER BY t.id),'[]'::jsonb)
+ INTO v_teams FROM public.teams t WHERE t.event_id=p_event_id;
+ IF v_event_context IS DISTINCT FROM v_submission.result_snapshot->'event_context'
+    OR v_teams IS DISTINCT FROM v_submission.result_snapshot->'teams' THEN
+   UPDATE yoso_approval_private.submissions SET status='superseded'
+   WHERE id=v_submission.id;
+   RETURN jsonb_build_object('submission_status','stale',
+     'requires_resubmission',true,'revision',v_revision);
+ END IF;
  INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
  VALUES(v_submission.id,v_uid) ON CONFLICT DO NOTHING;
  GET DIAGNOSTICS v_inserted=ROW_COUNT;
@@ -103,7 +126,8 @@ BEGIN
  WHERE s.event_id=p_event_id AND p.league_id=v_event.league_id
    AND p.profile_id=ANY(v_submission.eligible_user_ids);
  IF jsonb_build_object('matches',v_cards,'results',v_results,
-      'scores',v_scores) IS DISTINCT FROM v_submission.result_snapshot THEN
+      'scores',v_scores,'event_context',v_event_context,'teams',v_teams)
+      IS DISTINCT FROM v_submission.result_snapshot THEN
    UPDATE yoso_approval_private.submissions SET status='superseded'
    WHERE id=v_submission.id;
    RETURN jsonb_build_object('submission_status','stale',

@@ -149,6 +149,12 @@ GRANT SELECT,UPDATE ON public.external_match_imports TO authenticated;
 GRANT EXECUTE ON FUNCTION yoso_approval_private.begin_result_write(text) TO authenticated;
 ALTER TABLE public.events ADD COLUMN status text DEFAULT 'resultWait';
 ALTER TABLE public.events ADD COLUMN rules jsonb DEFAULT '{}';
+-- Mirror production event scoring columns for the shared approval fixtures.
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS rules_config jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS current_phase text NOT NULL DEFAULT 'setup';
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS sport_type text;
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS season text;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS odds numeric DEFAULT 1;
 DROP POLICY IF EXISTS results_admin ON public.results;
 CREATE POLICY results_admin ON public.results FOR ALL TO authenticated
  USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=event_id AND public.is_league_admin(e.league_id)))
@@ -1916,6 +1922,25 @@ try:
         (SELECT status='resultWait' FROM public.events
           WHERE id='approval-policy-probe'),
         'pending approval blocks reverting event to prediction entry');
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET rules_config='{"stagePoints":{"champion":999}}'
+        WHERE id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET rules=jsonb_set(rules,'{config}',
+          '{"captainMultiplier":100}'::jsonb,true)
+        WHERE id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET current_phase='phase3'
+        WHERE id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET prediction_deadline=clock_timestamp()
+        WHERE id='approval-policy-probe'$q$,'55000');
+      UPDATE public.events SET name='Renamed without touching scoring'
+        WHERE id='approval-policy-probe';
+      SELECT public.test_assert(
+        (SELECT name='Renamed without touching scoring' FROM public.events
+          WHERE id='approval-policy-probe'),
+        'a harmless title change remains permitted during pending approval');
       RESET ROLE;
       SET ROLE anon;
       SELECT public.test_reject(
@@ -1970,6 +1995,13 @@ try:
            'approval-policy-probe','unanimous',1) AS d) s),
         'idempotent repeat does not advance revision');
       RESET ROLE;
+      UPDATE public.events
+        SET rules_config='{"stagePoints":{"champion":999}}'
+        WHERE id='approval-policy-probe';
+      SELECT public.test_assert(
+        (SELECT rules_config->'stagePoints'->>'champion'='999'
+         FROM public.events WHERE id='approval-policy-probe'),
+        'scoring settings can change only after old submission is superseded');
       UPDATE public.events SET status='open'
       WHERE id='approval-policy-probe';
       SELECT public.test_assert(
@@ -1993,6 +2025,24 @@ try:
       SELECT set_config('yoso.fixture_submission_id',(
         SELECT id::text FROM yoso_approval_private.submissions
         WHERE event_id='submit-probe' AND status='submitted'),false);
+      SAVEPOINT team_coefficients_changed;
+      UPDATE public.teams SET odds=odds+1
+      WHERE event_id='submit-probe' AND name='Seed A';
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='stale'
+          AND (x->>'requires_resubmission')::boolean=true
+         FROM (SELECT public.approve_koshien_shared_results(
+           'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'scoring team coefficient drift invalidates an otherwise unchanged vote');
+      RESET ROLE;
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM yoso_approval_private.votes)
+        AND (SELECT status='superseded' FROM yoso_approval_private.submissions
+             WHERE event_id='submit-probe' AND revision=1),
+        'stale team metadata never creates a valid vote');
+      ROLLBACK TO SAVEPOINT team_coefficients_changed;
       SET ROLE anon;
       SELECT public.test_reject(
         $q$SELECT public.approve_koshien_shared_results(
@@ -2097,6 +2147,16 @@ try:
        AND (SELECT count(*)=1 FROM yoso_approval_private.submissions
         WHERE event_id='submit-probe' AND revision=3 AND status='finalized'),
        'admin submit created one final approval');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET rules_config='{"phase2Points":{"best16":777}}'
+         WHERE id='submit-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET
+          rules=jsonb_set(rules,'{config}','{"captainMultiplier":99}'::jsonb,true)
+          WHERE id='submit-probe'$q$,'55000');
+      RESET ROLE;
       -- half=ceil(4/2)=2: initial admin submit remains pending until another member.
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
@@ -2130,8 +2190,11 @@ try:
       INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules,prediction_deadline)
       VALUES('submit-probe','koshien','00000000-0000-0000-0000-000000000010',
         '00000000-0000-0000-0000-000000000001','resultWait',
-        '{"approvalPolicy":"unanimous","resultFlow":{"status":"none"}}',
+        '{"approvalPolicy":"unanimous","resultFlow":{"status":"none"},'
+         || '"config":{"phase2Points":{"best16":20}}}',
         now()-interval '1 day');
+      UPDATE public.events SET rules_config='{"phase2Points":{"best16":20}}'
+      WHERE id='submit-probe';
       INSERT INTO public.league_members(league_id,user_id,role,membership_status)
       SELECT '00000000-0000-0000-0000-000000000010',
         ('29000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,'member','active'
@@ -2211,6 +2274,22 @@ try:
           LATERAL jsonb_array_elements(s.result_snapshot->'matches') v
          WHERE s.event_id='submit-probe'),
         'private audit snapshot contains four scores and 48 cards');
+      SELECT public.test_assert(
+        (SELECT result_snapshot->'event_context'->'rules'->'config'
+                  ->'phase2Points'->>'best16'='20'
+           AND result_snapshot->'event_context'->'rules_config'
+                  ->'phase2Points'->>'best16'='20'
+           AND jsonb_array_length(result_snapshot->'teams')=2
+         FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe' AND revision=0),
+        'private approval audit includes event configuration and team coefficients');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$UPDATE public.events
+        SET rules_config='{"phase2Points":{"best16":900}}'
+        WHERE id='submit-probe'$q$,'55000');
+      RESET ROLE;
       SAVEPOINT invalid_snapshot;
       SELECT yoso_approval_private.issue_write_permit('submit-probe');
       UPDATE public.results

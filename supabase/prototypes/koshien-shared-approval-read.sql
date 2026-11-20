@@ -112,15 +112,41 @@ BEGIN
    END IF;
    RETURN NEW;
  END IF;
- IF (OLD.preset_type='koshien' OR NEW.preset_type='koshien')
-   AND NEW.status IS DISTINCT FROM OLD.status
-   AND NEW.status IS DISTINCT FROM 'finalized'
-   AND EXISTS (
-     SELECT 1 FROM yoso_approval_private.submissions s
-     WHERE s.event_id=OLD.id AND s.status='submitted'
-   ) THEN
-   RAISE EXCEPTION 'pending result approval blocks changing event status'
-     USING ERRCODE='55000';
+ IF OLD.preset_type='koshien' OR NEW.preset_type='koshien' THEN
+   -- Only actual pending submissions block a status rollback. A normal
+   -- shared quorum may still change resultWait -> finalized; that transition
+   -- is separately protected by the exact one-use transition permit.
+   IF NEW.status IS DISTINCT FROM OLD.status
+     AND NEW.status IS DISTINCT FROM 'finalized'
+     AND EXISTS (
+       SELECT 1 FROM yoso_approval_private.submissions s
+       WHERE s.event_id=OLD.id AND s.status='submitted'
+     ) THEN
+     RAISE EXCEPTION 'pending result approval blocks changing event status'
+       USING ERRCODE='55000';
+   END IF;
+
+   -- Do not let ordinary events UPDATE/RLS change a scoring definition
+   -- underneath already cast approval votes or a finalized tournament.
+   -- The legitimate policy RPC changes only approvalPolicy, and the
+   -- finalize/reopen RPCs change only resultFlow/status.
+   IF (
+       (coalesce(NEW.rules,'{}'::jsonb) - 'approvalPolicy' - 'resultFlow')
+         IS DISTINCT FROM
+       (coalesce(OLD.rules,'{}'::jsonb) - 'approvalPolicy' - 'resultFlow')
+       OR NEW.rules_config IS DISTINCT FROM OLD.rules_config
+       OR NEW.current_phase IS DISTINCT FROM OLD.current_phase
+       OR NEW.prediction_deadline IS DISTINCT FROM OLD.prediction_deadline
+       OR NEW.sport_type IS DISTINCT FROM OLD.sport_type
+       OR NEW.season IS DISTINCT FROM OLD.season
+     )
+     AND (OLD.status='finalized' OR EXISTS (
+       SELECT 1 FROM yoso_approval_private.submissions s
+       WHERE s.event_id=OLD.id AND s.status='submitted'
+     )) THEN
+     RAISE EXCEPTION 'approval-sensitive event settings require reopening or resubmission'
+       USING ERRCODE='55000';
+   END IF;
  END IF;
  RETURN NEW;
 END;
@@ -128,5 +154,5 @@ $function$;
 REVOKE ALL ON FUNCTION yoso_approval_private.protect_shared_approval_event_status()
  FROM PUBLIC,anon,authenticated,service_role;
 CREATE TRIGGER yoso_protect_shared_approval_event_status
- BEFORE INSERT OR UPDATE OF status ON public.events
+ BEFORE INSERT OR UPDATE ON public.events
  FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_shared_approval_event_status();

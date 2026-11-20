@@ -15,6 +15,8 @@ DECLARE
  v_results jsonb;
  v_scores jsonb;
  v_cards jsonb;
+ v_teams jsonb;
+ v_event_context jsonb;
  v_scored integer;
  v_existing yoso_approval_private.submissions;
  v_finalized yoso_approval_private.submissions;
@@ -133,6 +135,20 @@ BEGIN
  END IF;
  SELECT coalesce(jsonb_agg(to_jsonb(m) ORDER BY m.round_key,m.match_no),'[]'::jsonb)
  INTO v_cards FROM public.matches m WHERE m.event_id=p_event_id;
+ -- Persist the actual scoring definition and team coefficients alongside
+ -- the authoritative result rows. Do not treat an identical scores row as
+ -- proof that the underlying scoring parameters stayed unchanged.
+ v_event_context := jsonb_build_object(
+   'rules',coalesce(v_event.rules,'{}'::jsonb) - 'approvalPolicy' - 'resultFlow',
+   'rules_config',v_event.rules_config,
+   'current_phase',v_event.current_phase,
+   'prediction_deadline',v_event.prediction_deadline,
+   'sport_type',v_event.sport_type,
+   'season',v_event.season
+ );
+ SELECT coalesce(jsonb_agg(to_jsonb(t) - 'created_at' - 'updated_at'
+    ORDER BY t.id),'[]'::jsonb)
+ INTO v_teams FROM public.teams t WHERE t.event_id=p_event_id;
 
  -- Revision changes supersede older submissions, without reusing their votes.
  UPDATE yoso_approval_private.submissions SET status='superseded'
@@ -159,7 +175,8 @@ BEGIN
     submitted_by,status,result_snapshot
  ) VALUES(p_event_id,v_revision,v_policy,v_eligible,v_required,v_uid,
   'submitted',jsonb_build_object('matches',v_cards,'results',v_results,
-  'scores',v_scores)) RETURNING id INTO v_id;
+  'scores',v_scores,'event_context',v_event_context,'teams',v_teams)
+ ) RETURNING id INTO v_id;
  INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
  VALUES(v_id,v_uid);
  -- Preserve legacy admin=1 policy: submission and finalization are atomic.
