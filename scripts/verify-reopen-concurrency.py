@@ -2051,8 +2051,9 @@ try:
         'reopen revision invalidates previous finalized approval');
       RESET ROLE;
       -- admin=1 must finalize in the same transaction, including its retry.
-      UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}','"admin"'::jsonb,true)
-      WHERE id='submit-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.set_koshien_shared_approval_policy('submit-probe','admin',2);
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_assert(
@@ -2060,44 +2061,43 @@ try:
          AND (x->>'approved_count')::int=1
          AND (x->>'required_count')::int=1
          AND (x->>'idempotent')::boolean=false
-        FROM (SELECT public.submit_koshien_shared_results('submit-probe',2) x) r),
+        FROM (SELECT public.submit_koshien_shared_results('submit-probe',3) x) r),
        'admin policy first vote finalizes atomically');
       SELECT public.test_assert(
        (SELECT (x->>'idempotent')::boolean=true
-        FROM (SELECT public.submit_koshien_shared_results('submit-probe',2) x) r),
+        FROM (SELECT public.submit_koshien_shared_results('submit-probe',3) x) r),
        'repeated finalized admin submission returns idempotently');
       RESET ROLE;
       SELECT public.test_assert(
        (SELECT status='finalized' FROM public.events WHERE id='submit-probe')
        AND (SELECT count(*)=1 FROM yoso_approval_private.submissions
-        WHERE event_id='submit-probe' AND revision=2 AND status='finalized'),
+        WHERE event_id='submit-probe' AND revision=3 AND status='finalized'),
        'admin submit created one final approval');
       -- half=ceil(4/2)=2: initial admin submit remains pending until another member.
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
       SELECT public.reopen_koshien_results('submit-probe');
+      SELECT public.set_koshien_shared_approval_policy('submit-probe','half',4);
       RESET ROLE;
-      UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}','"half"'::jsonb,true)
-      WHERE id='submit-probe';
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_assert(
        (SELECT (x->>'submission_status')='submitted'
          AND (x->>'required_count')::int=2
          AND (x->>'approved_count')::int=1
-        FROM (SELECT public.submit_koshien_shared_results('submit-probe',3) x) r),
+        FROM (SELECT public.submit_koshien_shared_results('submit-probe',5) x) r),
        'half policy awaits second voter');
       RESET ROLE;
       SELECT set_config('yoso.fixture_submission_id',(
         SELECT id::text FROM yoso_approval_private.submissions
-        WHERE event_id='submit-probe' AND revision=3),false);
+        WHERE event_id='submit-probe' AND revision=5),false);
       SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_assert(
        (SELECT (x->>'submission_status')='finalized'
          AND (x->>'approved_count')::int=2
         FROM (SELECT public.approve_koshien_shared_results(
-           'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,3) x) r),
+           'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,5) x) r),
        'half policy finalizes at two of four members');
       RESET ROLE;
     """
@@ -2229,6 +2229,7 @@ try:
         + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
         + (root / "supabase/prototypes/koshien-shared-approval-submit.sql").read_text()
         + (root / "supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
+        + (root / "supabase/prototypes/koshien-shared-approval-policy.sql").read_text()
         + submit_checks + approve_checks + "\nROLLBACK;")
     assert snapshot()==before, "shared approval submit/vote must roll back all changes"
     assert sql("SELECT to_regprocedure('public.submit_koshien_shared_results(text,bigint)') IS NULL;")=="t"
@@ -2254,16 +2255,18 @@ try:
         setup=("BEGIN;"
           +(root/"supabase/prototypes/koshien-shared-approval-read.sql").read_text()
           +(root/"supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
+          +(root/"supabase/prototypes/koshien-shared-approval-policy.sql").read_text()
           +"INSERT INTO public.players(id,league_id,profile_id) "
            "VALUES('87000000-0000-4000-8000-000000000002',"
            "'00000000-0000-0000-0000-000000000010',"
            "'00000000-0000-0000-0000-000000000002');"
-           "UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}',"
-           "'\"unanimous\"'::jsonb,true) WHERE id='manual-b';"
+           +AUTH+
+           "DO $d$ BEGIN PERFORM public.set_koshien_shared_approval_policy("
+           "'manual-b','unanimous',"+str(rev)+"); END $d$; RESET ROLE;"
           +"INSERT INTO yoso_approval_private.submissions("
            "event_id,revision,policy,eligible_user_ids,required_count,"
            "submitted_by,status,result_snapshot) VALUES('manual-b',"+
-           str(rev)+",'unanimous',ARRAY["
+           str(rev+1)+",'unanimous',ARRAY["
            "'00000000-0000-0000-0000-000000000001'::uuid,"
            "'00000000-0000-0000-0000-000000000002'::uuid],2,"
            "'00000000-0000-0000-0000-000000000001','submitted','{}'::jsonb);"
@@ -2275,7 +2278,7 @@ try:
            "WHERE event_id='manual-b'),true); END $block$;"
            +AUTH+
            "SELECT public.approve_koshien_shared_results('manual-b',"
-           "current_setting('yoso.test_sub_id')::uuid,"+str(rev)+");")
+           "current_setting('yoso.test_sub_id')::uuid,"+str(rev+1)+");")
         send(a,setup)
         response=json.loads(line(a))
         assert response["submission_status"]=="submitted" and response["approved_count"]==1,response
