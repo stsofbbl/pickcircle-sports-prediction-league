@@ -255,6 +255,7 @@ const els = {
   tournamentManageList: document.querySelector("#tournamentManageList"),
   approvalRuleText: document.querySelector("#approvalRuleText"),
   approvalPolicyGroup: document.querySelector("#approvalPolicyGroup"),
+  approvalPolicyStatus: document.querySelector("#approvalPolicyStatus"),
   leagueName: document.querySelector("#leagueName"),
   participantList: document.querySelector("#participantList"),
   leagueAdminManager: document.querySelector("#leagueAdminManager"),
@@ -345,6 +346,7 @@ let koshienOnlineRankingView = { eventId: "", loadedFromDb: false, members: [], 
 let koshienSharedApprovalView = { eventId: "", loadedFromDb: false };
 let koshienSharedApprovalBusy = false;
 let koshienSharedApprovalNotice = { eventId: "", message: "", kind: "" };
+let koshienApprovalPolicyNotice = { eventId: "", message: "" };
 let koshienLaterPhaseLoading = false;
 let koshienLaterPhaseSaving = false;
 let koshienLaterAdminSaving = "";
@@ -2923,7 +2925,17 @@ function renderDashboard() {
   if (els.homeMissingTournamentCount) els.homeMissingTournamentCount.textContent = missingTournamentCount;
   if (els.homeMonthScore) els.homeMonthScore.textContent = formatScore(myScore);
   if (els.homeTotalScore) els.homeTotalScore.textContent = formatScore(myScore);
-  if (els.approvalRuleText) els.approvalRuleText.textContent = `結果確定には${approvalRequired}人の承認が必要`;
+  if (els.approvalRuleText) {
+    const flow = koshienSharedApprovalView;
+    const online = isOnlineKoshienResultFlow();
+    const shared = online && flow.loadedFromDb
+      && flow.eventId === String(state.event?.id || "");
+    els.approvalRuleText.textContent = shared
+      ? flow.submission_status !== "none" && Number.isSafeInteger(flow.required_count)
+        ? `結果確定には${flow.required_count}人の承認が必要`
+        : "承認人数は結果提出時に確定します"
+      : online ? "オンラインの承認条件を確認中" : `結果確定には${approvalRequired}人の承認が必要`;
+  }
   renderHomeReadinessPanel({ participant, missingTournamentCount, openEvents });
   renderApprovalPolicy();
 
@@ -4224,7 +4236,7 @@ async function runKoshienSharedApprovalAction(kind) {
   if (koshienSharedApprovalBusy || !currentAuthUser()) return;
   const eventId = String(state.event?.id || "");
   const flow = koshienSharedApprovalView;
-  const revision = Number(flow.revision);
+  const revision = flow.revision;
   if (!eventId || !flow.loadedFromDb || flow.eventId !== eventId
       || !Number.isSafeInteger(revision) || revision < 0) return;
   const submit = kind === "submit";
@@ -4330,12 +4342,86 @@ function ensureResultFlow() {
   state.event.resultFlow = normalizeResultFlow(state.event.resultFlow, state.participants);
 }
 
+async function updateKoshienSharedApprovalPolicy(policy) {
+  if (koshienSharedApprovalBusy || !isOnlineKoshienResultFlow()
+      || !currentAuthUser() || !isCurrentUserAdmin()) return;
+  const eventId = String(state.event?.id || "");
+  const flow = koshienSharedApprovalView;
+  if (!["admin", "half", "unanimous"].includes(policy)
+      || !eventId || !flow.loadedFromDb || flow.eventId !== eventId
+      || !Number.isSafeInteger(flow.revision) || flow.revision < 0
+      || !["open", "resultWait"].includes(flow.event_status)
+      || !["open", "resultWait"].includes(state.event.status)) return;
+  if (policy === flow.approval_policy) return;
+  const service = window.YosoDataService?.koshien;
+  if (!service?.setSharedApprovalPolicy) return;
+  if (flow.submission_status === "submitted"
+      && !window.confirm("承認方式を変更すると提出済み結果の承認票が無効になります。管理者による再提出が必要です。続行しますか？")) return;
+
+  koshienSharedApprovalBusy = true;
+  koshienApprovalPolicyNotice = { eventId, message: "" };
+  renderApprovalPolicy();
+  try {
+    const response = await service.setSharedApprovalPolicy(eventId, policy, flow.revision);
+    if (String(state.event?.id || "") !== eventId) return;
+    if (response?.event_id !== eventId || response?.policy !== policy) {
+      throw new Error("保存された承認方式の応答が一致しません。");
+    }
+    // Preserve the DB as the source of truth; never apply the selected value locally.
+    const snapshot = await loadKoshienOnlineState({ force: true });
+    if (!snapshot?.ok) throw new Error("保存後の再取得に失敗しました。最新状態を確認してください。");
+    if (String(state.event?.id || "") === eventId) {
+      koshienApprovalPolicyNotice = {
+        eventId,
+        message: response?.requires_resubmission && flow.submission_status === "submitted"
+          ? "承認方式を変更しました。以前の票は無効です。結果を再提出してください。"
+          : "オンラインの承認方式を保存しました。",
+      };
+    }
+  } catch (error) {
+    if (String(state.event?.id || "") === eventId) {
+      await refreshKoshienSharedApprovalState({ renderAfter: false });
+      koshienApprovalPolicyNotice = {
+        eventId, message: error?.message || "承認方式を保存できませんでした。",
+      };
+    }
+  } finally {
+    koshienSharedApprovalBusy = false;
+    if (String(state.event?.id || "") === eventId) render();
+  }
+}
+
 function renderApprovalPolicy() {
   if (!els.approvalPolicyGroup) return;
-  const policy = state.event?.approvalPolicy || state.approvalPolicy || "half";
+  const online = isOnlineKoshienResultFlow();
+  const policy = online && koshienSharedApprovalView.loadedFromDb
+    && ["admin", "half", "unanimous"].includes(koshienSharedApprovalView.approval_policy)
+    ? koshienSharedApprovalView.approval_policy
+    : state.event?.approvalPolicy || state.approvalPolicy || "half";
+  const eventId = String(state.event?.id || "");
+  const flow = koshienSharedApprovalView;
+  const allowed = !online || (Boolean(currentAuthUser()) && isCurrentUserAdmin()
+    && !koshienSharedApprovalBusy && flow.loadedFromDb && flow.eventId === eventId
+    && Number.isSafeInteger(flow.revision)
+    && ["open", "resultWait"].includes(flow.event_status)
+    && ["open", "resultWait"].includes(state.event.status));
   els.approvalPolicyGroup.querySelectorAll("[data-approval-policy]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.approvalPolicy === policy);
+    button.setAttribute("aria-pressed", String(button.dataset.approvalPolicy === policy));
+    button.disabled = !allowed;
   });
+  if (els.approvalPolicyStatus) {
+    const notice = koshienApprovalPolicyNotice.eventId === eventId
+      ? koshienApprovalPolicyNotice.message : "";
+    els.approvalPolicyStatus.textContent = notice
+      || (online && !flow.loadedFromDb
+        ? "共有承認の準備ができていません。承認方式の変更はできません。"
+        : online && !isCurrentUserAdmin()
+          ? "承認方式の変更はクラブ管理者のみ可能です。"
+          : online && !["admin", "half", "unanimous"].includes(flow.approval_policy)
+            ? "大会の承認方式が未設定です。管理者が選択して保存してください。"
+            : "");
+  }
 }
 
 function missingPredictionCount(name) {
@@ -7879,6 +7965,10 @@ els.rankingTabs?.querySelectorAll("button").forEach((button) => {
 
 els.approvalPolicyGroup?.querySelectorAll("[data-approval-policy]").forEach((button) => {
   button.addEventListener("click", () => {
+    if (isOnlineKoshienResultFlow()) {
+      updateKoshienSharedApprovalPolicy(button.dataset.approvalPolicy);
+      return;
+    }
     state.approvalPolicy = button.dataset.approvalPolicy;
     if (state.event) state.event.approvalPolicy = button.dataset.approvalPolicy;
     render();

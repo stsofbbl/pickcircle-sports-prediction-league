@@ -1873,6 +1873,83 @@ try:
     print("PASS: private submissions/votes, authenticated read, duplicate protection, stale revision, rollback")
 
 
+    # Policy updates must be atomic with revision changes and stale-vote
+    # invalidation, and must not leak from a rollback-only fixture.
+    before=snapshot()
+    policy_checks="""
+      INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules)
+      VALUES('approval-policy-probe','koshien',
+       '00000000-0000-0000-0000-000000000010',
+       '00000000-0000-0000-0000-000000000001','resultWait',
+       '{"approvalPolicy":"half","resultFlow":{"status":"none"},"keepMe":"untouched"}');
+      SELECT yoso_approval_private.lock_revision('approval-policy-probe');
+      INSERT INTO yoso_approval_private.submissions(
+        event_id,revision,policy,eligible_user_ids,required_count,submitted_by,result_snapshot
+      ) VALUES('approval-policy-probe',0,'half',ARRAY[
+        '00000000-0000-0000-0000-000000000001'::uuid,
+        '00000000-0000-0000-0000-000000000002'::uuid
+      ],1,'00000000-0000-0000-0000-000000000001','{}');
+      INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
+      SELECT id,'00000000-0000-0000-0000-000000000001'
+      FROM yoso_approval_private.submissions WHERE event_id='approval-policy-probe';
+      SET ROLE anon;
+      SELECT public.test_reject(
+        $q$SELECT public.set_koshien_shared_approval_policy(
+          'approval-policy-probe','unanimous',0)$q$,'42501');
+      RESET ROLE;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.set_koshien_shared_approval_policy(
+          'approval-policy-probe','unanimous',0)$q$,'42501');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SELECT public.test_reject(
+        $q$SELECT public.set_koshien_shared_approval_policy(
+          'approval-policy-probe','bogus',0)$q$,'22023');
+      SELECT public.test_reject(
+        $q$SELECT public.set_koshien_shared_approval_policy(
+          'approval-policy-probe','unanimous',99)$q$,'40001');
+      SELECT public.test_assert(
+        (SELECT (d->>'changed')::boolean=false AND (d->>'revision')::bigint=0
+         FROM (SELECT public.set_koshien_shared_approval_policy(
+           'approval-policy-probe','half',0) AS d) s),
+        'same policy and revision is idempotent');
+      SELECT public.test_assert(
+        (SELECT (d->>'changed')::boolean=true AND (d->>'revision')::bigint=1
+         FROM (SELECT public.set_koshien_shared_approval_policy(
+           'approval-policy-probe','unanimous',0) AS d) s),
+        'changing policy increases revision');
+      SELECT public.test_assert(
+        (SELECT rules->>'approvalPolicy'='unanimous'
+          AND rules->>'keepMe'='untouched'
+          AND status='resultWait'
+         FROM public.events WHERE id='approval-policy-probe')
+        AND (SELECT revision=1 FROM yoso_approval_private.revisions
+          WHERE event_id='approval-policy-probe')
+        AND (SELECT status='superseded' FROM yoso_approval_private.submissions
+          WHERE event_id='approval-policy-probe')
+        AND (SELECT (d->>'submission_status')='none'
+          FROM (SELECT public.get_koshien_shared_approval_state(
+            'approval-policy-probe') AS d) s),
+        'policy preserves unrelated rules and makes old votes uncountable');
+      SELECT public.test_reject(
+        $q$SELECT public.set_koshien_shared_approval_policy(
+          'approval-policy-probe','admin',0)$q$,'40001');
+      SELECT public.test_assert(
+        (SELECT (d->>'changed')::boolean=false AND (d->>'revision')::bigint=1
+         FROM (SELECT public.set_koshien_shared_approval_policy(
+           'approval-policy-probe','unanimous',1) AS d) s),
+        'idempotent repeat does not advance revision');
+      RESET ROLE;
+    """
+    sql("BEGIN;\n"
+        + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
+        + (root / "supabase/prototypes/koshien-shared-approval-policy.sql").read_text()
+        + policy_checks + "\nROLLBACK;")
+    assert snapshot()==before,"shared policy test must fully roll back"
+    assert sql("SELECT to_regprocedure('public.set_koshien_shared_approval_policy(text,text,bigint)') IS NULL;")=="t"
+    print("PASS: shared approval policy auth/CAS, stale votes, idempotence, rollback")
+
     # Submission prototype: synthetic complete 48-match Koshien with four
     # active members (but five league player rows). No finalize or real votes.
     before=snapshot()

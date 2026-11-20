@@ -70,6 +70,7 @@ BEGIN
    RETURN jsonb_build_object(
      'event_id',p_event_id,'event_status',v_event.status,
      'revision',v_revision,'submission_status','none',
+     'approval_policy',v_event.rules->>'approvalPolicy',
      'submission_id',NULL,'required_count',0,'approved_count',0,
      'current_user_eligible',false,'current_user_voted',false
    );
@@ -80,6 +81,7 @@ BEGIN
    'event_id',p_event_id,'event_status',v_event.status,
    'revision',v_revision,'submission_status',v_submission.status,
    'submission_id',v_submission.id,'policy',v_submission.policy,
+   'approval_policy',v_event.rules->>'approvalPolicy',
    'required_count',v_submission.required_count,'approved_count',v_votes,
    'eligible_count',cardinality(v_submission.eligible_user_ids),
    'current_user_eligible',v_uid=ANY(v_submission.eligible_user_ids),

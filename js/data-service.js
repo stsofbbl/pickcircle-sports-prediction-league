@@ -410,6 +410,20 @@
     }, "shared_approval_vote");
   }
 
+  async function setSharedApprovalPolicy(eventId, policy, revision) {
+    const id = String(eventId || "").trim();
+    const nextPolicy = String(policy || "").trim();
+    if (!id || !["admin", "half", "unanimous"].includes(nextPolicy)
+        || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("大会ID・承認方式・revisionを再取得してください。");
+    }
+    return laterPhaseRpc("set_koshien_shared_approval_policy", {
+      p_event_id: id,
+      p_policy: nextPolicy,
+      p_expected_revision: revision,
+    }, "shared_approval_policy");
+  }
+
   async function reopenKoshienResults(eventId) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("結果確定取消のevent_idが必要です。");
@@ -1408,6 +1422,7 @@
       loadSharedApprovalState,
       submitSharedApprovalResults,
       approveSharedApprovalResults,
+      setSharedApprovalPolicy,
     },
     local: {
       loadState: loadLocalState,
