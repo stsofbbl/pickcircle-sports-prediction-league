@@ -4752,7 +4752,13 @@ function resultFlowPanel() {
       && koshienSharedApprovalView.eventId === String(state.event?.id || "")
       ? koshienSharedApprovalView : null;
     if (!flow) {
-      return '<div class="entry-block result-flow-panel"><h3>大会全体の結果確定</h3><p class="helper-text">大会全体の提出・承認はオンライン共有に未対応です。試合結果の保存は引き続き利用できます。</p></div>';
+      const notice = koshienSharedApprovalNotice.eventId === String(state.event?.id || "")
+        ? koshienSharedApprovalNotice.message : "";
+      return `<div class="entry-block result-flow-panel">
+        <h3>大会全体の結果確定</h3>
+        <p class="helper-text" role="status">${escapeHtml(notice || "大会全体の提出・承認はオンライン共有に未対応です。試合結果の保存は引き続き利用できます。")}</p>
+        ${currentAuthUser() ? '<button type="button" class="ghost-button" data-shared-approval-refresh>最新状態を確認</button>' : ""}
+      </div>`;
     }
     const status = flow.submission_status === "finalized" ? "確定済み"
       : flow.submission_status === "submitted" ? "承認待ち" : "未提出";
@@ -4841,41 +4847,65 @@ function resultFlowMessage() {
 }
 
 async function reopenFinalizedResults() {
-  if (!isCurrentUserAdmin() || !isResultFinalized(state.event)) return;
+  if (koshienSharedApprovalBusy || !isCurrentUserAdmin() || !isResultFinalized(state.event)) return;
+  const online = isOnlineKoshienResultFlow();
+  const eventId = String(state.event?.id || "");
+  const flow = koshienSharedApprovalView;
+  const service = window.YosoDataService?.koshien;
+  if (online && (!currentAuthUser() || !flow.loadedFromDb || flow.eventId !== eventId
+      || flow.event_status !== "finalized" || !service?.reopenKoshienResults)) return;
   if (!window.confirm("大会全体の結果確定を取り消しますか？入力済みの試合結果は残り、承認だけがリセットされます。")) return;
-  const previousStatus = state.event.status;
-  const previousFlow = JSON.parse(JSON.stringify(state.event.resultFlow || createResultFlow()));
-  const applyReopenedState = () => {
-    state.event.status = "resultWait";
-    state.event.resultFlow.status = "none";
-    state.event.resultFlow.submittedBy = "";
-    state.event.resultFlow.submittedAt = "";
-    state.event.resultFlow.approvals = {};
-    state.event.resultFlow.finalizedAt = "";
-    saveLocalStateOnly();
-  };
-  try {
-    const shouldSaveOnline = baseTemplateId(state.event?.templateId) === "koshien"
-      && window.YosoDataService?.shouldAutoSaveKoshien?.();
-    if (shouldSaveOnline) {
-      if (!currentAuthUser()) throw new Error("オンラインの管理者ログインが必要です。");
-      if (!window.YosoDataService?.koshien?.reopenKoshienResults) {
-        throw new Error("結果確定取消のDB更新機能を利用できません。");
-      }
-      await window.YosoDataService.koshien.reopenKoshienResults(String(state.event.id));
-    }
-    applyReopenedState();
-    if (shouldSaveOnline) await refreshKoshienSharedApprovalState({ renderAfter: false });
-    setKoshienMatchMessage("大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。", "success");
-  } catch (error) {
-    state.event.status = previousStatus;
-    state.event.resultFlow = previousFlow;
-    saveLocalStateOnly();
-    setKoshienMatchMessage(error?.message || "結果確定を取り消せませんでした。", "error");
-  }
-  render();
-}
 
+  if (!online) {
+    state.event.status = "resultWait";
+    state.event.resultFlow = createResultFlow();
+    saveLocalStateOnly();
+    setKoshienMatchMessage("大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。", "success");
+    render();
+    return;
+  }
+
+  koshienSharedApprovalBusy = true;
+  render();
+  try {
+    const response = await service.reopenKoshienResults(eventId);
+    if (String(state.event?.id || "") !== eventId) return;
+    if (response?.event_id !== eventId || response?.status !== "resultWait"
+        || response?.result_flow?.status !== "none") {
+      throw new Error("サーバーの確定取消応答が不明です。");
+    }
+    // The RPC response is authoritative even if the follow-up GET fails.
+    // Never roll back a successful server transition with an old local snapshot.
+    state.event.status = response.status;
+    state.event.resultFlow = normalizeResultFlow(response.result_flow, state.participants);
+    saveLocalStateOnly();
+    koshienSharedApprovalView = { eventId, loadedFromDb: false };
+    const latest = await loadKoshienOnlineState({ force: true });
+    if (String(state.event?.id || "") !== eventId) return;
+    if (!latest?.ok || String(latest.event?.id || "") !== eventId) {
+      koshienSharedApprovalView = { eventId, loadedFromDb: false };
+      const message = "結果確定取消はサーバーで完了しましたが、最新状態の取得に失敗しました。再読み込みしてください。";
+      koshienSharedApprovalNotice = { eventId, message, kind: "error" };
+      setKoshienMatchMessage(message, "error");
+    } else {
+      const message = "大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。";
+      koshienSharedApprovalNotice = { eventId, message, kind: "success" };
+      setKoshienMatchMessage(message, "success");
+    }
+  } catch (error) {
+    if (String(state.event?.id || "") === eventId) {
+      // A network error may happen after the RPC committed. Treat it as unknown,
+      // clear cached approval actions, and require a fresh authenticated read.
+      koshienSharedApprovalView = { eventId, loadedFromDb: false };
+      const message = `確定取消の実行結果を確認できません。完了している可能性があるため、最新状態を確認してください。${error?.message ? `（${error.message}）` : ""}`;
+      koshienSharedApprovalNotice = { eventId, message, kind: "error" };
+      setKoshienMatchMessage(message, "error");
+    }
+  } finally {
+    koshienSharedApprovalBusy = false;
+    if (String(state.event?.id || "") === eventId) render();
+  }
+}
 function updatePresetSummary() {
   if (!els.presetDetails || !els.presetSummary) return;
   els.presetSummary.textContent = els.presetDetails.open ? "▼ プリセット一覧を閉じる" : "▶ プリセット一覧を表示";
