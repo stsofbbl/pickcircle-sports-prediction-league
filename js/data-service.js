@@ -377,6 +377,53 @@
     return data;
   }
 
+  async function loadSharedApprovalState(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("共有結果承認のevent_idが必要です。");
+    return laterPhaseRpc("get_koshien_shared_approval_state", {
+      p_event_id: normalizedEventId,
+    }, "shared_approval_read");
+  }
+
+  async function submitSharedApprovalResults(eventId, revision) {
+    const id = String(eventId || "").trim();
+    if (!id || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("大会IDと承認revisionを再取得してください。");
+    }
+    return laterPhaseRpc("submit_koshien_shared_results", {
+      p_event_id: id,
+      p_expected_revision: revision,
+    }, "shared_approval_submit");
+  }
+
+  async function approveSharedApprovalResults(eventId, submissionId, revision) {
+    const id = String(eventId || "").trim();
+    const submission = String(submissionId || "").trim();
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(submission)
+        || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("承認対象を最新状態から再取得してください。");
+    }
+    return laterPhaseRpc("approve_koshien_shared_results", {
+      p_event_id: id,
+      p_submission_id: submission,
+      p_expected_revision: revision,
+    }, "shared_approval_vote");
+  }
+
+  async function setSharedApprovalPolicy(eventId, policy, revision) {
+    const id = String(eventId || "").trim();
+    const nextPolicy = String(policy || "").trim();
+    if (!id || !["admin", "half", "unanimous"].includes(nextPolicy)
+        || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("大会ID・承認方式・revisionを再取得してください。");
+    }
+    return laterPhaseRpc("set_koshien_shared_approval_policy", {
+      p_event_id: id,
+      p_policy: nextPolicy,
+      p_expected_revision: revision,
+    }, "shared_approval_policy");
+  }
+
   async function reopenKoshienResults(eventId) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("結果確定取消のevent_idが必要です。");
@@ -1372,6 +1419,10 @@
       setLaterPhaseStatus,
       cancelKoshienMatchResult,
       reopenKoshienResults,
+      loadSharedApprovalState,
+      submitSharedApprovalResults,
+      approveSharedApprovalResults,
+      setSharedApprovalPolicy,
     },
     local: {
       loadState: loadLocalState,
