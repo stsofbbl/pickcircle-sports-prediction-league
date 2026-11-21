@@ -16,6 +16,7 @@ DECLARE
  v_scores jsonb;
  v_cards jsonb;
  v_teams jsonb;
+ v_event_teams jsonb;
  v_event_context jsonb;
  v_scored integer;
  v_existing yoso_approval_private.submissions;
@@ -154,6 +155,9 @@ BEGIN
  SELECT coalesce(jsonb_agg(to_jsonb(t) - 'created_at' - 'updated_at'
     ORDER BY t.id),'[]'::jsonb)
  INTO v_teams FROM public.teams t WHERE t.event_id=p_event_id;
+ SELECT coalesce(jsonb_agg(to_jsonb(et) - 'created_at' - 'updated_at'
+    ORDER BY et.id),'[]'::jsonb)
+ INTO v_event_teams FROM public.event_teams et WHERE et.event_id=p_event_id;
 
  -- Revision changes supersede older submissions, without reusing their votes.
  UPDATE yoso_approval_private.submissions SET status='superseded'
@@ -180,7 +184,8 @@ BEGIN
     submitted_by,status,result_snapshot
  ) VALUES(p_event_id,v_revision,v_policy,v_eligible,v_required,v_uid,
   'submitted',jsonb_build_object('matches',v_cards,'results',v_results,
-  'scores',v_scores,'event_context',v_event_context,'teams',v_teams)
+  'scores',v_scores,'event_context',v_event_context,'teams',v_teams,
+  'event_teams',v_event_teams)
  ) RETURNING id INTO v_id;
  INSERT INTO yoso_approval_private.votes(submission_id,voter_user_id)
  VALUES(v_id,v_uid);

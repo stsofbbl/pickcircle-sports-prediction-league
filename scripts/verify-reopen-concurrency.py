@@ -158,6 +158,11 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS sport_type text;
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS season text;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS odds numeric DEFAULT 1;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+-- Mirror event_teams' production metadata shape for the shared audit.
+CREATE TABLE IF NOT EXISTS public.event_teams(
+  id bigint PRIMARY KEY, event_id text NOT NULL, name text,
+  seed integer, metadata jsonb DEFAULT '{}',created_at timestamptz DEFAULT now());
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.event_teams TO authenticated;
 DROP POLICY IF EXISTS results_admin ON public.results;
 CREATE POLICY results_admin ON public.results FOR ALL TO authenticated
  USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=event_id AND public.is_league_admin(e.league_id)))
@@ -1810,6 +1815,11 @@ try:
             ORDER BY t.id)
           FROM public.teams t WHERE t.event_id=e.id
         ),'[]'::jsonb),
+        'event_teams',coalesce((
+          SELECT jsonb_agg(to_jsonb(et) - 'created_at' - 'updated_at'
+            ORDER BY et.id)
+          FROM public.event_teams et WHERE et.event_id=e.id
+        ),'[]'::jsonb),
         'matches',coalesce((
           SELECT jsonb_agg(to_jsonb(m) ORDER BY m.round_key,m.match_no)
           FROM public.matches m WHERE m.event_id=e.id
@@ -1938,6 +1948,8 @@ try:
        '{"approvalPolicy":"half","resultFlow":{"status":"none"},"keepMe":"untouched"}');
       INSERT INTO public.teams(id,event_id,name,odds) VALUES
         ('86000000-0000-4000-8000-0000000000fe','approval-policy-probe','Policy Seed',1);
+      INSERT INTO public.event_teams(id,event_id,name,seed,metadata)
+        VALUES (9101,'approval-policy-probe','Policy Seed',1,'{"gameMultiplier":1}');
       SELECT yoso_approval_private.lock_revision('approval-policy-probe');
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
@@ -1988,6 +2000,9 @@ try:
           WHERE event_id='approval-policy-probe'$q$,'55000');
       SELECT public.test_reject(
         $q$DELETE FROM public.teams WHERE event_id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.event_teams SET metadata='{"gameMultiplier":50}'
+          WHERE event_id='approval-policy-probe'$q$,'55000');
       SELECT public.test_reject(
         $q$INSERT INTO public.teams(id,event_id,name,odds)
           VALUES('86000000-0000-4000-8000-0000000000fd',
@@ -2058,6 +2073,12 @@ try:
       SELECT public.test_assert(
         (SELECT odds=2 FROM public.teams WHERE event_id='approval-policy-probe'),
         'team coefficients can change after the old submission is superseded');
+      UPDATE public.event_teams SET metadata='{"gameMultiplier":2}'
+        WHERE event_id='approval-policy-probe';
+      SELECT public.test_assert(
+        (SELECT metadata->>'gameMultiplier'='2' FROM public.event_teams
+         WHERE event_id='approval-policy-probe'),
+        'event-team metadata can change after submission is superseded');
       UPDATE public.events SET status='open'
       WHERE id='approval-policy-probe';
       SELECT public.test_assert(
@@ -2105,6 +2126,23 @@ try:
              WHERE event_id='submit-probe' AND revision=1),
         'stale team metadata adds no vote to the active revision');
       ROLLBACK TO SAVEPOINT team_coefficients_changed;
+      SAVEPOINT event_team_metadata_changed;
+      ALTER TABLE public.event_teams
+        DISABLE TRIGGER yoso_protect_koshien_event_team_configuration;
+      UPDATE public.event_teams SET metadata='{"gameMultiplier":2.5}'
+        WHERE event_id='submit-probe';
+      ALTER TABLE public.event_teams
+        ENABLE TRIGGER yoso_protect_koshien_event_team_configuration;
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='stale'
+          AND (x->>'requires_resubmission')::boolean=true
+         FROM (SELECT public.approve_koshien_shared_results(
+           'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'event_teams metadata drift invalidates old approval vote');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT event_team_metadata_changed;
       SET ROLE anon;
       SELECT public.test_reject(
         $q$SELECT public.approve_koshien_shared_results(
@@ -2220,6 +2258,9 @@ try:
           WHERE id='submit-probe'$q$,'55000');
       SELECT public.test_reject(
         $q$UPDATE public.teams SET odds=odds+1 WHERE event_id='submit-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.event_teams SET metadata='{"gameMultiplier":7}'
+          WHERE event_id='submit-probe'$q$,'55000');
       RESET ROLE;
       -- half=ceil(4/2)=2: initial admin submit remains pending until another member.
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
@@ -2265,6 +2306,8 @@ try:
       INSERT INTO public.teams(id,event_id,name,start_round) VALUES
         ('86000000-0000-4000-8000-000000000001','submit-probe','Seed A',1),
         ('86000000-0000-4000-8000-000000000002','submit-probe','Seed B',1);
+      INSERT INTO public.event_teams(id,event_id,name,seed,metadata)
+      VALUES(9201,'submit-probe','Seed A',1,'{"gameMultiplier":1}');
       SELECT yoso_approval_private.issue_write_permit('submit-probe');
       -- Seed synthetic historical cards without firing progression side effects.
       -- Re-enable every user trigger before invoking the actual submission RPC.
@@ -2343,6 +2386,7 @@ try:
            AND result_snapshot->'event_context'->'rules_config'
                   ->'phase2Points'->>'best16'='20'
            AND jsonb_array_length(result_snapshot->'teams')=2
+           AND jsonb_array_length(result_snapshot->'event_teams')=1
          FROM yoso_approval_private.submissions
          WHERE event_id='submit-probe' AND revision=0),
         'private approval audit includes event configuration and team coefficients');
@@ -2355,6 +2399,9 @@ try:
       SELECT public.test_reject(
         $q$UPDATE public.teams SET odds=odds+1
           WHERE event_id='submit-probe' AND name='Seed A'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.event_teams SET metadata='{"gameMultiplier":5}'
+          WHERE event_id='submit-probe'$q$,'55000');
       RESET ROLE;
       SAVEPOINT invalid_snapshot;
       SELECT yoso_approval_private.issue_write_permit('submit-probe');
@@ -2509,6 +2556,8 @@ try:
          "'"+admin_uid+"');"
          "INSERT INTO public.teams(id,event_id,name,odds) VALUES("
          "'86000000-0000-4000-8000-0000000000fc','roster-race','Race Seed',1);"
+         "INSERT INTO public.event_teams(id,event_id,name,seed,metadata) VALUES("
+         "9301,'roster-race','Race Seed',1,'{\"gameMultiplier\":1}');"
          "SELECT yoso_approval_private.lock_revision('roster-race');"
          "INSERT INTO yoso_approval_private.submissions("
          "event_id,revision,policy,eligible_user_ids,required_count,"
@@ -2581,7 +2630,10 @@ try:
     sql(AUTH+"SELECT public.test_reject("
         "$q$UPDATE public.teams SET odds=7 WHERE event_id='roster-race'$q$,'55000');"
         "SELECT public.test_reject("
-        "$q$DELETE FROM public.teams WHERE event_id='roster-race'$q$,'55000');")
+        "$q$DELETE FROM public.teams WHERE event_id='roster-race'$q$,'55000');"
+        "SELECT public.test_reject("
+        "$q$UPDATE public.event_teams SET metadata='{}' "
+        "WHERE event_id='roster-race'$q$,'55000');")
     def add_new_member(with_player=True):
         x=("INSERT INTO public.league_members(league_id,user_id,role,membership_status)"
            " VALUES('"+league_id+"','"+new_uid+"','member','active');")
@@ -2747,6 +2799,7 @@ try:
             "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
             "DROP TRIGGER IF EXISTS yoso_protect_koshien_team_configuration ON public.teams;"
+            "DROP TRIGGER IF EXISTS yoso_protect_koshien_event_team_configuration ON public.event_teams;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
             "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
@@ -2754,6 +2807,7 @@ try:
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
             "DELETE FROM yoso_approval_private.revisions WHERE event_id='roster-race';"
             "DELETE FROM public.teams WHERE event_id='roster-race';"
+            "DELETE FROM public.event_teams WHERE event_id='roster-race';"
             "DELETE FROM public.events WHERE id='roster-race';")
     assert snapshot()==before,"new-roster concurrency test must restore all tracked tables"
     print("PASS: roster race data and RPC cleanup restores original PostgreSQL fixture")
@@ -3034,6 +3088,7 @@ try:
             "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
             "DROP TRIGGER IF EXISTS yoso_protect_koshien_team_configuration ON public.teams;"
+            "DROP TRIGGER IF EXISTS yoso_protect_koshien_event_team_configuration ON public.event_teams;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
             "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
@@ -3302,6 +3357,7 @@ try:
             "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
             "DROP TRIGGER IF EXISTS yoso_protect_koshien_team_configuration ON public.teams;"
+            "DROP TRIGGER IF EXISTS yoso_protect_koshien_event_team_configuration ON public.event_teams;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
             "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"

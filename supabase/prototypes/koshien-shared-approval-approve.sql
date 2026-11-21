@@ -17,6 +17,7 @@ DECLARE
  v_results jsonb;
  v_scores jsonb;
  v_teams jsonb;
+ v_event_teams jsonb;
  v_event_context jsonb;
  v_flow jsonb;
  v_finalized_at timestamptz;
@@ -104,8 +105,12 @@ BEGIN
  SELECT coalesce(jsonb_agg(to_jsonb(t) - 'created_at' - 'updated_at'
     ORDER BY t.id),'[]'::jsonb)
  INTO v_teams FROM public.teams t WHERE t.event_id=p_event_id;
+ SELECT coalesce(jsonb_agg(to_jsonb(et) - 'created_at' - 'updated_at'
+    ORDER BY et.id),'[]'::jsonb)
+ INTO v_event_teams FROM public.event_teams et WHERE et.event_id=p_event_id;
  IF v_event_context IS DISTINCT FROM v_submission.result_snapshot->'event_context'
-    OR v_teams IS DISTINCT FROM v_submission.result_snapshot->'teams' THEN
+    OR v_teams IS DISTINCT FROM v_submission.result_snapshot->'teams'
+    OR v_event_teams IS DISTINCT FROM v_submission.result_snapshot->'event_teams' THEN
    UPDATE yoso_approval_private.submissions SET status='superseded'
    WHERE id=v_submission.id;
    RETURN jsonb_build_object('submission_status','stale',
@@ -131,7 +136,8 @@ BEGIN
  WHERE s.event_id=p_event_id AND p.league_id=v_event.league_id
    AND p.profile_id=ANY(v_submission.eligible_user_ids);
  IF jsonb_build_object('matches',v_cards,'results',v_results,
-      'scores',v_scores,'event_context',v_event_context,'teams',v_teams)
+      'scores',v_scores,'event_context',v_event_context,'teams',v_teams,
+      'event_teams',v_event_teams)
       IS DISTINCT FROM v_submission.result_snapshot THEN
    UPDATE yoso_approval_private.submissions SET status='superseded'
    WHERE id=v_submission.id;

@@ -228,3 +228,9 @@ REVOKE ALL ON FUNCTION yoso_approval_private.protect_koshien_team_configuration(
 CREATE TRIGGER yoso_protect_koshien_team_configuration
  BEFORE INSERT OR UPDATE OR DELETE ON public.teams
  FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_koshien_team_configuration();
+
+-- event_teams metadata is also used to reconstruct displayed scoring settings.
+-- Reuse the exact event advisory lock and row guard used by public.teams.
+CREATE TRIGGER yoso_protect_koshien_event_team_configuration
+ BEFORE INSERT OR UPDATE OR DELETE ON public.event_teams
+ FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_koshien_team_configuration();
