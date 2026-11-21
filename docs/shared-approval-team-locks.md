@@ -20,7 +20,7 @@
 4. 会員・クラブ削除の競合、ポリシー変更、admin/half/unanimous、48試合、採点変更なし、完全ROLLBACKを既存の隔離CIで再確認。
 
 ## 権限の別途是正が必要
-本番カタログ（READ ONLY）では、`teams`、`event_teams`、`events`、`matches`、`results`、`scores`、`players`、`leagues`、`league_members` で `anon`/ `authenticated` に **TRUNCATE** 権限が付与されている。PostgreSQLの TRUNCATE はRLSの対象外で、DELETE行トリガーも実行しない。これは本試作のチーム行ガードを回避しうる広いSQL権限である。
+本番カタログ（READ ONLY）では、公開テーブル30件中 **anonが16件、authenticatedが24件**で`TRUNCATE`権限を持つ。`teams`・`event_teams`・`events`・`scores`等が該当。PostgreSQLのTRUNCATEはRLS・行DELETEトリガーの対象外である。ただし**Supabase Data APIはTRUNCATE権限を直接使用しない**ため、通常のREST API経由の不正TRUNCATEが可能と確認したものではない。SQL実行経路が存在する場合の不要な権限として、審査対象に残す。
 
 **公開前のレビュー案**（未実行・未承認）：
 
@@ -38,3 +38,5 @@ REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
 - Draft PR #47の独立レビュー。承認なしの本番DB更新、デプロイ、PRマージは禁止
 
 参照：PostgreSQL 17 [Explicit Locking](https://www.postgresql.org/docs/17/explicit-locking.html)、[TRUNCATE](https://www.postgresql.org/docs/17/sql-truncate.html)、[RLS](https://www.postgresql.org/docs/17/ddl-rowsecurity.html)。
+
+具体的なACL一覧、将来テーブルのデフォルト権限（`postgres` / `supabase_admin`両方）、隔離テスト、および**未実行**の是正・復旧計画：`docs/public-truncate-privilege-preflight.md`。

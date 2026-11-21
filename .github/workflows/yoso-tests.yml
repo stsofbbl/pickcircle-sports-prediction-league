@@ -50,6 +50,13 @@ jobs:
           # Previous SQL fixture rolls back; no Supabase URL or credential is used.
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test < tests/sql/koshien-result-version-contract.sql
           test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.matches') IS NULL AND to_regprocedure('public.koshien_result_version(text)') IS NULL")" = t
+      - name: Verify TRUNCATE privileges and RLS in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never call production: isolated roles/schema exist only inside BEGIN/ROLLBACK.
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test < tests/sql/public-truncate-privileges.sql
+          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regnamespace('yoso_acl_probe') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('yoso_acl_anon','yoso_acl_authenticated'))")" = t
       - name: Verify approval revision prototype with two PostgreSQL sessions
         shell: bash
         run: |
