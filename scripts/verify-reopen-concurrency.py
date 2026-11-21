@@ -2395,15 +2395,62 @@ try:
       ALTER TABLE public.matches ENABLE TRIGGER USER;
       INSERT INTO public.results(event_id,payload,updated_by)
       SELECT 'submit-probe',jsonb_build_object('matches',jsonb_agg(
-          jsonb_build_object('round',m.round_key,'match_no',m.match_no)
+          jsonb_build_object('round',m.round_key,'match_no',m.match_no,
+            'team_a_id',t1.name,'team_b_id',t2.name,
+            'winner_id',tw.name,'loser_id',tl.name,
+            'score_a',m.team1_score,'score_b',m.team2_score,
+            'status',m.status)
           ORDER BY m.round_key,m.match_no)),
           '00000000-0000-0000-0000-000000000001'
-      FROM public.matches m WHERE m.event_id='submit-probe';
+      FROM public.matches m
+      JOIN public.teams t1 ON t1.id=m.team1_id
+      JOIN public.teams t2 ON t2.id=m.team2_id
+      JOIN public.teams tw ON tw.id=m.winner_team_id
+      JOIN public.teams tl ON tl.id=m.loser_team_id
+      WHERE m.event_id='submit-probe';
       INSERT INTO public.scores(event_id,player_id)
       VALUES ('submit-probe','20000000-0000-0000-0000-000000000001'),
              ('submit-probe','28000000-0000-4000-8000-000000000001'),
              ('submit-probe','28000000-0000-4000-8000-000000000002'),
              ('submit-probe','28000000-0000-4000-8000-000000000003');
+      -- A historical payload may contain all 48 slots while disagreeing
+      -- with the authoritative structured match rows.
+      SAVEPOINT mismatched_payload_score;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      UPDATE public.results
+      SET payload=jsonb_set(payload,'{matches,0,score_a}','99'::jsonb,false)
+      WHERE event_id='submit-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT mismatched_payload_score;
+
+      SAVEPOINT mismatched_payload_school;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      UPDATE public.results SET payload=jsonb_set(payload,
+        '{matches,0,winner_id}','"Not the winner"'::jsonb,false)
+      WHERE event_id='submit-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT mismatched_payload_school;
+
+      SAVEPOINT duplicated_payload_slot;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      UPDATE public.results SET payload=jsonb_set(payload,'{matches,1}',
+        payload->'matches'->0,false)
+      WHERE event_id='submit-probe';
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT duplicated_payload_slot;
+
       SELECT public.test_assert(
         (SELECT count(*)=48 FROM public.matches WHERE event_id='submit-probe')
         AND (SELECT count(*)=49 FROM public.teams WHERE event_id='submit-probe')

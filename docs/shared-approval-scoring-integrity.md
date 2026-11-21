@@ -39,6 +39,12 @@
 - `yoso_approval_private.koshien_bracket_topology_valid`を追加し、共有承認の提出RPCから呼び出す。**49校登録・R1/R2初出場校の重複なし（計49校）・48試合の各ラウンド規定数・同一ラウンドの学校重複なし・各勝者が次ラウンドに1回進出・各校の`start_round`（1回戦出場/2回戦から登場）の一致**の全条件を確認する。既存の48試合の完了・スコア・勝敗整合検査は保持。
 - 使い捨てDBの提出・本人投票テスト用データを、2校を繰り返す不正なものから**49校・48試合の進出が成立する組合せ**へ変更。あわせて、同一ラウンドの学校重複とR1勝者をR2から外す改ざんをそれぞれ拒否し、ROLLBACK後に正当な提出が成功することを検証する。
 - 本番READ ONLY監査の`supabase/audits/koshien-bracket-topology-readonly.sql`では`topology_passed=true`（49校、48試合、重複・進出漏れ・異なる大会ID参照は0）。このSQLは本番変更・本番RPC導入ではない。
-- **残る範囲外**：公式抽選表で指定された各試合の送り先・対戦ペアの完全一致、`start_round`と実際の初戦の一致、`results.payload`と構造化matchesの完全一致、得点計算式の正式な照合。それらは独立して確認する。
+- **残る範囲外**：公式抽選表で指定された各試合の送り先・対戦ペアの完全一致、`results.payload`と構造化matchesの完全一致、得点計算式の正式な照合。それらは独立して確認する。
 
 - 本番のREAD ONLY実測では`start_round=1`が34校で全校R1出場、`start_round=2`が15校で全校R1非出場。変更した試作の検証式・読み取り監査の両方に反映。隔離DBでは係数だけ誤って2回戦開始にした学校を提出拒否し、ロールバック後に正常判定へ戻ることを確認する。
+
+## 追加：保存結果payloadと試合レコードの一致を検証（開発試作）
+- 本番READ ONLY調査では`results.payload.matches[*].team_a_id/team_b_id/winner_id/loser_id`には**学校名**が保存されており、`matches.team1_id/team2_id/winner_team_id/loser_team_id`には`teams.id`のUUIDが格納されている。UUIDどうしで比較するのは誤り。試合テーブルから学校名をJOINして照合する。
+- 48件の`(round, match_no)`を重複なく一意に突合し、両出場校・勝者・敗者・両校得点・statusが一致することを結果提出の条件に追加。**不正な型や欠損値はSQLキャストで落とさず不一致として拒否**。合致しない場合はSQLSTATE `55000`。
+- 隔離DBでも保存結果を実際の学校名と点数で生成し、得点改ざん、勝者名改ざん、同一試合スロット重複のいずれも提出拒否、ROLLBACK後の正当提出/承認が可能かを検証。
+- **対象外**：追加メタデータや試合開始時刻、公式の組合せ表との一致など。本番READ ONLY監査用に`supabase/audits/koshien-result-payload-readonly.sql`を追加。

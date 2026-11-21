@@ -141,6 +141,35 @@ BEGIN
    RAISE EXCEPTION 'result payload must contain 48 match slots'
      USING ERRCODE='55000';
  END IF;
+ -- The persisted payload uses school NAMES in team_a_id/team_b_id and
+ -- winner_id/loser_id, whereas matches stores teams.id UUID references.
+ -- Match all 48 unique (round,match_no) keys before signing the snapshot.
+ -- Compare JSON number values without casts so malformed payloads fail
+ -- validation rather than causing a SQL conversion error.
+ SELECT count(*)=48
+   AND count(DISTINCT pg_catalog.jsonb_build_array(
+     j.entry->'round',j.entry->'match_no'))=48
+   AND count(*) FILTER (WHERE m.event_id IS NOT NULL
+     AND j.entry->>'team_a_id'=t1.name
+     AND j.entry->>'team_b_id'=t2.name
+     AND j.entry->>'winner_id'=tw.name
+     AND j.entry->>'loser_id'=tl.name
+     AND j.entry->'score_a'=to_jsonb(m.team1_score)
+     AND j.entry->'score_b'=to_jsonb(m.team2_score)
+     AND j.entry->>'status'=m.status)=48
+ INTO v_good
+ FROM pg_catalog.jsonb_array_elements(v_results->'matches') AS j(entry)
+ LEFT JOIN public.matches m ON m.event_id=p_event_id
+   AND m.round_key=j.entry->>'round'
+   AND to_jsonb(m.match_no)=j.entry->'match_no'
+ LEFT JOIN public.teams t1 ON t1.id=m.team1_id
+ LEFT JOIN public.teams t2 ON t2.id=m.team2_id
+ LEFT JOIN public.teams tw ON tw.id=m.winner_team_id
+ LEFT JOIN public.teams tl ON tl.id=m.loser_team_id;
+ IF NOT coalesce(v_good,false) THEN
+   RAISE EXCEPTION 'result payload does not match 48 official match records'
+     USING ERRCODE='55000';
+ END IF;
  SELECT count(DISTINCT s.player_id),
    coalesce(jsonb_agg(to_jsonb(s) ORDER BY s.player_id),'[]'::jsonb)
  INTO v_scored,v_scores
