@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "git": {
+    "deploymentEnabled": {
+      "codex/yoso2-online-result-flow": false
+    }
+  },
   "rewrites": [
     {
       "source": "/supabase-config.js",
