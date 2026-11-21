@@ -2159,6 +2159,31 @@ try:
         'event_teams metadata drift invalidates old approval vote');
       RESET ROLE;
       ROLLBACK TO SAVEPOINT event_team_metadata_changed;
+      -- A vote before quorum must be rejected if historical/out-of-band
+      -- updates changed the signed results payload without a revision.
+      SAVEPOINT results_payload_drift_before_vote;
+      ALTER TABLE public.results DISABLE TRIGGER USER;
+      UPDATE public.results
+        SET payload=jsonb_set(payload,'{matches,0,score_a}','99'::jsonb,false)
+        WHERE event_id='submit-probe';
+      ALTER TABLE public.results ENABLE TRIGGER USER;
+      SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='stale'
+          AND (x->>'requires_resubmission')::boolean=true
+         FROM (SELECT public.approve_koshien_shared_results(
+           'submit-probe',current_setting('yoso.fixture_submission_id')::uuid,1) AS x) t),
+        'second voter rejects results payload drift before quorum');
+      RESET ROLE;
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM yoso_approval_private.votes v
+         JOIN yoso_approval_private.submissions s ON s.id=v.submission_id
+         WHERE s.event_id='submit-probe' AND s.revision=1)
+        AND (SELECT status='superseded' FROM yoso_approval_private.submissions
+          WHERE event_id='submit-probe' AND revision=1),
+        'stale results did not add an interim vote');
+      ROLLBACK TO SAVEPOINT results_payload_drift_before_vote;
       SET ROLE anon;
       SELECT public.test_reject(
         $q$SELECT public.approve_koshien_shared_results(

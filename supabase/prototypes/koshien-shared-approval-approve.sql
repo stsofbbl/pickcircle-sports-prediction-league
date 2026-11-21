@@ -108,9 +108,19 @@ BEGIN
  SELECT coalesce(jsonb_agg(to_jsonb(et) - 'created_at' - 'updated_at'
     ORDER BY et.id),'[]'::jsonb)
  INTO v_event_teams FROM public.event_teams et WHERE et.event_id=p_event_id;
- IF v_event_context IS DISTINCT FROM v_submission.result_snapshot->'event_context'
-    OR v_teams IS DISTINCT FROM v_submission.result_snapshot->'teams'
-    OR v_event_teams IS DISTINCT FROM v_submission.result_snapshot->'event_teams' THEN
+ -- Invalidate an outdated submission BEFORE any interim vote, not only
+ -- when quorum is reached. The final vote still rechecks as a second gate.
+ SELECT coalesce(jsonb_agg(to_jsonb(m) ORDER BY m.round_key,m.match_no),
+   '[]'::jsonb) INTO v_cards FROM public.matches m WHERE m.event_id=p_event_id;
+ SELECT r.payload INTO v_results FROM public.results r WHERE r.event_id=p_event_id;
+ SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY s.player_id),'[]'::jsonb)
+ INTO v_scores FROM public.scores s JOIN public.players p ON p.id=s.player_id
+ WHERE s.event_id=p_event_id AND p.league_id=v_event.league_id
+   AND p.profile_id=ANY(v_submission.eligible_user_ids);
+ IF jsonb_build_object('matches',v_cards,'results',v_results,
+      'scores',v_scores,'event_context',v_event_context,'teams',v_teams,
+      'event_teams',v_event_teams)
+      IS DISTINCT FROM v_submission.result_snapshot THEN
    UPDATE yoso_approval_private.submissions SET status='superseded'
    WHERE id=v_submission.id;
    RETURN jsonb_build_object('submission_status','stale',
