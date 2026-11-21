@@ -35,6 +35,11 @@ BEGIN
  IF NOT FOUND THEN
    RAISE EXCEPTION 'approval league not found' USING ERRCODE='23503';
  END IF;
+ -- BEFORE ROW triggers on public.teams obtain the same advisory key using
+ -- pg_try_advisory_xact_lock (fail-fast). Acquire it before the event row
+ -- lock so team -> event lock inversions cannot deadlock final approval.
+ PERFORM pg_catalog.pg_advisory_xact_lock(
+   yoso_approval_private.team_config_lock_key(p_event_id));
  SELECT e.* INTO v_event FROM public.events e
  WHERE e.id=p_event_id AND e.preset_type='koshien' FOR UPDATE;
  IF v_event.id IS NULL OR v_event.league_id IS DISTINCT FROM v_league_id THEN

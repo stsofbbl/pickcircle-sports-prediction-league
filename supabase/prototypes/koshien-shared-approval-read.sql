@@ -156,3 +156,75 @@ REVOKE ALL ON FUNCTION yoso_approval_private.protect_shared_approval_event_statu
 CREATE TRIGGER yoso_protect_shared_approval_event_status
  BEFORE INSERT OR UPDATE ON public.events
  FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_shared_approval_event_status();
+
+
+-- Shared lock domain for team writers and the submit/vote RPCs.
+-- Every caller uses the same transaction-scoped, event-specific lock key.
+-- The row DML trigger uses TRY rather than WAIT because PostgreSQL has
+-- already acquired the team row lock before a BEFORE ROW trigger executes.
+-- Waiting here while a vote holds the event row would invert event->team.
+CREATE FUNCTION yoso_approval_private.team_config_lock_key(p_event_id text)
+RETURNS bigint LANGUAGE sql IMMUTABLE STRICT SET search_path=''
+AS $function$
+ SELECT pg_catalog.hashtextextended('yoso:koshien:team-config:' || p_event_id,0::bigint)
+$function$;
+REVOKE ALL ON FUNCTION yoso_approval_private.team_config_lock_key(text)
+ FROM PUBLIC,anon,authenticated,service_role;
+
+CREATE FUNCTION yoso_approval_private.protect_koshien_team_configuration()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''
+AS $function$
+DECLARE
+ v_ids text[];
+ v_event_id text;
+ v_event_status text;
+ v_preset text;
+BEGIN
+ IF TG_OP='UPDATE' THEN
+   -- The audit excludes timestamps: a pure updated_at refresh is harmless.
+   IF (to_jsonb(NEW) - 'created_at' - 'updated_at')
+      IS NOT DISTINCT FROM (to_jsonb(OLD) - 'created_at' - 'updated_at') THEN
+     RETURN NEW;
+   END IF;
+   v_ids := ARRAY[OLD.event_id,NEW.event_id];
+ ELSIF TG_OP='INSERT' THEN
+   v_ids := ARRAY[NEW.event_id];
+ ELSE
+   v_ids := ARRAY[OLD.event_id];
+ END IF;
+
+ -- Lock both old and new event scopes in one deterministic order if a team
+ -- row is moved between events. No event/league row lock in this trigger.
+ FOR v_event_id IN
+   SELECT DISTINCT x.id FROM pg_catalog.unnest(v_ids) AS x(id)
+   WHERE x.id IS NOT NULL ORDER BY x.id
+ LOOP
+   IF NOT pg_catalog.pg_try_advisory_xact_lock(
+     yoso_approval_private.team_config_lock_key(v_event_id)
+   ) THEN
+     RAISE EXCEPTION 'team configuration is being approved; retry the change'
+       USING ERRCODE='55P03';
+   END IF;
+
+   SELECT e.preset_type,e.status INTO v_preset,v_event_status
+   FROM public.events e WHERE e.id=v_event_id;
+   IF v_preset='koshien' AND (
+     v_event_status='finalized'
+     OR EXISTS (
+       SELECT 1 FROM yoso_approval_private.submissions s
+       WHERE s.event_id=v_event_id AND s.status='submitted'
+     )
+   ) THEN
+     RAISE EXCEPTION 'Koshien team configuration is locked during approval'
+       USING ERRCODE='55000';
+   END IF;
+ END LOOP;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END;
+$function$;
+REVOKE ALL ON FUNCTION yoso_approval_private.protect_koshien_team_configuration()
+ FROM PUBLIC,anon,authenticated,service_role;
+CREATE TRIGGER yoso_protect_koshien_team_configuration
+ BEFORE INSERT OR UPDATE OR DELETE ON public.teams
+ FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_koshien_team_configuration();

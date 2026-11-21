@@ -142,6 +142,7 @@ CREATE ROLE authenticated NOLOGIN NOSUPERUSER NOBYPASSRLS;
 CREATE ROLE anon NOLOGIN NOSUPERUSER NOBYPASSRLS;
 GRANT USAGE ON SCHEMA public,auth,yoso_approval_private TO authenticated;
 GRANT SELECT ON public.events,public.teams,public.players TO authenticated;
+GRANT INSERT,UPDATE,DELETE ON public.teams TO authenticated;
 GRANT SELECT,INSERT,UPDATE ON public.matches,public.results,public.scores TO authenticated;
 GRANT UPDATE ON public.events TO authenticated;
 -- Recreated role must retain access used by the invoker import-sync trigger.
@@ -156,6 +157,7 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS current_phase text NOT NULL D
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS sport_type text;
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS season text;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS odds numeric DEFAULT 1;
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 DROP POLICY IF EXISTS results_admin ON public.results;
 CREATE POLICY results_admin ON public.results FOR ALL TO authenticated
  USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=event_id AND public.is_league_admin(e.league_id)))
@@ -1934,6 +1936,8 @@ try:
        '00000000-0000-0000-0000-000000000010',
        '00000000-0000-0000-0000-000000000001','resultWait',
        '{"approvalPolicy":"half","resultFlow":{"status":"none"},"keepMe":"untouched"}');
+      INSERT INTO public.teams(id,event_id,name,odds) VALUES
+        ('86000000-0000-4000-8000-0000000000fe','approval-policy-probe','Policy Seed',1);
       SELECT yoso_approval_private.lock_revision('approval-policy-probe');
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
@@ -1979,6 +1983,16 @@ try:
         (SELECT name='Renamed without touching scoring' FROM public.events
           WHERE id='approval-policy-probe'),
         'a harmless title change remains permitted during pending approval');
+      SELECT public.test_reject(
+        $q$UPDATE public.teams SET odds=odds+1
+          WHERE event_id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$DELETE FROM public.teams WHERE event_id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$INSERT INTO public.teams(id,event_id,name,odds)
+          VALUES('86000000-0000-4000-8000-0000000000fd',
+          'approval-policy-probe','Unauthorized late seed',1)$q$,'55000');
+      UPDATE public.teams SET updated_at=now() WHERE event_id='approval-policy-probe';
       RESET ROLE;
       SET ROLE anon;
       SELECT public.test_reject(
@@ -2040,6 +2054,10 @@ try:
         (SELECT rules_config->'stagePoints'->>'champion'='999'
          FROM public.events WHERE id='approval-policy-probe'),
         'scoring settings can change only after old submission is superseded');
+      UPDATE public.teams SET odds=odds+1 WHERE event_id='approval-policy-probe';
+      SELECT public.test_assert(
+        (SELECT odds=2 FROM public.teams WHERE event_id='approval-policy-probe'),
+        'team coefficients can change after the old submission is superseded');
       UPDATE public.events SET status='open'
       WHERE id='approval-policy-probe';
       SELECT public.test_assert(
@@ -2064,8 +2082,12 @@ try:
         SELECT id::text FROM yoso_approval_private.submissions
         WHERE event_id='submit-probe' AND status='submitted'),false);
       SAVEPOINT team_coefficients_changed;
+      -- Simulate legacy/out-of-band drift to prove vote-time snapshot
+      -- detection works even if the team write trigger had been bypassed.
+      ALTER TABLE public.teams DISABLE TRIGGER yoso_protect_koshien_team_configuration;
       UPDATE public.teams SET odds=odds+1
       WHERE event_id='submit-probe' AND name='Seed A';
+      ALTER TABLE public.teams ENABLE TRIGGER yoso_protect_koshien_team_configuration;
       SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_assert(
@@ -2196,6 +2218,8 @@ try:
         $q$UPDATE public.events SET
           rules=jsonb_set(rules,'{config}','{"captainMultiplier":99}'::jsonb,true)
           WHERE id='submit-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.teams SET odds=odds+1 WHERE event_id='submit-probe'$q$,'55000');
       RESET ROLE;
       -- half=ceil(4/2)=2: initial admin submit remains pending until another member.
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
@@ -2328,6 +2352,9 @@ try:
         $q$UPDATE public.events
         SET rules_config='{"phase2Points":{"best16":900}}'
         WHERE id='submit-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.teams SET odds=odds+1
+          WHERE event_id='submit-probe' AND name='Seed A'$q$,'55000');
       RESET ROLE;
       SAVEPOINT invalid_snapshot;
       SELECT yoso_approval_private.issue_write_permit('submit-probe');
@@ -2480,6 +2507,8 @@ try:
          "VALUES('roster-race','koshien','"+league_id+"','resultWait',"
          "'{\"approvalPolicy\":\"unanimous\",\"resultFlow\":{\"status\":\"none\"}}',"
          "'"+admin_uid+"');"
+         "INSERT INTO public.teams(id,event_id,name,odds) VALUES("
+         "'86000000-0000-4000-8000-0000000000fc','roster-race','Race Seed',1);"
          "SELECT yoso_approval_private.lock_revision('roster-race');"
          "INSERT INTO yoso_approval_private.submissions("
          "event_id,revision,policy,eligible_user_ids,required_count,"
@@ -2503,6 +2532,56 @@ try:
         return ("SET request.jwt.claim.sub='"+uid+"';SET ROLE authenticated;"
                 "SELECT public.approve_koshien_shared_results("
                 "'roster-race','"+submission_id+"',0);")
+
+    # Reproduce the troublesome inverse lock order. A legacy team writer
+    # already holds the event row; B acquires the approval advisory lock and
+    # waits for the same event; A must fail FAST trying to write a team row.
+    # A waiting team trigger would deadlock here (event -> team -> event).
+    a=b=None
+    try:
+        sid=current_submission()
+        a=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True,bufsize=1)
+        send(a,"SELECT pg_backend_pid();")
+        holder_pid=int(line(a))
+        send(a,"SET application_name='yoso_team_event_holder';BEGIN;"
+               "SELECT id FROM public.events WHERE id='roster-race' FOR UPDATE;")
+        assert line(a)=="roster-race", "legacy team writer did not lock event"
+        b=subprocess.Popen(PSQL,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE,text=True)
+        send(b,"SET application_name='yoso_team_vote_waiter';"
+               "SET statement_timeout='15s';BEGIN;"
+               +vote_statement(sid,admin_uid)+"COMMIT;")
+        deadline=time.monotonic()+8
+        while sql("SELECT count(*) FROM pg_stat_activity "
+                  "WHERE application_name='yoso_team_vote_waiter' "
+                  f"AND {holder_pid}=ANY(pg_blocking_pids(pid));")!="1":
+            assert b.poll() is None, "approval did not wait on event row"
+            assert time.monotonic()<deadline, "approval event wait not observed"
+            time.sleep(.05)
+        send(a,"UPDATE public.teams SET odds=odds+1 "
+               "WHERE event_id='roster-race' AND name='Race Seed';")
+        a.stdin.close()
+        a.wait(timeout=10)
+        assert a.returncode!=0 and "team configuration is being approved" in a.stderr.read(), \
+            "team writer must fail fast instead of deadlocking with the voter"
+        output,errors=b.communicate(timeout=10)
+        assert b.returncode==0,errors
+        result=json.loads(output.strip().splitlines()[-1])
+        assert result["submission_status"]=="submitted" and result["approved_count"]==1,result
+        assert sql("SELECT odds FROM public.teams WHERE event_id='roster-race';")=="1"
+        print("PASS: prelocked event vs approval advisory lock rejects team write without deadlock")
+    finally:
+        for proc in (a,b):
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    # Normal direct table DML must also be rejected for pending submissions.
+    sql(AUTH+"SELECT public.test_reject("
+        "$q$UPDATE public.teams SET odds=7 WHERE event_id='roster-race'$q$,'55000');"
+        "SELECT public.test_reject("
+        "$q$DELETE FROM public.teams WHERE event_id='roster-race'$q$,'55000');")
     def add_new_member(with_player=True):
         x=("INSERT INTO public.league_members(league_id,user_id,role,membership_status)"
            " VALUES('"+league_id+"','"+new_uid+"','member','active');")
@@ -2667,10 +2746,14 @@ try:
         sql("DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
             "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
+            "DROP TRIGGER IF EXISTS yoso_protect_koshien_team_configuration ON public.teams;"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
             "DELETE FROM yoso_approval_private.revisions WHERE event_id='roster-race';"
+            "DELETE FROM public.teams WHERE event_id='roster-race';"
             "DELETE FROM public.events WHERE id='roster-race';")
     assert snapshot()==before,"new-roster concurrency test must restore all tracked tables"
     print("PASS: roster race data and RPC cleanup restores original PostgreSQL fixture")
@@ -2950,6 +3033,9 @@ try:
             "DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
             "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
+            "DROP TRIGGER IF EXISTS yoso_protect_koshien_team_configuration ON public.teams;"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
@@ -3215,6 +3301,9 @@ try:
             "DROP FUNCTION IF EXISTS public.approve_koshien_shared_results(text,uuid,bigint);"
             "DROP TRIGGER IF EXISTS yoso_protect_shared_approval_event_status ON public.events;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_shared_approval_event_status();"
+            "DROP TRIGGER IF EXISTS yoso_protect_koshien_team_configuration ON public.teams;"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
