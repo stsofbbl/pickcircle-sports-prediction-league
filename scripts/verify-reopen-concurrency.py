@@ -2376,6 +2376,30 @@ try:
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SELECT public.test_reject(
         $q$SELECT public.submit_koshien_shared_results('submit-probe',123)$q$,'40001');
+      RESET ROLE;
+      -- Real matches FKs check teams.id only, not teams.event_id. Simulate a
+      -- completed match with correct score/winner/loser but a foreign school.
+      SAVEPOINT foreign_team_match;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      ALTER TABLE public.matches DISABLE TRIGGER USER;
+      UPDATE public.matches
+        SET team2_id='10000000-0000-0000-0000-000000000002',
+            loser_team_id='10000000-0000-0000-0000-000000000002'
+        WHERE event_id='submit-probe' AND round_key='R1' AND match_no=1;
+      ALTER TABLE public.matches ENABLE TRIGGER USER;
+      SELECT public.test_assert(
+        (SELECT t.event_id='save' FROM public.matches m JOIN public.teams t
+           ON t.id=m.team2_id WHERE m.event_id='submit-probe'
+             AND m.round_key='R1' AND m.match_no=1),
+        'foreign school ID passes the global FK but belongs to another event');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT foreign_team_match;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
       SELECT public.test_assert(
         (SELECT (x->>'required_count')::int=4
             AND (x->>'approved_count')::int=1

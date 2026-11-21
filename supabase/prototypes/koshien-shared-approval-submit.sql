@@ -111,6 +111,12 @@ BEGIN
    AND count(*) FILTER (WHERE m.status='completed'
       AND m.team1_id IS NOT NULL AND m.team2_id IS NOT NULL
       AND m.team1_id<>m.team2_id
+      -- Match FKs reference teams(id) globally; prevent a result card from
+      -- silently using a school belonging to a different tournament.
+      AND EXISTS (SELECT 1 FROM public.teams t1
+        WHERE t1.id=m.team1_id AND t1.event_id=p_event_id)
+      AND EXISTS (SELECT 1 FROM public.teams t2
+        WHERE t2.id=m.team2_id AND t2.event_id=p_event_id)
       AND m.team1_score IS NOT NULL AND m.team2_score IS NOT NULL
       AND m.team1_score>=0 AND m.team2_score>=0
       AND m.team1_score<>m.team2_score
