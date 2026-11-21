@@ -159,6 +159,9 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS season text;
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS odds numeric DEFAULT 1;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+-- Production stores representative_key in teams.metadata. The early
+-- disposable fixture originally omitted this column.
+ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS metadata jsonb DEFAULT '{}'::jsonb;
 -- Mirror event_teams' production metadata shape for the shared audit.
 CREATE TABLE IF NOT EXISTS public.event_teams(
   id bigint PRIMARY KEY, event_id text NOT NULL, name text,
