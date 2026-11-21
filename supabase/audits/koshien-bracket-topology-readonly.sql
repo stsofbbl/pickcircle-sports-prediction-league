@@ -49,12 +49,19 @@ metrics AS (
     ) AS missing_or_duplicate_advances,
     (SELECT COUNT(DISTINCT a.team_id) FROM appearances a
      WHERE a.event_id=e.id AND a.round_key IN ('R1','R2')) AS unique_entrants,
-    (SELECT COUNT(*) FROM public.teams t WHERE t.event_id=e.id) AS registered_teams
+    (SELECT COUNT(*) FROM public.teams t WHERE t.event_id=e.id) AS registered_teams,
+    (SELECT COUNT(*) FROM public.teams t WHERE t.event_id=e.id
+       AND t.start_round IS DISTINCT FROM CASE WHEN EXISTS (
+         SELECT 1 FROM appearances a WHERE a.event_id=e.id
+           AND a.round_key='R1' AND a.team_id=t.id
+       ) THEN 1 ELSE 2 END
+    ) AS start_round_mismatches
   FROM koshien_events e
 )
 SELECT metrics.*,
   (match_count=48 AND completed_count=48 AND invalid_completed_rows=0
     AND wrong_round_counts=0 AND repeated_team_rounds=0
     AND foreign_event_matches=0 AND missing_or_duplicate_advances=0
-    AND unique_entrants=49 AND registered_teams=49) AS topology_passed
+    AND unique_entrants=49 AND registered_teams=49
+    AND start_round_mismatches=0) AS topology_passed
 FROM metrics ORDER BY event_id;

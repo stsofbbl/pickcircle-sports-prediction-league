@@ -2493,6 +2493,23 @@ try:
         yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
         'undoing both invalid edits restores the complete bracket');
 
+      -- The school coefficients must describe the real entry round.
+      SAVEPOINT wrong_start_round;
+      UPDATE public.teams SET start_round=2
+        WHERE event_id='submit-probe' AND name='Seed A';
+      SELECT public.test_assert(
+        NOT yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'an R1 school falsely marked as an R2 bye cannot be approved');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT wrong_start_round;
+      SELECT public.test_assert(
+        yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'restored start-round metadata passes topology validation');
+
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_assert(

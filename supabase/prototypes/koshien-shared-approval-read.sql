@@ -263,6 +263,15 @@ AS $function$
    AND (SELECT COUNT(*) FROM games)=48
    AND (SELECT COUNT(DISTINCT a.team_id) FROM appearances a
         WHERE a.round_key IN ('R1','R2'))=49
+   -- First-round entrants must be start_round=1; the 15 byes must be 2.
+   -- This coefficient also feeds Koshien scoring, not just presentation.
+   AND NOT EXISTS (
+     SELECT 1 FROM public.teams t WHERE t.event_id=p_event_id
+       AND t.start_round IS DISTINCT FROM CASE WHEN EXISTS (
+         SELECT 1 FROM appearances a WHERE a.team_id=t.id
+           AND a.round_key='R1'
+       ) THEN 1 ELSE 2 END
+   )
    AND NOT EXISTS (
      SELECT 1 FROM rounds r WHERE
        (SELECT COUNT(*) FROM games g WHERE g.round_key=r.round_key)
