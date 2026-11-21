@@ -312,11 +312,7 @@ AS $function$
      SELECT 1 FROM feeders f
      LEFT JOIN games previous ON previous.round_key=f.source_round
        AND previous.match_no=CASE
-         WHEN f.source_no ~ '^[0-9]{1,3}
-$function$;
-REVOKE ALL ON FUNCTION yoso_approval_private.koshien_bracket_topology_valid(text)
- FROM PUBLIC,anon,authenticated,service_role;
- THEN f.source_no::integer
+         WHEN f.source_no ~ '^[0-9]{1,3}$' THEN f.source_no::integer
          ELSE NULL END
      WHERE f.source_round IS DISTINCT FROM CASE f.round_key
        WHEN 'R2' THEN 'R1' WHEN 'R3' THEN 'R2' WHEN 'F' THEN 'SF' END
