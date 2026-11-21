@@ -3132,6 +3132,11 @@ try:
         FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;
       ALTER TABLE public.players ADD CONSTRAINT fixture_players_league_fk
         FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;
+      -- Production teams and event_teams also cascade on event DELETE.
+      ALTER TABLE public.teams ADD CONSTRAINT fixture_teams_event_fk
+        FOREIGN KEY(event_id) REFERENCES public.events(id) ON DELETE CASCADE NOT VALID;
+      ALTER TABLE public.event_teams ADD CONSTRAINT fixture_event_teams_event_fk
+        FOREIGN KEY(event_id) REFERENCES public.events(id) ON DELETE CASCADE NOT VALID;
 
       INSERT INTO public.leagues(id,name,created_by)
         VALUES('00000000-0000-0000-0000-000000000030','Cascade club',
@@ -3147,6 +3152,10 @@ try:
         VALUES('cascade-event','koshien',
           '00000000-0000-0000-0000-000000000030','resultWait',
           '00000000-0000-0000-0000-000000000001','{}');
+      INSERT INTO public.teams(id,event_id,name,odds)
+        VALUES('86000000-0000-4000-8000-0000000000ea','cascade-event','Cascade Seed',2);
+      INSERT INTO public.event_teams(id,event_id,name,seed,metadata)
+        VALUES(9401,'cascade-event','Cascade Seed',1,'{"gameMultiplier":2}');
       SELECT yoso_approval_private.lock_revision('cascade-event');
       INSERT INTO yoso_approval_private.submissions(
         event_id,revision,policy,eligible_user_ids,required_count,
@@ -3183,6 +3192,8 @@ try:
           WHERE league_id='00000000-0000-0000-0000-000000000030')
         AND NOT EXISTS(SELECT 1 FROM public.players
           WHERE league_id='00000000-0000-0000-0000-000000000030')
+        AND NOT EXISTS(SELECT 1 FROM public.teams WHERE event_id='cascade-event')
+        AND NOT EXISTS(SELECT 1 FROM public.event_teams WHERE event_id='cascade-event')
         AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.revisions
           WHERE event_id='cascade-event')
         AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.submissions
@@ -3220,6 +3231,10 @@ try:
         "FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;"
         "ALTER TABLE public.players ADD CONSTRAINT ci_player_club_fk "
         "FOREIGN KEY(league_id) REFERENCES public.leagues(id) ON DELETE CASCADE NOT VALID;"
+        "ALTER TABLE public.teams ADD CONSTRAINT ci_team_event_fk "
+        "FOREIGN KEY(event_id) REFERENCES public.events(id) ON DELETE CASCADE NOT VALID;"
+        "ALTER TABLE public.event_teams ADD CONSTRAINT ci_event_team_event_fk "
+        "FOREIGN KEY(event_id) REFERENCES public.events(id) ON DELETE CASCADE NOT VALID;"
         +(root/"supabase/prototypes/koshien-real-delete-club.sql").read_text()
         +(root/"supabase/prototypes/koshien-shared-approval-read.sql").read_text()
         +(root/"supabase/prototypes/koshien-shared-approval-approve.sql").read_text())
@@ -3236,6 +3251,10 @@ try:
             "INSERT INTO public.events(id,preset_type,league_id,status,created_by,rules) "
             "VALUES('"+club_event+"','koshien','"+club_id+"','resultWait','"+club_owner+"',"
             "'{\"approvalPolicy\":\"unanimous\",\"resultFlow\":{\"status\":\"none\"}}');"
+            "INSERT INTO public.teams(id,event_id,name,odds) VALUES("
+            "'86000000-0000-4000-8000-0000000000eb','"+club_event+"','Concurrent Seed',2);"
+            "INSERT INTO public.event_teams(id,event_id,name,seed,metadata) VALUES("
+            "9402,'"+club_event+"','Concurrent Seed',1,'{\"gameMultiplier\":2}');"
             "SELECT yoso_approval_private.lock_revision('"+club_event+"');"
             "INSERT INTO yoso_approval_private.submissions("
             "event_id,revision,policy,eligible_user_ids,required_count,submitted_by,result_snapshot)"
@@ -3258,6 +3277,8 @@ try:
         assert sql("SELECT count(*) FROM public.events WHERE id='"+club_event+"';")=="0"
         assert sql("SELECT count(*) FROM public.league_members WHERE league_id='"+club_id+"';")=="0"
         assert sql("SELECT count(*) FROM public.players WHERE league_id='"+club_id+"';")=="0"
+        assert sql("SELECT count(*) FROM public.teams WHERE event_id='"+club_event+"';")=="0"
+        assert sql("SELECT count(*) FROM public.event_teams WHERE event_id='"+club_event+"';")=="0"
         assert sql("SELECT count(*) FROM yoso_approval_private.revisions WHERE event_id='"+club_event+"';")=="0"
         assert sql("SELECT count(*) FROM yoso_approval_private.submissions WHERE event_id='"+club_event+"';")=="0"
         assert sql("SELECT count(*) FROM yoso_approval_private.votes;")=="0"
@@ -3368,6 +3389,8 @@ try:
             "ALTER TABLE public.events DROP CONSTRAINT IF EXISTS ci_event_club_fk;"
             "ALTER TABLE public.league_members DROP CONSTRAINT IF EXISTS ci_member_club_fk;"
             "ALTER TABLE public.players DROP CONSTRAINT IF EXISTS ci_player_club_fk;"
+            "ALTER TABLE public.teams DROP CONSTRAINT IF EXISTS ci_team_event_fk;"
+            "ALTER TABLE public.event_teams DROP CONSTRAINT IF EXISTS ci_event_team_event_fk;"
             "ALTER TABLE public.leagues DROP COLUMN created_by;")
     assert snapshot()==before_delete_races
     assert sql("SELECT to_regprocedure('public.delete_club(uuid,text)') IS NULL;")=="t"

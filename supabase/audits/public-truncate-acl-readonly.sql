@@ -16,19 +16,25 @@ WHERE n.nspname='public' AND c.relkind IN ('r','p')
   AND r.rolname IN ('anon','authenticated','service_role')
 GROUP BY r.rolname ORDER BY r.rolname;
 
--- Preserve this manifest before any revocation. It is a list of SQL texts
--- to restore only ORIGINAL per-table TRUNCATE privileges if approved.
+-- Preserve exactly the direct per-table ACL grants, not inherited/implicit
+-- effective privileges. A restore must never grant a right that was inherited.
+-- Do not EXECUTE the generated strings unless a rollback is approved.
 SELECT c.relname AS table_name,pg_catalog.pg_get_userbyid(c.relowner) AS table_owner,
- r.rolname AS recipient,
- pg_catalog.format('GRANT TRUNCATE ON TABLE %I.%I TO %I;',
-  n.nspname,c.relname,r.rolname) AS selective_restore_statement
+ grantee.rolname AS recipient,
+ grantor.rolname AS original_grantor,priv.is_grantable,
+ pg_catalog.format('GRANT TRUNCATE ON TABLE %I.%I TO %I%s;',
+  n.nspname,c.relname,grantee.rolname,
+  CASE WHEN priv.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END)
+ AS selective_restore_statement
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-CROSS JOIN pg_catalog.pg_roles r
+CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) priv
+JOIN pg_catalog.pg_roles grantee ON grantee.oid=priv.grantee
+JOIN pg_catalog.pg_roles grantor ON grantor.oid=priv.grantor
 WHERE n.nspname='public' AND c.relkind IN ('r','p')
-  AND r.rolname IN ('anon','authenticated')
-  AND pg_catalog.has_table_privilege(r.oid,c.oid,'TRUNCATE')
-ORDER BY c.relname,r.rolname;
+  AND grantee.rolname IN ('anon','authenticated')
+  AND priv.privilege_type='TRUNCATE'
+ORDER BY c.relname,grantee.rolname;
 
 -- New tables can obtain the same grants from different creating roles.
 -- A per-role default setting is NOT modified by REVOKE on existing tables.
