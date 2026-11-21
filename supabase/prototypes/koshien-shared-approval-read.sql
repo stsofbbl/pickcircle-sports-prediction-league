@@ -113,16 +113,19 @@ BEGIN
    RETURN NEW;
  END IF;
  IF OLD.preset_type='koshien' OR NEW.preset_type='koshien' THEN
-   -- Only actual pending submissions block a status rollback. A normal
-   -- shared quorum may still change resultWait -> finalized; that transition
-   -- is separately protected by the exact one-use transition permit.
-   IF NEW.status IS DISTINCT FROM OLD.status
-     AND NEW.status IS DISTINCT FROM 'finalized'
-     AND EXISTS (
+   -- While a submission is pending, a direct status rollback or archival
+   -- would strand active approval votes. Legitimate quorum finalization
+   -- remains possible, and archiving after finalization is still allowed.
+   -- The resultWait -> finalized transition uses a single-use permit.
+   IF (
+       (NEW.status IS DISTINCT FROM OLD.status
+        AND NEW.status IS DISTINCT FROM 'finalized')
+       OR NEW.archived_at IS DISTINCT FROM OLD.archived_at
+     ) AND EXISTS (
        SELECT 1 FROM yoso_approval_private.submissions s
        WHERE s.event_id=OLD.id AND s.status='submitted'
      ) THEN
-     RAISE EXCEPTION 'pending result approval blocks changing event status'
+     RAISE EXCEPTION 'pending result approval blocks status or archive changes'
        USING ERRCODE='55000';
    END IF;
 

@@ -22,7 +22,7 @@
 - 2接続でsubmit / vote / policy更新 / reopen / 結果編集、**teams / event_teamsの直接更新と確定、削除時のFK CASCADE**、加入/退会/role変更/プレイヤー作成、アカウント・クラブ削除の競合順序と、deadlock / stale revision / 完全ROLLBACKを確認。
 - 48試合の勝敗整合、対象者ごとのscores、admin/half/unanimousの必要票数、冪等再送、承認後の旧票・再提出の扱いを確認。
 - 承認・取消操作が成功したが再取得だけ失敗する場合に、端末上の確定状態がDBと矛盾しないことを確認。
-- 旧提出／票が有効なままイベントを「resultWait→open/archive/draft」に変更する直接UPDATEと、Koshienイベントを確定済みで直接INSERTする経路を拒否。通常の承認によるresultWait→finalizedおよび取消は維持する。
+- 旧提出／票が有効なままイベントを「resultWait→open/archive/draft」に変更する直接UPDATE、**statusを変更せずarchived_atだけ書き換えるUPDATE**、Koshienイベントを確定済みで直接INSERTする経路を拒否。票が失効した後や確定後の通常アーカイブは維持し、承認によるresultWait→finalizedおよび取消も維持する。
 - 全変更は差分のある関連テストのみを追加する。独立レビューと実認証複数端末E2EはCIとは別の完了条件。
 
 ## ロールバック設計で守ること

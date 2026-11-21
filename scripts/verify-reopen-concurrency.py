@@ -156,6 +156,7 @@ ALTER TABLE public.events ADD COLUMN IF NOT EXISTS rules_config jsonb NOT NULL D
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS current_phase text NOT NULL DEFAULT 'setup';
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS sport_type text;
 ALTER TABLE public.events ADD COLUMN IF NOT EXISTS season text;
+ALTER TABLE public.events ADD COLUMN IF NOT EXISTS archived_at timestamptz;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS odds numeric DEFAULT 1;
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
 -- Mirror event_teams' production metadata shape for the shared audit.
@@ -1989,6 +1990,13 @@ try:
       SELECT public.test_reject(
         $q$UPDATE public.events SET prediction_deadline=clock_timestamp()
         WHERE id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET archived_at=clock_timestamp()
+        WHERE id='approval-policy-probe'$q$,'55000');
+      SELECT public.test_assert(
+        (SELECT archived_at IS NULL FROM public.events
+         WHERE id='approval-policy-probe'),
+        'pending approval cannot be hidden by archiving without superseding votes');
       UPDATE public.events SET name='Renamed without touching scoring'
         WHERE id='approval-policy-probe';
       SELECT public.test_assert(
@@ -2079,6 +2087,14 @@ try:
         (SELECT metadata->>'gameMultiplier'='2' FROM public.event_teams
          WHERE event_id='approval-policy-probe'),
         'event-team metadata can change after submission is superseded');
+      UPDATE public.events SET archived_at=clock_timestamp()
+        WHERE id='approval-policy-probe';
+      SELECT public.test_assert(
+        (SELECT archived_at IS NOT NULL FROM public.events
+         WHERE id='approval-policy-probe'),
+        'event can be archived once the old submission is superseded');
+      UPDATE public.events SET archived_at=NULL
+        WHERE id='approval-policy-probe';
       UPDATE public.events SET status='open'
       WHERE id='approval-policy-probe';
       SELECT public.test_assert(
@@ -2207,6 +2223,13 @@ try:
         AND NOT EXISTS(SELECT 1 FROM yoso_approval_private.transition_permits
           WHERE event_id='submit-probe'),
         'event and submission finalized; transition permit consumed');
+      UPDATE public.events SET archived_at=clock_timestamp()
+        WHERE id='submit-probe';
+      SELECT public.test_assert(
+        (SELECT archived_at IS NOT NULL FROM public.events
+          WHERE id='submit-probe'),
+        'fully finalized event can still be archived normally');
+      UPDATE public.events SET archived_at=NULL WHERE id='submit-probe';
       SET request.jwt.claim.sub='29000000-0000-4000-8000-000000000003';
       SET ROLE authenticated;
       SELECT public.test_assert(
