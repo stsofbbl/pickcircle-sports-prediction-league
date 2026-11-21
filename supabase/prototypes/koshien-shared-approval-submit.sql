@@ -135,6 +135,26 @@ BEGIN
    RAISE EXCEPTION 'Koshien bracket has repeated schools or invalid advancement'
      USING ERRCODE='55000';
  END IF;
+ -- The UI reconstructs the school list from event_teams, while scoring
+ -- uses teams. Do not sign a complete bracket against an incomplete or
+ -- ambiguous 49-row display roster. Representative keys are preferred;
+ -- exact names remain the documented fallback.
+ SELECT count(*)=49
+   AND count(DISTINCT et.name)=49
+   AND count(DISTINCT et.seed)=49
+   AND count(DISTINCT t.id)=49
+ INTO v_good
+ FROM public.event_teams et
+ LEFT JOIN public.teams t ON t.event_id=p_event_id AND (
+   (nullif(et.metadata->>'representative_key','') IS NOT NULL
+      AND t.metadata->>'representative_key'=et.metadata->>'representative_key')
+   OR t.name=et.name
+ )
+ WHERE et.event_id=p_event_id;
+ IF NOT coalesce(v_good,false) THEN
+   RAISE EXCEPTION 'Koshien display roster must map one-to-one to 49 scoring teams'
+     USING ERRCODE='55000';
+ END IF;
  SELECT r.payload INTO v_results FROM public.results r WHERE r.event_id=p_event_id;
  IF v_results IS NULL OR jsonb_typeof(v_results->'matches')<>'array'
    OR jsonb_array_length(v_results->'matches')<>48 THEN

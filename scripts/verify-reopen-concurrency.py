@@ -2509,6 +2509,25 @@ try:
       SELECT public.test_reject(
         $q$SELECT public.submit_koshien_shared_results('submit-probe',123)$q$,'40001');
       RESET ROLE;
+      -- The displayed event_teams roster must contain all 49 schools
+      -- and map exactly to the scoring-oriented teams roster.
+      SAVEPOINT display_roster_missing;
+      DELETE FROM public.event_teams WHERE event_id='submit-probe' AND seed=49;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT display_roster_missing;
+      SAVEPOINT display_roster_wrong_name;
+      UPDATE public.event_teams SET name='Unknown School'
+        WHERE event_id='submit-probe' AND seed=49;
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT display_roster_wrong_name;
       -- Real matches FKs check teams.id only, not teams.event_id. Simulate a
       -- completed match with correct score/winner/loser but a foreign school.
       SAVEPOINT foreign_team_match;
