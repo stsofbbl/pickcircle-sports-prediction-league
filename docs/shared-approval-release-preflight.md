@@ -21,6 +21,7 @@
 - 本番から取得した最新のRLS/CHECK/FK/default/trigger/function定義を採用した**使い捨てDB**で初期導入と既存データの読込・更新を行い、非対象大会と既存score計算の差分がないことを確認。
 - 2接続でsubmit / vote / policy更新 / reopen / 結果編集、**teams / event_teamsの直接更新と確定、削除時のFK CASCADE**、加入/退会/role変更/プレイヤー作成、アカウント・クラブ削除の競合順序と、deadlock / stale revision / 完全ROLLBACKを確認。
 - 48試合の勝敗整合、対象者ごとのscores、admin/half/unanimousの必要票数、冪等再送、承認後の旧票・再提出の扱いを確認。
+- **READ ONLY大会構造監査** `supabase/audits/koshien-bracket-topology-readonly.sql`で49校/48試合、R1=17/R2=16/R3=8/QF=4/SF=2/F=1、同一ラウンド重複、勝者進出漏れ、別大会の学校ID、全試合完了を確認。2026-11-21本番読み取り監査では対象大会の`topology_passed=true`。**ただし公式の各試合組合せ・シード位置を完全検証するものではなく、これだけで本番公開判定しない。**
 - 承認・取消操作が成功したが再取得だけ失敗する場合に、端末上の確定状態がDBと矛盾しないことを確認。
 - 旧提出／票が有効なままイベントを「resultWait→open/archive/draft」に変更する直接UPDATE、**statusを変更せずarchived_atだけ書き換えるUPDATE**、Koshienイベントを確定済みで直接INSERTする経路を拒否。票が失効した後や確定後の通常アーカイブは維持し、承認によるresultWait→finalizedおよび取消も維持する。
 - 全変更は差分のある関連テストのみを追加する。独立レビューと実認証複数端末E2EはCIとは別の完了条件。
