@@ -2944,6 +2944,7 @@ try:
             "DROP TRIGGER IF EXISTS yoso_protect_koshien_event_team_configuration ON public.event_teams;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
             "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.koshien_bracket_topology_valid(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
@@ -2952,6 +2953,7 @@ try:
             "DELETE FROM public.event_teams WHERE event_id='roster-race';"
             "DELETE FROM public.events WHERE id='roster-race';")
     assert snapshot()==before,"new-roster concurrency test must restore all tracked tables"
+    assert sql("SELECT to_regprocedure('yoso_approval_private.koshien_bracket_topology_valid(text)') IS NULL;")=="t"
     print("PASS: roster race data and RPC cleanup restores original PostgreSQL fixture")
 
 
@@ -3233,6 +3235,7 @@ try:
             "DROP TRIGGER IF EXISTS yoso_protect_koshien_event_team_configuration ON public.event_teams;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
             "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.koshien_bracket_topology_valid(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
@@ -3523,6 +3526,7 @@ try:
             "DROP TRIGGER IF EXISTS yoso_protect_koshien_event_team_configuration ON public.event_teams;"
             "DROP FUNCTION IF EXISTS yoso_approval_private.protect_koshien_team_configuration();"
             "DROP FUNCTION IF EXISTS yoso_approval_private.team_config_lock_key(text);"
+            "DROP FUNCTION IF EXISTS yoso_approval_private.koshien_bracket_topology_valid(text);"
             "DROP FUNCTION IF EXISTS public.get_koshien_shared_approval_state(text);"
             "DROP TABLE IF EXISTS yoso_approval_private.votes;"
             "DROP TABLE IF EXISTS yoso_approval_private.submissions;"
