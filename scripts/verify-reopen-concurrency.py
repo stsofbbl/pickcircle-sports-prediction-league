@@ -2365,9 +2365,15 @@ try:
       )
       INSERT INTO public.matches(
         event_id,round_key,match_no,team1_id,team2_id,
-        team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at)
+        team1_score,team2_score,winner_team_id,loser_team_id,status,metadata,updated_at)
       SELECT 'submit-probe','R2',slot.n,a.team_id,b.team_id,
-        3,1,a.team_id,b.team_id,'completed',now()
+        3,1,a.team_id,b.team_id,'completed',
+        jsonb_strip_nulls(jsonb_build_object(
+          'team1_source_round_key',CASE WHEN a.k<=17 THEN 'R1' END,
+          'team1_source_match_no',CASE WHEN a.k<=17 THEN a.k END,
+          'team2_source_round_key',CASE WHEN b.k<=17 THEN 'R1' END,
+          'team2_source_match_no',CASE WHEN b.k<=17 THEN b.k END
+        )),now()
       FROM generate_series(1,16) AS slot(n)
       JOIN entrants a ON a.k=2*slot.n-1
       JOIN entrants b ON b.k=2*slot.n;
@@ -2381,9 +2387,15 @@ try:
         LOOP
           INSERT INTO public.matches(
             event_id,round_key,match_no,team1_id,team2_id,
-            team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at)
+            team1_score,team2_score,winner_team_id,loser_team_id,status,metadata,updated_at)
           SELECT 'submit-probe',v_round,slot.n,p1.winner_team_id,p2.winner_team_id,
-            3,1,p1.winner_team_id,p2.winner_team_id,'completed',now()
+            3,1,p1.winner_team_id,p2.winner_team_id,'completed',
+            CASE WHEN v_round IN ('R3','F') THEN jsonb_build_object(
+              'team1_source_round_key',v_previous,
+              'team1_source_match_no',2*slot.n-1,
+              'team2_source_round_key',v_previous,
+              'team2_source_match_no',2*slot.n
+            ) ELSE '{}'::jsonb END,now()
           FROM generate_series(1,v_total) AS slot(n)
           JOIN public.matches p1 ON p1.event_id='submit-probe'
             AND p1.round_key=v_previous AND p1.match_no=2*slot.n-1
@@ -2493,6 +2505,39 @@ try:
         $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
       RESET ROLE;
       ROLLBACK TO SAVEPOINT foreign_team_match;
+
+      -- A school can advance into a valid R2 slot but from the WRONG
+      -- source fixture. Its assigned feeder must match the R1 winner.
+      SAVEPOINT mismatched_official_feeder;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      ALTER TABLE public.matches DISABLE TRIGGER USER;
+      UPDATE public.matches
+      SET metadata=jsonb_set(metadata,'{team1_source_match_no}','2'::jsonb,false)
+      WHERE event_id='submit-probe' AND round_key='R2' AND match_no=1;
+      ALTER TABLE public.matches ENABLE TRIGGER USER;
+      SELECT public.test_assert(
+        NOT yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'R2 feeder must point to the actual winning R1 match');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT mismatched_official_feeder;
+
+      -- Missing feeder metadata must not silently disable validation.
+      SAVEPOINT omitted_official_feeder;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      ALTER TABLE public.matches DISABLE TRIGGER USER;
+      UPDATE public.matches
+      SET metadata=metadata - 'team1_source_match_no' - 'team1_source_round_key'
+      WHERE event_id='submit-probe' AND round_key='R2' AND match_no=1;
+      ALTER TABLE public.matches ENABLE TRIGGER USER;
+      SELECT public.test_assert(
+        NOT yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'R2 feeder count cannot be bypassed by removing metadata');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT omitted_official_feeder;
 
       -- A score-consistent card can still reuse a school twice in R1.
       SAVEPOINT repeated_r1_school;

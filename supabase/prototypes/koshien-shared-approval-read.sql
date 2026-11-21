@@ -246,7 +246,7 @@ CREATE FUNCTION yoso_approval_private.koshien_bracket_topology_valid(p_event_id 
 RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path=''
 AS $function$
  WITH games AS (
-   SELECT m.round_key,m.match_no,m.team1_id,m.team2_id,m.winner_team_id
+   SELECT m.round_key,m.match_no,m.team1_id,m.team2_id,m.winner_team_id,m.metadata
    FROM public.matches m WHERE m.event_id=p_event_id
  ), rounds(round_key,required_count,next_round) AS (
    VALUES ('R1',17,'R2'),('R2',16,'R3'),('R3',8,'QF'),
@@ -257,6 +257,23 @@ AS $function$
    UNION ALL
    SELECT g.round_key,g.team2_id AS team_id FROM games g
    WHERE g.team2_id IS NOT NULL
+ ), feeders AS (
+   -- R2 slots carry the official R1 feeder for 17 winners; 15 byes have
+   -- no R1 feeder. R3 and F have deterministic feeders for both slots.
+   -- QF/SF are official redraws and intentionally have no fixed feeders.
+   SELECT g.round_key,g.match_no,1 AS side,g.team1_id AS team_id,
+     g.metadata->>'team1_source_round_key' AS source_round,
+     g.metadata->>'team1_source_match_no' AS source_no
+   FROM games g WHERE g.round_key IN ('R2','R3','F')
+     AND (g.metadata ? 'team1_source_round_key'
+       OR g.metadata ? 'team1_source_match_no')
+   UNION ALL
+   SELECT g.round_key,g.match_no,2,g.team2_id,
+     g.metadata->>'team2_source_round_key',
+     g.metadata->>'team2_source_match_no'
+   FROM games g WHERE g.round_key IN ('R2','R3','F')
+     AND (g.metadata ? 'team2_source_round_key'
+       OR g.metadata ? 'team2_source_match_no')
  )
  SELECT
    (SELECT COUNT(*) FROM public.teams t WHERE t.event_id=p_event_id)=49
@@ -287,6 +304,25 @@ AS $function$
      WHERE r.next_round IS NOT NULL AND
        (SELECT COUNT(*) FROM appearances a
         WHERE a.round_key=r.next_round AND a.team_id=g.winner_team_id)<>1
+   )
+   AND (SELECT COUNT(*) FROM feeders f WHERE f.round_key='R2')=17
+   AND (SELECT COUNT(*) FROM feeders f WHERE f.round_key='R3')=16
+   AND (SELECT COUNT(*) FROM feeders f WHERE f.round_key='F')=2
+   AND NOT EXISTS (
+     SELECT 1 FROM feeders f
+     LEFT JOIN games previous ON previous.round_key=f.source_round
+       AND previous.match_no=CASE
+         WHEN f.source_no ~ '^[0-9]{1,3}
+$function$;
+REVOKE ALL ON FUNCTION yoso_approval_private.koshien_bracket_topology_valid(text)
+ FROM PUBLIC,anon,authenticated,service_role;
+ THEN f.source_no::integer
+         ELSE NULL END
+     WHERE f.source_round IS DISTINCT FROM CASE f.round_key
+       WHEN 'R2' THEN 'R1' WHEN 'R3' THEN 'R2' WHEN 'F' THEN 'SF' END
+       OR previous.winner_team_id IS DISTINCT FROM f.team_id
+       OR (f.round_key IN ('R3','F') AND f.source_no IS DISTINCT FROM
+         (2*f.match_no-CASE WHEN f.side=1 THEN 1 ELSE 0 END)::text)
    );
 $function$;
 REVOKE ALL ON FUNCTION yoso_approval_private.koshien_bracket_topology_valid(text)

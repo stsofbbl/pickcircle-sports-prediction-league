@@ -22,6 +22,7 @@
 - 2接続でsubmit / vote / policy更新 / reopen / 結果編集、**teams / event_teamsの直接更新と確定、削除時のFK CASCADE**、加入/退会/role変更/プレイヤー作成、アカウント・クラブ削除の競合順序と、deadlock / stale revision / 完全ROLLBACKを確認。
 - 48試合の勝敗整合、対象者ごとのscores、admin/half/unanimousの必要票数、冪等再送、承認後の旧票・再提出の扱いを確認。
 - **結果payloadとの一致**：payloadの`team_a_id/team_b_id/winner_id/loser_id`はUUIDではなく**学校名**。試合の各UUIDから`teams.name`をJOINして48個のキー（round, match_no）の一意性、出場校・勝敗・点数・状態の整合を提出RPCで検証する。READ ONLYの`supabase/audits/koshien-result-payload-readonly.sql`は2026-11-21本番で48件すべて一致。追加メタデータや開始時刻の完全一致、公式抽選表の検証とは区別する。
+- **公式勝者の送り先**：2回戦17件・3回戦16件・決勝2件の`matches.metadata`進出元参照を、指定された前の試合の勝者と照合する。3回戦・決勝では決定的な対戦枠番号も確認し、準々決勝・準決勝の公式再抽選は固定せず尊重する。本番READ ONLYの`supabase/audits/koshien-official-feeders-readonly.sql`で不一致0。隔離DBで参照先改ざん・欠損を拒否する。
 - **トーナメント構造**：`submit_koshien_shared_results`に49校・各ラウンド規定数・学校重複なし・各勝者の次ラウンド進出を検証するprivate helperを接続。隔離DBの合成データも49校48試合に置き換え、重複・進出漏れを拒否する。READ ONLY大会構造監査`supabase/audits/koshien-bracket-topology-readonly.sql`は2026-11-21本番で`topology_passed=true`。**ただし公式の各試合組合せ・シード位置・results.payload整合性を完全検証するものではなく、これだけで本番公開判定しない。**
 - 承認・取消操作が成功したが再取得だけ失敗する場合に、端末上の確定状態がDBと矛盾しないことを確認。
 - 旧提出／票が有効なままイベントを「resultWait→open/archive/draft」に変更する直接UPDATE、**statusを変更せずarchived_atだけ書き換えるUPDATE**、Koshienイベントを確定済みで直接INSERTする経路を拒否。票が失効した後や確定後の通常アーカイブは維持し、承認によるresultWait→finalizedおよび取消も維持する。
