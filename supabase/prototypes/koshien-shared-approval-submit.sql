@@ -129,6 +129,12 @@ BEGIN
    RAISE EXCEPTION 'all 48 official matches must be valid and completed'
      USING ERRCODE='55000';
  END IF;
+ -- Match results alone do not prove a knockout bracket: each school must
+ -- enter once, all 49 must appear by R2, and every winner must advance.
+ IF NOT yoso_approval_private.koshien_bracket_topology_valid(p_event_id) THEN
+   RAISE EXCEPTION 'Koshien bracket has repeated schools or invalid advancement'
+     USING ERRCODE='55000';
+ END IF;
  SELECT r.payload INTO v_results FROM public.results r WHERE r.event_id=p_event_id;
  IF v_results IS NULL OR jsonb_typeof(v_results->'matches')<>'array'
    OR jsonb_array_length(v_results->'matches')<>48 THEN

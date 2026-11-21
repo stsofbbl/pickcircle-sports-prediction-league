@@ -237,3 +237,48 @@ CREATE TRIGGER yoso_protect_koshien_team_configuration
 CREATE TRIGGER yoso_protect_koshien_event_team_configuration
  BEFORE INSERT OR UPDATE OR DELETE ON public.event_teams
  FOR EACH ROW EXECUTE FUNCTION yoso_approval_private.protect_koshien_team_configuration();
+
+-- Official summer Koshien: 49 distinct schools, 48 completed knockout
+-- matches, 17 R1 winners plus 15 R2 byes, and one appearance per round.
+-- The submit RPC performs score/winner checks separately before calling this.
+-- This helper is server-only: never grant clients direct EXECUTE.
+CREATE FUNCTION yoso_approval_private.koshien_bracket_topology_valid(p_event_id text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY INVOKER SET search_path=''
+AS $function$
+ WITH games AS (
+   SELECT m.round_key,m.match_no,m.team1_id,m.team2_id,m.winner_team_id
+   FROM public.matches m WHERE m.event_id=p_event_id
+ ), rounds(round_key,required_count,next_round) AS (
+   VALUES ('R1',17,'R2'),('R2',16,'R3'),('R3',8,'QF'),
+          ('QF',4,'SF'),('SF',2,'F'),('F',1,NULL::text)
+ ), appearances AS (
+   SELECT g.round_key,g.team1_id AS team_id FROM games g
+   WHERE g.team1_id IS NOT NULL
+   UNION ALL
+   SELECT g.round_key,g.team2_id AS team_id FROM games g
+   WHERE g.team2_id IS NOT NULL
+ )
+ SELECT
+   (SELECT COUNT(*) FROM public.teams t WHERE t.event_id=p_event_id)=49
+   AND (SELECT COUNT(*) FROM games)=48
+   AND (SELECT COUNT(DISTINCT a.team_id) FROM appearances a
+        WHERE a.round_key IN ('R1','R2'))=49
+   AND NOT EXISTS (
+     SELECT 1 FROM rounds r WHERE
+       (SELECT COUNT(*) FROM games g WHERE g.round_key=r.round_key)
+          <>r.required_count
+   )
+   AND NOT EXISTS (
+     SELECT 1 FROM appearances a GROUP BY a.round_key,a.team_id
+     HAVING COUNT(*)>1
+   )
+   AND NOT EXISTS (
+     SELECT 1 FROM games g
+     JOIN rounds r ON r.round_key=g.round_key
+     WHERE r.next_round IS NOT NULL AND
+       (SELECT COUNT(*) FROM appearances a
+        WHERE a.round_key=r.next_round AND a.team_id=g.winner_team_id)<>1
+   );
+$function$;
+REVOKE ALL ON FUNCTION yoso_approval_private.koshien_bracket_topology_valid(text)
+ FROM PUBLIC,anon,authenticated,service_role;

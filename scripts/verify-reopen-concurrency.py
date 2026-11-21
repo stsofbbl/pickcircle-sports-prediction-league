@@ -2326,26 +2326,72 @@ try:
       SELECT '00000000-0000-0000-0000-000000000010',
         ('29000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,'member','active'
       FROM generate_series(1,3) i;
-      INSERT INTO public.teams(id,event_id,name,start_round) VALUES
-        ('86000000-0000-4000-8000-000000000001','submit-probe','Seed A',1),
-        ('86000000-0000-4000-8000-000000000002','submit-probe','Seed B',1);
+      -- 49 real entrants: 34 schools enter R1 and 15 enter R2 with a bye.
+      -- Seed A/B retain their old IDs so coefficient-change tests still work.
+      INSERT INTO public.teams(id,event_id,name,start_round)
+      SELECT ('86000000-0000-4000-8000-'||lpad(ids.n::text,12,'0'))::uuid,
+        'submit-probe',
+        CASE WHEN ids.n=1 THEN 'Seed A' WHEN ids.n=2 THEN 'Seed B'
+          ELSE 'Seed '||lpad(ids.n::text,2,'0') END,
+        CASE WHEN ids.n<=34 THEN 1 ELSE 2 END
+      FROM generate_series(1,49) AS ids(n);
       INSERT INTO public.event_teams(id,event_id,name,seed,metadata)
-      VALUES(9201,'submit-probe','Seed A',1,'{"gameMultiplier":1}');
+      SELECT 9200+ids.n,'submit-probe',
+        CASE WHEN ids.n=1 THEN 'Seed A' WHEN ids.n=2 THEN 'Seed B'
+          ELSE 'Seed '||lpad(ids.n::text,2,'0') END,
+        ids.n,'{"gameMultiplier":1}'::jsonb
+      FROM generate_series(1,49) AS ids(n);
       SELECT yoso_approval_private.issue_write_permit('submit-probe');
-      -- Seed synthetic historical cards without firing progression side effects.
-      -- Re-enable every user trigger before invoking the actual submission RPC.
+      -- Seed a coherent official 49-team knockout progression, without
+      -- invoking the live progression triggers before the full bracket exists.
       ALTER TABLE public.matches DISABLE TRIGGER USER;
       INSERT INTO public.matches(
-         event_id,round_key,match_no,team1_id,team2_id,
-         team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at
+        event_id,round_key,match_no,team1_id,team2_id,
+        team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at)
+      SELECT 'submit-probe','R1',slot.n,p.first_id,p.second_id,
+        3,1,p.first_id,p.second_id,'completed',now()
+      FROM generate_series(1,17) AS slot(n)
+      CROSS JOIN LATERAL (
+        SELECT ('86000000-0000-4000-8000-'||
+            lpad((2*slot.n-1)::text,12,'0'))::uuid AS first_id,
+          ('86000000-0000-4000-8000-'||
+            lpad((2*slot.n)::text,12,'0'))::uuid AS second_id
+      ) p;
+      WITH entrants AS (
+        SELECT k,
+          ('86000000-0000-4000-8000-'||
+            lpad((CASE WHEN k<=17 THEN 2*k-1 ELSE k+17 END)::text,12,'0'))::uuid AS team_id
+        FROM generate_series(1,32) AS ord(k)
       )
-      SELECT 'submit-probe',rr.round_key,i,
-        '86000000-0000-4000-8000-000000000001',
-        '86000000-0000-4000-8000-000000000002',3,1,
-        '86000000-0000-4000-8000-000000000001',
-        '86000000-0000-4000-8000-000000000002','completed',now()
-      FROM (VALUES ('R1',17),('R2',16),('R3',8),('QF',4),('SF',2),('F',1))
-       rr(round_key,n),LATERAL generate_series(1,rr.n) i;
+      INSERT INTO public.matches(
+        event_id,round_key,match_no,team1_id,team2_id,
+        team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at)
+      SELECT 'submit-probe','R2',slot.n,a.team_id,b.team_id,
+        3,1,a.team_id,b.team_id,'completed',now()
+      FROM generate_series(1,16) AS slot(n)
+      JOIN entrants a ON a.k=2*slot.n-1
+      JOIN entrants b ON b.k=2*slot.n;
+      DO $rounds$
+      DECLARE v_round text; v_previous text; v_total integer;
+      BEGIN
+        FOR v_round,v_previous,v_total IN
+          SELECT r.round_key,r.prev_round,r.n FROM
+          (VALUES ('R3','R2',8),('QF','R3',4),('SF','QF',2),('F','SF',1))
+          AS r(round_key,prev_round,n)
+        LOOP
+          INSERT INTO public.matches(
+            event_id,round_key,match_no,team1_id,team2_id,
+            team1_score,team2_score,winner_team_id,loser_team_id,status,updated_at)
+          SELECT 'submit-probe',v_round,slot.n,p1.winner_team_id,p2.winner_team_id,
+            3,1,p1.winner_team_id,p2.winner_team_id,'completed',now()
+          FROM generate_series(1,v_total) AS slot(n)
+          JOIN public.matches p1 ON p1.event_id='submit-probe'
+            AND p1.round_key=v_previous AND p1.match_no=2*slot.n-1
+          JOIN public.matches p2 ON p2.event_id='submit-probe'
+            AND p2.round_key=v_previous AND p2.match_no=2*slot.n;
+        END LOOP;
+      END
+      $rounds$;
       ALTER TABLE public.matches ENABLE TRIGGER USER;
       INSERT INTO public.results(event_id,payload,updated_by)
       SELECT 'submit-probe',jsonb_build_object('matches',jsonb_agg(
@@ -2360,8 +2406,10 @@ try:
              ('submit-probe','28000000-0000-4000-8000-000000000003');
       SELECT public.test_assert(
         (SELECT count(*)=48 FROM public.matches WHERE event_id='submit-probe')
+        AND (SELECT count(*)=49 FROM public.teams WHERE event_id='submit-probe')
+        AND yoso_approval_private.koshien_bracket_topology_valid('submit-probe')
         AND (SELECT count(*)=4 FROM public.scores WHERE event_id='submit-probe'),
-        '48 valid cards and four active scorers seeded');
+        '49 schools, 48 coherent cards and four active scorers seeded');
       SET ROLE anon;
       SELECT public.test_reject(
         $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'42501');
@@ -2398,6 +2446,53 @@ try:
         $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
       RESET ROLE;
       ROLLBACK TO SAVEPOINT foreign_team_match;
+
+      -- A score-consistent card can still reuse a school twice in R1.
+      SAVEPOINT repeated_r1_school;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      ALTER TABLE public.matches DISABLE TRIGGER USER;
+      UPDATE public.matches
+      SET team2_id=(SELECT team2_id FROM public.matches
+        WHERE event_id='submit-probe' AND round_key='R1' AND match_no=1),
+          loser_team_id=(SELECT team2_id FROM public.matches
+        WHERE event_id='submit-probe' AND round_key='R1' AND match_no=1)
+      WHERE event_id='submit-probe' AND round_key='R1' AND match_no=2;
+      ALTER TABLE public.matches ENABLE TRIGGER USER;
+      SELECT public.test_assert(
+        NOT yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'a school appearing twice in R1 invalidates bracket topology');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT repeated_r1_school;
+
+      -- The round counts and card-level scores stay valid, but the R1
+      -- winner in match 1 must not be replaced by its defeated school in R2.
+      SAVEPOINT missing_r1_winner;
+      SELECT yoso_approval_private.issue_write_permit('submit-probe');
+      ALTER TABLE public.matches DISABLE TRIGGER USER;
+      UPDATE public.matches
+      SET team1_id=(SELECT loser_team_id FROM public.matches
+        WHERE event_id='submit-probe' AND round_key='R1' AND match_no=1),
+          winner_team_id=(SELECT loser_team_id FROM public.matches
+        WHERE event_id='submit-probe' AND round_key='R1' AND match_no=1)
+      WHERE event_id='submit-probe' AND round_key='R2' AND match_no=1;
+      ALTER TABLE public.matches ENABLE TRIGGER USER;
+      SELECT public.test_assert(
+        NOT yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'R1 winner missing from R2 invalidates bracket topology');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.test_reject(
+        $q$SELECT public.submit_koshien_shared_results('submit-probe',0)$q$,'55000');
+      RESET ROLE;
+      ROLLBACK TO SAVEPOINT missing_r1_winner;
+      SELECT public.test_assert(
+        yoso_approval_private.koshien_bracket_topology_valid('submit-probe'),
+        'undoing both invalid edits restores the complete bracket');
+
       SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
       SET ROLE authenticated;
       SELECT public.test_assert(
@@ -2432,8 +2527,8 @@ try:
                   ->'phase2Points'->>'best16'='20'
            AND result_snapshot->'event_context'->'rules_config'
                   ->'phase2Points'->>'best16'='20'
-           AND jsonb_array_length(result_snapshot->'teams')=2
-           AND jsonb_array_length(result_snapshot->'event_teams')=1
+           AND jsonb_array_length(result_snapshot->'teams')=49
+           AND jsonb_array_length(result_snapshot->'event_teams')=49
          FROM yoso_approval_private.submissions
          WHERE event_id='submit-probe' AND revision=0),
         'private approval audit includes event configuration and team coefficients');
