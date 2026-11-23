@@ -47,3 +47,21 @@
 `saveKoshienStructuredTables`の`players`単一upsertに限り、`55P03`後100msで1回再実行する試作を追加。各HTTP/SQL文は独立トランザクションなので、最初の競合失敗は保存されない。再実行では同じleague/profile identityを使い、RLS・FKに最新の会員資格とクラブ存在を再判定させる。認可拒否、削除済み親、2回目の競合は上位の保存エラーへ返す。得点・結果を一括再送しない。
 
 `tests/koshien-player-retry.test.js`は再試行回数、同一identity、権限・FK拒否を検証する。使い捨てPostgreSQLの`scripts/verify-roster-delete-deadlock.py`は、直接player INSERTがleagueロック中に`55P03`、ロックROLLBACK後は再実行可、club削除COMMIT後はRLS/FKで拒否・行残留なしを検証する。試作trigger本体のNOWAITは依然として隔離DBだけの比較であり、PR全体の本番適用ゲートは未解消。
+
+
+## NOWAIT版への置換前に必要な統合試験（2026-11-24）
+
+現行の統合試験 `scripts/verify-reopen-concurrency.py` は、承認投票が `leagues FOR KEY SHARE` を保持する間、資格変更triggerの `leagues FOR UPDATE` が**待機する**設計を検証している。隔離試験のNOWAIT版では同じ操作は待たずにSQLSTATE `55P03` で失敗する。従来の「待機後に成功」というassertをそのまま利用すると、仕様変更の検証にならない。各行の失敗時に部分書込みが残らないことを確かめ、投票COMMIT/ROLLBACK後に**新しいトランザクション**で再試行する。
+
+| 既存の試験箇所 | NOWAIT版で必要な確認 |
+| --- | --- |
+| 2894–2970: 既存会員のstatus UPDATE | 投票中は`55P03`、status不変。投票解放後に再実行してstatus変更と提出revisionの整合を確認 |
+| 3094–3128: 新会員＋player INSERT（投票先行） | 最初のトランザクションは`55P03`で両行とも残らない。解放後に会員＋playerを原子的に再実行し、旧提出をstale/supersededとして票を再利用しない |
+| 3130–3168: 新会員＋player INSERT（登録先行） | 投票がリーグロックを待って最新の資格者集合を読む現行期待値を維持 |
+| 3170–3227: 会員行作成後の単独player INSERT | 投票中は`55P03`でplayerなし。解放後の再実行で追加し、旧提出をstaleにする。リーグ名・表示名・加入日時など資格と無関係な更新は引き続き通す |
+| 3409–3520: 実RPC／auth削除との競合 | `remove_club_member`、`review_club_join_request`、`manage_league_admin`、自己player登録、`archive_deleted_account`を個別に初回`55P03`→解放後再実行で検証。権限拒否と資格者集合の変化・不変も現行と照合 |
+| クラブ削除×承認の既存3順序、および`verify-roster-delete-deadlock.py` | NOWAIT化で40P01が再発せず、削除済みクラブを再試行で復活させないことを再確認 |
+
+**未解決の入口：アカウント削除。** `js/data-service.js`の`deleteAccount`は`delete-account` Edge Functionを1回呼び、同Functionは`auth.admin.deleteUser`を1回呼ぶ。`auth.users`削除後の`archive_deleted_account` triggerが資格変更時に`55P03`となると削除全体は失敗し得る。現在のEdge Functionにはこの競合の再試行がない。SQLSTATEがAuth Admin APIでどう返るか、削除失敗後のユーザー・会員・profileの一貫性、競合解放後の安全な再試行を隔離環境で検証するまで、NOWAIT triggerを本番へ適用しない。単にクライアント側で再送する案も、パスワード再確認と部分成功の扱いを確認する前には採用しない。
+
+関連する`retryRosterLockOnce`とplayer upsertの1回再試行は、対象のRPC/単一SQL文の試作に限る。統合試験の待機期待を更新し、全入口の権限・締切・状態整合性と削除後の不変条件が通ることを本番migrationの条件とする。本番DBの実ユーザーデータでは競合試験をしない。
