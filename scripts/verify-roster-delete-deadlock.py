@@ -216,3 +216,71 @@ nowait_case("member update versus shared league KEY SHARE",
             "' AND user_id='" + member + "' FOR UPDATE",
             "SELECT public.remove_club_member('" + league + "','" + member + "');",
             "FOR KEY SHARE")
+
+def deleted_before_retry(label, child_lock, mutation, expected_error):
+    a = b = None
+    try:
+        a = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(a, "BEGIN;SELECT 1 " + child_lock + ";")
+        assert line(a) == "1"
+        b = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(b, "BEGIN;SELECT 1 FROM public.leagues WHERE id='" + league +
+             "' FOR UPDATE;")
+        assert line(b) == "1"
+        send(a, auth + mutation)
+        a.stdin.close()
+        a.wait(timeout=5)
+        assert a.returncode != 0 and "55P03" in a.stderr.read(), label
+        send(b, auth + "SELECT public.delete_club('" + league +
+             "','Delete race');COMMIT;")
+        b.stdin.close()
+        b.wait(timeout=5)
+        assert b.returncode == 0, (label, b.stderr.read())
+        assert sql("SELECT count(*) FROM public.leagues WHERE id='" + league + "';") == "0"
+        assert sql("SELECT count(*) FROM public.league_members WHERE league_id='" + league + "';") == "0"
+        assert sql("SELECT count(*) FROM public.players WHERE league_id='" + league + "';") == "0"
+        assert sql("SELECT count(*) FROM public.league_join_requests WHERE league_id='" + league + "';") == "0"
+        retry = subprocess.run(psql, input=auth + mutation, text=True,
+                               capture_output=True, timeout=10)
+        assert retry.returncode != 0 and expected_error in retry.stderr, (
+            label, retry.stdout, retry.stderr)
+        assert sql("SELECT count(*) FROM public.leagues WHERE id='" + league + "';") == "0"
+        print("PASS: deleted club blocks stale " + label + " retry with " + expected_error)
+        # The fixture remains disposable; seed the same identity for the next race.
+        sql("INSERT INTO public.leagues(id,name,created_by) VALUES"
+            "('"+league+"','Delete race','"+owner+"');"
+            "INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES"
+            "('"+league+"','"+owner+"','owner','active'),"
+            "('"+league+"','"+member+"','member','active');"
+            "INSERT INTO public.players(id,league_id,profile_id,display_name) VALUES"
+            "('80000000-0000-4000-8000-000000000002','"+league+"','"+member+"','Member');"
+            "INSERT INTO public.league_join_requests(id,league_id,requester_id) VALUES"
+            "('49000000-0000-4000-8000-000000000001','"+league+"',"
+            "'59000000-0000-4000-8000-000000000001');")
+    finally:
+        for proc in (a,b):
+            if proc and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+deleted_before_retry(
+    "manage_league_admin",
+    "FROM public.league_members WHERE league_id='" + league +
+    "' AND user_id='" + member + "' FOR UPDATE",
+    "SELECT public.manage_league_admin('" + league + "','" + member + "',true);",
+    "42501")
+deleted_before_retry(
+    "remove_club_member",
+    "FROM public.league_members WHERE league_id='" + league +
+    "' AND user_id='" + member + "' FOR UPDATE",
+    "SELECT public.remove_club_member('" + league + "','" + member + "');",
+    "42501")
+deleted_before_retry(
+    "review_club_join_request",
+    "FROM public.league_join_requests WHERE id=" +
+    "'49000000-0000-4000-8000-000000000001' FOR UPDATE",
+    "SELECT count(*) FROM public.review_club_join_request(" +
+    "'49000000-0000-4000-8000-000000000001',true);",
+    "P0002")
