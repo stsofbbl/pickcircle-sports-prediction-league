@@ -283,3 +283,11 @@ test("failed result save leaves shared approval state untrusted", async () => {
   assert.equal(ctx.koshienSharedApprovalView.loadedFromDb, false);
   assert.match(ctx.koshienSharedApprovalNotice.message, /保存結果を確認できません/);
 });
+
+test("a skipped online save preserves the submitted server approval state", async () => {
+  const { ctx, calls } = sharedPendingSaveHarness({ saveResult: { skipped: true } });
+  await ctx.confirmSave();
+  assert.deepEqual(calls, ["confirm", "persist", "save"]);
+  assert.equal(ctx.koshienSharedApprovalView.loadedFromDb, true);
+  assert.equal(ctx.koshienSharedApprovalView.submission_status, "submitted");
+});
