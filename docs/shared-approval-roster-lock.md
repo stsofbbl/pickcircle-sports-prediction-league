@@ -40,3 +40,10 @@
 3経路ともPostgreSQL `40P01`を再現し、両接続終了後に試験クラブが残ることを確認した。[CI run 45175655208](https://github.com/stsofbbl/pickcircle-sports-prediction-league/actions/runs/45175655208)は、**deadlockの検出を期待値として**全success。CIの緑は本番適用可能を意味しない。本番Supabaseへの書込みは行っていない。
 
 安全ゲート：現在のリーグ行`FOR UPDATE`取得を行うBEFORE行triggerは、本番の削除・会員管理と組み合わせて導入しない。次は直DMLを含む全入口で子行→親リーグの待機環を避ける設計を試作し、加入/除名/削除の正常系と2接続競合、権限、再試行時の挙動を検証する。単に会員管理RPCだけをリーグ先行へ変える方法では、クライアントからの直接DML経路を覆えない。
+
+
+## 直接player保存の再試行境界（2026-11-24）
+
+`saveKoshienStructuredTables`の`players`単一upsertに限り、`55P03`後100msで1回再実行する試作を追加。各HTTP/SQL文は独立トランザクションなので、最初の競合失敗は保存されない。再実行では同じleague/profile identityを使い、RLS・FKに最新の会員資格とクラブ存在を再判定させる。認可拒否、削除済み親、2回目の競合は上位の保存エラーへ返す。得点・結果を一括再送しない。
+
+`tests/koshien-player-retry.test.js`は再試行回数、同一identity、権限・FK拒否を検証する。使い捨てPostgreSQLの`scripts/verify-roster-delete-deadlock.py`は、直接player INSERTがleagueロック中に`55P03`、ロックROLLBACK後は再実行可、club削除COMMIT後はRLS/FKで拒否・行残留なしを検証する。試作trigger本体のNOWAITは依然として隔離DBだけの比較であり、PR全体の本番適用ゲートは未解消。
