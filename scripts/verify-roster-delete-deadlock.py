@@ -175,7 +175,23 @@ def nowait_case(label, child_lock, mutation, league_lock="FOR UPDATE"):
         b.wait(timeout=5)
         assert b.returncode == 0, (label, b.stderr.read())
         assert sql("SELECT count(*) FROM public.leagues WHERE id='" + league + "';") == "1"
-        print("PASS: NOWAIT " + label + " fails with 55P03 before deadlock")
+        # A new transaction may retry only after the competing lock is released.
+        # Roll back its successful operation so every case starts from the same roster.
+        retried = sql("BEGIN;" + auth + mutation + "ROLLBACK;")
+        assert retried, (label, "retry returned no result")
+        assert sql("SELECT membership_status FROM public.league_members "
+                   "WHERE league_id='" + league + "' AND user_id='" + member + "';") == "active"
+        assert sql("SELECT status FROM public.league_join_requests "
+                   "WHERE id='49000000-0000-4000-8000-000000000001';") == "pending"
+        # Retrying never turns a non-admin into an authorized caller.
+        unauthorized = subprocess.run(
+            psql, input="BEGIN;SET request.jwt.claim.sub='" + member +
+            "';SET ROLE authenticated;" + mutation,
+            text=True, capture_output=True, timeout=10)
+        assert unauthorized.returncode != 0 and "42501" in unauthorized.stderr, (
+            label, unauthorized.stderr)
+        print("PASS: NOWAIT " + label +
+              " fails with 55P03, then authorized retry succeeds; non-admin denied")
     finally:
         for proc in (a,b):
             if proc and proc.poll() is None:
