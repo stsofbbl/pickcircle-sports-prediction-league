@@ -160,3 +160,22 @@ DO $test$ BEGIN
 END $test$;
 SELECT 'PASS: no leaked permits';
 SELECT 'PASS: admin-only finalization authorization, version, status, guards';
+
+-- Finalized event deletion is supported by production FK ON DELETE CASCADE.
+-- Exercise the real trigger ordering in this isolated schema (no real data).
+SET ROLE authenticated;
+SELECT public.finalize_koshien_admin_results('test-finalize',
+ public.koshien_result_version('test-finalize'));
+RESET ROLE;
+DELETE FROM public.events WHERE id='test-finalize';
+DO $test$ BEGIN
+  IF EXISTS (SELECT 1 FROM public.matches WHERE event_id='test-finalize')
+     OR EXISTS (SELECT 1 FROM public.scores WHERE event_id='test-finalize')
+     OR EXISTS (SELECT 1 FROM public.results WHERE event_id='test-finalize')
+     OR EXISTS (SELECT 1 FROM public.teams WHERE event_id='test-finalize')
+     OR EXISTS (SELECT 1 FROM public.event_teams WHERE event_id='test-finalize')
+     OR EXISTS (SELECT 1 FROM public.koshien_result_reopens WHERE event_id='test-finalize') THEN
+    RAISE EXCEPTION 'finalized event cascade left child rows';
+  END IF;
+END $test$;
+SELECT 'PASS: deleting a finalized event cascades through all child tables';

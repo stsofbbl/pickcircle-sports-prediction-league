@@ -32,6 +32,19 @@ ALTER TABLE public.koshien_result_reopens ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON public.koshien_result_reopens TO authenticated;
 CREATE TABLE public.players(id uuid PRIMARY KEY,league_id uuid,profile_id uuid);
 CREATE TABLE public.scores(event_id text,player_id uuid,total_score integer);
+-- Preserve the production event-deletion cascade for the new result guards.
+ALTER TABLE public.teams ADD FOREIGN KEY (event_id)
+  REFERENCES public.events(id) ON DELETE CASCADE;
+ALTER TABLE public.event_teams ADD FOREIGN KEY (event_id)
+  REFERENCES public.events(id) ON DELETE CASCADE;
+ALTER TABLE public.matches ADD FOREIGN KEY (event_id)
+  REFERENCES public.events(id) ON DELETE CASCADE;
+ALTER TABLE public.results ADD FOREIGN KEY (event_id)
+  REFERENCES public.events(id) ON DELETE CASCADE;
+ALTER TABLE public.scores ADD FOREIGN KEY (event_id)
+  REFERENCES public.events(id) ON DELETE CASCADE;
+ALTER TABLE public.koshien_result_reopens ADD FOREIGN KEY (event_id)
+  REFERENCES public.events(id) ON DELETE CASCADE;
 CREATE FUNCTION public.is_league_admin(p_league_id uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.league_members
