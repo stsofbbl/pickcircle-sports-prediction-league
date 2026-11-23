@@ -198,3 +198,73 @@ test("join approval stops after a second lock conflict", async () => {
   );
   assert.equal(calls, 2);
 });
+
+test("admin role changes and member removal retry one transient roster lock", async () => {
+  for (const [action, expectedName] of [
+    [(service) => service.league.manageAdmin({
+      leagueId: "league-id", userId: "member-id", makeAdmin: true,
+    }), "manage_league_admin"],
+    [(service) => service.league.removeMember({
+      leagueId: "league-id", userId: "member-id",
+    }), "remove_club_member"],
+  ]) {
+    const calls = [];
+    const service = loadService({
+      async rpc(name, args) {
+        calls.push({ name, args });
+        if (calls.length === 1) return { data: null, error: { code: "55P03", message: "locked" } };
+        return { data: { ok: true }, error: null };
+      },
+    });
+    assert.equal((await action(service)).ok, true);
+    assert.deepEqual(calls.map((call) => call.name), [expectedName, expectedName]);
+    assert.equal(JSON.stringify(calls[0].args), JSON.stringify(calls[1].args));
+  }
+});
+
+test("admin role and removal RPCs preserve authorization and retry bounds", async () => {
+  for (const action of [
+    (service) => service.league.manageAdmin({
+      leagueId: "league-id", userId: "member-id", makeAdmin: true,
+    }),
+    (service) => service.league.removeMember({ leagueId: "league-id", userId: "member-id" }),
+  ]) {
+    for (const code of ["42501", "P0002"]) {
+      let calls = 0;
+      const service = loadService({
+        async rpc() { calls++; return { data: null, error: { code, message: code } }; },
+      });
+      await assert.rejects(action(service), (error) => error.code === code);
+      assert.equal(calls, 1);
+    }
+    let calls = 0;
+    const service = loadService({
+      async rpc() { calls++; return { data: null, error: { code: "55P03", message: "locked" } }; },
+    });
+    await assert.rejects(action(service), (error) => error.code === "55P03");
+    assert.equal(calls, 2);
+  }
+});
+
+test("roster retry propagates deletion or lost authorization on the second RPC", async () => {
+  for (const [action, code] of [
+    [(service) => service.league.manageAdmin({
+      leagueId: "league-id", userId: "member-id", makeAdmin: true,
+    }), "42501"],
+    [(service) => service.league.removeMember({
+      leagueId: "league-id", userId: "member-id",
+    }), "P0002"],
+  ]) {
+    let calls = 0;
+    const service = loadService({
+      async rpc() {
+        calls++;
+        return { data: null, error: calls === 1
+          ? { code: "55P03", message: "locked" }
+          : { code, message: "state changed" } };
+      },
+    });
+    await assert.rejects(action(service), (error) => error.code === code);
+    assert.equal(calls, 2);
+  }
+});
