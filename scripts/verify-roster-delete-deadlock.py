@@ -285,6 +285,53 @@ deleted_before_retry(
     "'49000000-0000-4000-8000-000000000001',true);",
     "P0002")
 
+def account_delete_after_vote_lock():
+    """Auth delete must be atomic when its roster trigger fails fast."""
+    sql("INSERT INTO auth.users(id) VALUES('" + member + "');"
+        "INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES"
+        "('" + member + "','" + member + "','Member');")
+    holder = None
+    try:
+        holder = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(holder, "BEGIN;SELECT 1 FROM public.leagues WHERE id='" + league +
+             "' FOR KEY SHARE;")
+        assert line(holder) == "1"
+        failed = subprocess.run(psql, input="DELETE FROM auth.users WHERE id='" + member +
+                                "';", text=True, capture_output=True, timeout=10)
+        assert failed.returncode != 0 and "55P03" in failed.stderr, failed.stderr
+        assert sql("SELECT count(*) FROM auth.users WHERE id='" + member + "';") == "1"
+        assert sql("SELECT auth_user_id::text || ':' || display_name FROM public.profiles "
+                   "WHERE id='" + member + "';") == member + ":Member"
+        assert sql("SELECT membership_status || ':' || role FROM public.league_members "
+                   "WHERE league_id='" + league + "' AND user_id='" + member + "';") == "active:member"
+        assert sql("SELECT display_name FROM public.players "
+                   "WHERE profile_id='" + member + "';") == "Member"
+        send(holder, "ROLLBACK;")
+        holder.stdin.close()
+        holder.wait(timeout=5)
+        assert holder.returncode == 0, holder.stderr.read()
+        assert sql("DELETE FROM auth.users WHERE id='" + member + "' RETURNING id;") == member
+        assert sql("SELECT count(*) FROM auth.users WHERE id='" + member + "';") == "0"
+        assert sql("SELECT auth_user_id IS NULL AND display_name LIKE '退会済みメンバー-%' "
+                   "FROM public.profiles WHERE id='" + member + "';") == "t"
+        assert sql("SELECT membership_status || ':' || role FROM public.league_members "
+                   "WHERE league_id='" + league + "' AND user_id='" + member + "';") == "removed:member"
+        assert sql("SELECT display_name LIKE '退会済みメンバー-%' FROM public.players "
+                   "WHERE profile_id='" + member + "';") == "t"
+        print("PASS: auth delete 55P03 rolls back all changes; retry anonymizes atomically")
+    finally:
+        if holder and holder.poll() is None:
+            holder.kill()
+            holder.wait()
+        # Restore the disposable fixture for the remaining direct-player tests.
+        sql("DELETE FROM public.players WHERE profile_id='" + member + "';"
+            "DELETE FROM public.profiles WHERE id='" + member + "';"
+            "UPDATE public.league_members SET membership_status='active',role='member' "
+            "WHERE league_id='" + league + "' AND user_id='" + member + "';")
+
+account_delete_after_vote_lock()
+
 def player_upsert_after_lock(commit_delete):
     player_id = "80000000-0000-4000-8000-000000000099"
     insert = ("INSERT INTO public.players(id,league_id,profile_id,display_name) VALUES"
