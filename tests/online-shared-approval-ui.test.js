@@ -208,3 +208,78 @@ test("a newly accepted shared vote still reports success", async () => {
   assert.equal(ctx.koshienSharedApprovalNotice.kind, "success");
   assert.match(ctx.koshienSharedApprovalNotice.message, /本人の承認を記録しました/);
 });
+
+function sharedPendingSaveHarness({ confirmed = true, saveResult = {}, refreshedStatus = "none", refreshFails = false } = {}) {
+  const calls = [];
+  const ctx = {
+    state: { event: { id: "event-A", templateId: "koshien" } },
+    koshienSharedApprovalView: { eventId: "event-A", loadedFromDb: true, submission_status: "submitted" },
+    koshienSharedApprovalNotice: { eventId: "", message: "", kind: "" },
+    window: {
+      confirm: () => { calls.push("confirm"); return confirmed; },
+      YosoDataService: { shouldAutoSaveKoshien: () => true },
+    },
+    baseTemplateId: (id) => id,
+    isCurrentUserAdmin: () => true,
+    koshienHasScorableResults: () => true,
+    persist: () => calls.push("persist"),
+    saveKoshienOnlineNow: async () => {
+      calls.push("save");
+      if (saveResult instanceof Error) throw saveResult;
+      return saveResult;
+    },
+    refreshKoshienSharedApprovalState: async () => {
+      calls.push("refresh");
+      if (refreshFails) throw new Error("read failed");
+      ctx.koshienSharedApprovalView = {
+        eventId: "event-A", loadedFromDb: true, submission_status: refreshedStatus,
+      };
+    },
+    render: () => calls.push("render"),
+    els: { saveButton: { textContent: "" } },
+    UI_TEXT: { save: {
+      syncing: "syncing", local: "local", partial: "partial",
+      saved: "saved", confirm: "confirm", confirmed: "confirmed",
+    }},
+    setTimeout: () => {},
+    console: { warn: () => {} },
+  };
+  const begin = appSource.indexOf("async function confirmSave() {");
+  const end = appSource.indexOf("\nels.resetButton?.addEventListener", begin);
+  assert.ok(begin >= 0 && end > begin);
+  vm.createContext(ctx);
+  vm.runInContext(appSource.slice(begin, end), ctx);
+  return { ctx, calls };
+}
+
+test("canceling a pending shared-result save leaves approval and local state untouched", async () => {
+  const { ctx, calls } = sharedPendingSaveHarness({ confirmed: false });
+  await ctx.confirmSave();
+  assert.deepEqual(calls, ["confirm"]);
+  assert.equal(ctx.koshienSharedApprovalView.submission_status, "submitted");
+});
+
+test("saving during pending approval refreshes the revision and asks for resubmission", async () => {
+  const { ctx, calls } = sharedPendingSaveHarness();
+  await ctx.confirmSave();
+  assert.deepEqual(calls, ["confirm", "persist", "save", "refresh", "render"]);
+  assert.equal(ctx.koshienSharedApprovalView.submission_status, "none");
+  assert.match(ctx.koshienSharedApprovalNotice.message, /承認票は無効/);
+  assert.match(ctx.koshienSharedApprovalNotice.message, /再提出/);
+});
+
+test("failed approval refresh after save disables stale shared approval actions", async () => {
+  const { ctx, calls } = sharedPendingSaveHarness({ refreshFails: true });
+  await ctx.confirmSave();
+  assert.deepEqual(calls, ["confirm", "persist", "save", "refresh", "render"]);
+  assert.equal(ctx.koshienSharedApprovalView.loadedFromDb, false);
+  assert.match(ctx.koshienSharedApprovalNotice.message, /最新状態を確認/);
+});
+
+test("failed result save leaves shared approval state untrusted", async () => {
+  const { ctx, calls } = sharedPendingSaveHarness({ saveResult: new Error("network") });
+  await ctx.confirmSave();
+  assert.deepEqual(calls, ["confirm", "persist", "save", "render"]);
+  assert.equal(ctx.koshienSharedApprovalView.loadedFromDb, false);
+  assert.match(ctx.koshienSharedApprovalNotice.message, /保存結果を確認できません/);
+});

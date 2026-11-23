@@ -7888,15 +7888,52 @@ els.koshienLaterPreviewDialog?.addEventListener("close", () => {
 });
 
 async function confirmSave() {
+  const onlineKoshien = window.YosoDataService?.shouldAutoSaveKoshien?.()
+    && baseTemplateId(state.event?.templateId) === "koshien";
+  const eventId = String(state.event?.id || "");
+  const pendingSharedSave = onlineKoshien && isCurrentUserAdmin()
+    && koshienHasScorableResults(state.event)
+    && koshienSharedApprovalView.loadedFromDb
+    && koshienSharedApprovalView.eventId === eventId
+    && koshienSharedApprovalView.submission_status === "submitted";
+  if (pendingSharedSave && !window.confirm("結果を再保存すると、承認待ちの票は無効になります。保存後に結果を再提出しますか？")) return;
   persist();
-  if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
+  if (onlineKoshien) {
     els.saveButton.textContent = UI_TEXT.save.syncing;
     try {
       const result = await saveKoshienOnlineNow();
       els.saveButton.textContent = result?.skipped ? UI_TEXT.save.local : result?.partial ? UI_TEXT.save.partial : UI_TEXT.save.saved;
+      if (pendingSharedSave && !result?.skipped && String(state.event?.id || "") === eventId) {
+        // The write may have invalidated votes. Keep approval actions disabled
+        // until the server-owned revision and submission are read again.
+        koshienSharedApprovalView = { eventId, loadedFromDb: false };
+        try {
+          await refreshKoshienSharedApprovalState({ renderAfter: false });
+        } catch (error) {
+          console.warn("Shared approval refresh after save failed", error);
+        }
+        const needsResubmission = koshienSharedApprovalView.loadedFromDb
+          && koshienSharedApprovalView.eventId === eventId
+          && koshienSharedApprovalView.submission_status === "none";
+        koshienSharedApprovalNotice = {
+          eventId,
+          message: needsResubmission
+            ? "結果を保存しました。以前の承認票は無効になりました。最新の結果を確認して再提出してください。"
+            : "保存後の承認状態を確認できません。最新状態を確認してから操作してください。",
+          kind: "error",
+        };
+        render();
+      }
     } catch (error) {
       console.warn("Koshien Supabase save failed", error);
       els.saveButton.textContent = UI_TEXT.save.local;
+      if (pendingSharedSave && String(state.event?.id || "") === eventId) {
+        koshienSharedApprovalView = { eventId, loadedFromDb: false };
+        koshienSharedApprovalNotice = {
+          eventId, message: "保存結果を確認できません。最新の承認状態を確認してください。", kind: "error",
+        };
+        render();
+      }
     }
     setTimeout(() => {
       els.saveButton.textContent = UI_TEXT.save.confirm;
