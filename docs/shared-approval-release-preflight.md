@@ -36,6 +36,12 @@
 - **一時停止は完全なロールバックではない。** 既存の結果保存/確定取消RPC、チーム編集、既存イベントの状態遷移は残る。停止中の新旧ルート混在とデータ不整合を防ぐには、UIの機能フラグ切替、既存RPCの権限・トリガー依存、操作中ユーザー、監査保存期間を別途審査する。旧版コードへ復元するための`CREATE OR REPLACE`実行順や権限復元は、導入前に本番定義の原本を保存してから設計する。
 - 既存の`public.reopen_koshien_results`などは**`CREATE OR REPLACE FUNCTION`時に既存の関数権限を保持する**。どの権限を止めて何を復元するかは本番カタログ実測に基づく一覧で扱う。事故防止のため新規監査・隔離試験のSQLを、そのまま本番migrationとして貼り付けない。参考：[PostgreSQL 17 CREATE FUNCTION](https://www.postgresql.org/docs/17/sql-createfunction.html)。
 
+## 既存結果保存RPCの置換差分（2026-11-23、本番READ ONLY照合）
+
+- 本番の `public.save_koshien_result_snapshot(text,jsonb,jsonb,jsonb)` を `pg_get_functiondef` で取得し、`supabase/prototypes/koshien-result-write.sql` の同じ関数部分と比較。試作版から `perform yoso_approval_private.begin_result_write(p_event_id);` の1行とその空行を除き、末尾のDDL終端セミコロンを揃えると**本文が完全一致**した。基準MD5は `6443a7d5501cfda739cadab8a43ea31b`。これは同日の本番定義に限るため、適用直前のpreflightで再確認する。
+- 新呼出は管理者認可の後、JSON構造検証の前に置かれる。後続の検証やRLSでエラーが起きた場合、同一トランザクションでrevision更新も戻ること、正常な結果保存では1回だけ進むことを隔離DBで確認する。結果が同じ再送や承認待ち中の再保存が提出・票をどう失効させるかも、正式migrationの統合試験に含める。
+- `CREATE OR REPLACE FUNCTION`はこの既存関数の呼び出し経路を置換するため、**private helper・revision表・権限を先に導入**し、全体を単一トランザクションで検証してから有効化する。実運用後の切戻しでは保存した旧関数定義を復元し、既存の呼出権限とSECURITY INVOKERを再照合する。private提出・票・監査記録は切戻しでも削除しない。
+
 ## 既存関数・トリガーを正確に復元するための原本取得
 
 - `supabase/audits/shared-approval-baseline-backup-readonly.sql`は、変更対象または影響対象となる**既存6関数・イベントトリガー2件**の定義本体、定義MD5、owner、元の関数ACL（grantor・grantee・GRANT OPTION）を**SELECTのみ**で返す。2026-11-23の本番READ ONLY実測では**8/8件すべて定義取得可能・owner=postgres**。変更前の原本をバージョン付きで保管し、将来の復旧時には**保存した原本**を利用すること。
