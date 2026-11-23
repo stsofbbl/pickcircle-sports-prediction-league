@@ -719,10 +719,20 @@
   }
 
   async function reviewClubJoinRequest({ requestId, approve } = {}) {
-    const rows = await clubRpc("review_club_join_request", {
+    const args = {
       p_request_id: String(requestId || "").trim(),
       p_approve: Boolean(approve),
-    });
+    };
+    let rows;
+    try {
+      rows = await clubRpc("review_club_join_request", args);
+    } catch (error) {
+      if (!args.p_approve || error?.code !== "55P03") throw error;
+      // The first RPC rolled back. The second call must recheck the request
+      // and caller's admin role after the competing league lock is released.
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      rows = await clubRpc("review_club_join_request", args);
+    }
     return Array.isArray(rows) ? rows[0] || null : rows;
   }
 
