@@ -27,7 +27,7 @@ BEGIN
   IF NEW.preset_type = 'koshien' AND (
     (NEW.status = 'finalized' AND OLD.status IS DISTINCT FROM 'finalized')
     OR (NEW.rules->'resultFlow'->>'status' = 'finalized'
-      AND OLD.rules->'resultFlow'->>'status' IS DISTINCT FROM 'finalized')
+      AND NEW.rules->'resultFlow' IS DISTINCT FROM OLD.rules->'resultFlow')
   ) AND NOT EXISTS (
     SELECT 1 FROM yoso_admin_finalize_private.permits p
     WHERE p.event_id = NEW.id AND p.txid = txid_current() AND p.actor = auth.uid()

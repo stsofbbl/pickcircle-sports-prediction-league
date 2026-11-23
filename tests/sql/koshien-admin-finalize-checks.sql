@@ -81,6 +81,12 @@ DO $test$ BEGIN
     RAISE EXCEPTION 'post-finalization result edit succeeded';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
+    UPDATE public.events SET
+      rules=jsonb_set(rules,'{resultFlow,finalizedAt}','"tampered"')
+      WHERE id='test-finalize';
+    RAISE EXCEPTION 'post-finalization approval metadata tampered';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
     UPDATE public.teams SET event_id='test-finalize' WHERE event_id='test-finalize';
     RAISE EXCEPTION 'post-finalization representative edit succeeded';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
