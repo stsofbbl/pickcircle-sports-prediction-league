@@ -385,6 +385,28 @@
     }, "result_reopen");
   }
 
+  async function finalizeKoshienAdminResults(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("甲子園大会IDが必要です。");
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user) throw new Error("オンラインのログインが必要です。");
+    const { data: version, error: versionError } = await supabase.rpc("koshien_result_version", {
+      p_event_id: normalizedEventId,
+    });
+    if (versionError) throw versionError;
+    const expectedVersion = Number(version);
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
+      throw new Error("試合結果のバージョンを確認できませんでした。");
+    }
+    const { data, error } = await supabase.rpc("finalize_koshien_admin_results", {
+      p_event_id: normalizedEventId,
+      p_expected_version: expectedVersion,
+    });
+    if (error) throw error;
+    return data;
+  }
+
   async function saveKoshienResultTransaction({ supabase, league, event, teamRows, scoreRows }) {
     const eventId = String(event.id);
     const teamByName = new Map(teamRows.map((team) => [team.name, team]));
@@ -1372,6 +1394,7 @@
       setLaterPhaseStatus,
       cancelKoshienMatchResult,
       reopenKoshienResults,
+      finalizeAdminResults: finalizeKoshienAdminResults,
     },
     local: {
       loadState: loadLocalState,

@@ -4162,6 +4162,11 @@ function canOpenOfficialDataForEvent(event) {
     && !isResultFinalized(event);
 }
 
+function isOnlineKoshienResultFlow() {
+  return baseTemplateId(state.event?.templateId) === "koshien"
+    && Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
+}
+
 function requiredApprovalCount() {
   return requiredApprovalCountForEvent(state.event);
 }
@@ -4181,7 +4186,51 @@ function isResultFinalized(event = state.event) {
   return event?.resultFlow?.status === "finalized";
 }
 
+let koshienAdminFinalizeBusy = false;
+
+async function finalizeKoshienOnlineAsAdmin() {
+  if (koshienAdminFinalizeBusy || !isCurrentUserAdmin()) return;
+  const eventId = String(state.event?.id || "");
+  if (!currentAuthUser() || !eventId
+    || String(loadedKoshienOnlineEventId || "") !== eventId
+    || String(onlineKoshienEventId || "") !== eventId) {
+    window.alert("最新のオンライン大会情報を再読込してから操作してください。");
+    return;
+  }
+  if (state.event.status !== "resultWait"
+    || (state.event.approvalPolicy || state.approvalPolicy) !== "admin") {
+    window.alert("現在の大会状態・承認方式ではオンライン確定できません。");
+    return;
+  }
+  const service = window.YosoDataService?.koshien;
+  if (!service?.finalizeAdminResults) {
+    window.alert("オンライン確定機能を利用できません。");
+    return;
+  }
+  if (!window.confirm("保存済みの全48試合と得点を確認し、大会結果をオンラインで確定しますか？")) return;
+  koshienAdminFinalizeBusy = true;
+  try {
+    const response = await service.finalizeAdminResults(eventId);
+    if (response?.event_status !== "finalized") throw new Error("確定結果を確認できませんでした。");
+    if (String(state.event?.id || "") !== eventId) return;
+    const snapshot = await loadKoshienOnlineState({ force: true });
+    if (!snapshot?.ok || String(state.event?.id || "") !== eventId
+      || !isResultFinalized(state.event)) {
+      throw new Error("確定処理の結果を再取得できませんでした。画面を再読込してください。");
+    }
+    setKoshienMatchMessage("大会結果がオンラインで確定しました。", "success");
+  } catch (error) {
+    if (String(state.event?.id || "") === eventId) {
+      setKoshienMatchMessage(error?.message || "オンライン確定に失敗しました。", "error");
+    }
+  } finally {
+    koshienAdminFinalizeBusy = false;
+    if (String(state.event?.id || "") === eventId) render();
+  }
+}
+
 function submitResults() {
+  if (isOnlineKoshienResultFlow()) return finalizeKoshienOnlineAsAdmin();
   ensureResultFlow();
   const name = currentParticipantName();
   state.event.resultFlow.status = "submitted";
@@ -4193,6 +4242,7 @@ function submitResults() {
 }
 
 function approveResults(name) {
+  if (isOnlineKoshienResultFlow()) return;
   ensureResultFlow();
   const approver = name || currentParticipantName();
   if (!approver) return;
@@ -4203,6 +4253,7 @@ function approveResults(name) {
 }
 
 function finalizeResultsIfReady() {
+  if (isOnlineKoshienResultFlow()) return;
   ensureResultFlow();
   if (approvalCount(state.event) < requiredApprovalCountForEvent(state.event)) return;
   state.event.resultFlow.status = "finalized";
@@ -4553,8 +4604,12 @@ function resultFlowPanel() {
   const approvedText = approvedNames.length ? approvedNames.join("、") : "まだ承認なし";
   const isResultWait = state.event.status === "resultWait";
   const finalized = isResultFinalized(state.event);
-  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized && flow.status !== "submitted";
-  const canApprove = isResultWait && flow.status === "submitted" && !finalized;
+  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized
+    && flow.status !== "submitted"
+    && (!isOnlineKoshienResultFlow() || (state.event.approvalPolicy || state.approvalPolicy) === "admin");
+  const onlineKoshien = isOnlineKoshienResultFlow();
+  const adminPolicy = (state.event.approvalPolicy || state.approvalPolicy) === "admin";
+  const canApprove = !onlineKoshien && isResultWait && flow.status === "submitted" && !finalized;
   const approverOptions = state.participants
     .filter((name) => !flow.approvals?.[name])
     .map((name) => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
@@ -4572,7 +4627,9 @@ function resultFlowPanel() {
         <div>
           <span class="match-kicker">結果確定の進行</span>
           <h3>${escapeHtml(statusText)}</h3>
-          <p class="helper-text">${escapeHtml(resultFlowMessage())}</p>
+          <p class="helper-text">${escapeHtml(onlineKoshien && !adminPolicy
+            ? "オンラインの複数人承認は現在準備中です。ローカル承認で確定することはできません。"
+            : resultFlowMessage())}</p>
         </div>
         <span class="status-label ${finalized ? "open" : "pending"}">${escapeHtml(flow.status === "none" ? "未提出" : flow.status === "submitted" ? "承認待ち" : "確定")}</span>
       </div>
@@ -4581,7 +4638,7 @@ function resultFlowPanel() {
         <span>承認済み: ${escapeHtml(approvedText)}</span>
       </div>
       <div class="result-flow-actions">
-        ${canSubmit ? `<button class="primary-button" type="button" data-result-submit>結果を提出</button>` : ""}
+        ${canSubmit ? `<button class="primary-button" type="button" data-result-submit>${onlineKoshien ? "オンラインで結果を確定" : "結果を提出"}</button>` : ""}
         ${canApprove && approverOptions ? `
           <select data-result-approver>${approverOptions}</select>
           <button class="ghost-button" type="button" data-result-approve>承認する</button>
@@ -4599,7 +4656,10 @@ function resultFlowMessage() {
   if (state.event.status === "resultWait" && state.event.resultFlow?.status === "submitted") {
     return "結果は提出済みです。必要承認数に達するまでランキングには反映されません。";
   }
-  if (state.event.status === "resultWait") return "管理者が結果を入力して提出すると、参加者承認へ進みます。";
+  if (state.event.status === "resultWait" && isOnlineKoshienResultFlow()) {
+    return "保存済みの全試合と得点を確認し、管理者がオンラインで確定してください。";
+  }
+  if (state.event.status === "resultWait") return "管理者が結果を入力して提出すると、参加者承認へ進みます.";
   return "予想受付中です。結果はまだランキングに反映されません。";
 }
 

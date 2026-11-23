@@ -43,6 +43,15 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test -f "$stage_dir/tests/sql/phase3-visibility.sql"
           # The fixture must leave no relations or role after its ROLLBACK.
           test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
+      - name: Verify admin-only online result finalization in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_admin_finalize_mvp_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_admin_finalize_mvp_test' EXIT
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-setup.sql
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124000000_admin_finalize_koshien_results.sql
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-checks.sql
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
