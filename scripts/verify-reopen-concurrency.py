@@ -1937,6 +1937,40 @@ try:
     # invalidation, and must not leak from a rollback-only fixture.
     before=snapshot()
     policy_checks="""
+      -- Reproduce the two existing production BEFORE UPDATE triggers inside
+      -- the same disposable transaction as the shared approval guard.
+      ALTER TABLE public.events ADD COLUMN IF NOT EXISTS updated_at timestamptz;
+      CREATE FUNCTION public.set_updated_at() RETURNS trigger
+      LANGUAGE plpgsql SET search_path TO 'public' AS $fn$
+      BEGIN
+        NEW.updated_at = now();
+        RETURN NEW;
+      END;
+      $fn$;
+      CREATE TRIGGER events_set_updated_at BEFORE UPDATE ON public.events
+      FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+      CREATE FUNCTION public.protect_jhbf_import_test_event_marker() RETURNS trigger
+      LANGUAGE plpgsql SET search_path TO '' AS $fn$
+      DECLARE v_marker jsonb;
+      BEGIN
+        v_marker := coalesce(OLD.rules->'testHarness',
+          OLD.rules->'config'->'testHarness',OLD.rules_config->'testHarness');
+        IF OLD.name = '【TEST】高野連結果取込確認'
+          AND v_marker->>'kind' = 'jhbf_minimal_import'
+          AND OLD.id = 'jhbf-import-test-' || replace(OLD.league_id::text, '-', '') THEN
+          NEW.name := OLD.name;
+          NEW.league_id := OLD.league_id;
+          NEW.preset_type := 'koshien';
+          NEW.rules := jsonb_set(coalesce(NEW.rules, '{}'::jsonb),
+            '{testHarness}',v_marker,true);
+          NEW.rules_config := jsonb_set(coalesce(NEW.rules_config, '{}'::jsonb),
+            '{testHarness}',v_marker,true);
+        END IF;
+        RETURN NEW;
+      END;
+      $fn$;
+      CREATE TRIGGER protect_jhbf_import_test_event_marker BEFORE UPDATE ON public.events
+      FOR EACH ROW EXECUTE FUNCTION public.protect_jhbf_import_test_event_marker();
       -- A Koshien event cannot start life as finalized via ordinary INSERT.
       SELECT public.test_reject(
         $q$INSERT INTO public.events(id,preset_type,league_id,created_by,status,rules)
@@ -2104,6 +2138,40 @@ try:
         (SELECT status='open' FROM public.events
           WHERE id='approval-policy-probe'),
         'event can reopen only after pending approval was superseded');
+      -- The production import marker runs before the approval guards. Its
+      -- protected event must still reject direct archival while a vote waits.
+      INSERT INTO public.events(id,preset_type,league_id,created_by,name,status,rules)
+      VALUES('jhbf-import-test-00000000000000000000000000000010','koshien',
+        '00000000-0000-0000-0000-000000000010',
+        '00000000-0000-0000-0000-000000000001',
+        '【TEST】高野連結果取込確認','resultWait',
+        '{"testHarness":{"kind":"jhbf_minimal_import"},"approvalPolicy":"admin"}');
+      SELECT yoso_approval_private.lock_revision(
+        'jhbf-import-test-00000000000000000000000000000010');
+      INSERT INTO yoso_approval_private.submissions(
+        event_id,revision,policy,eligible_user_ids,required_count,
+        submitted_by,result_snapshot
+      ) VALUES('jhbf-import-test-00000000000000000000000000000010',
+        0,'admin',ARRAY['00000000-0000-0000-0000-000000000001'::uuid],
+        1,'00000000-0000-0000-0000-000000000001','{}');
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      UPDATE public.events SET name='tampered',preset_type='other',
+        rules='{"approvalPolicy":"admin"}'
+      WHERE id='jhbf-import-test-00000000000000000000000000000010';
+      SELECT public.test_reject(
+        $q$UPDATE public.events SET archived_at=now()
+          WHERE id='jhbf-import-test-00000000000000000000000000000010'$q$,
+        '55000');
+      RESET ROLE;
+      SELECT public.test_assert((SELECT
+        name='【TEST】高野連結果取込確認' AND preset_type='koshien'
+        AND rules->'testHarness'->>'kind'='jhbf_minimal_import'
+        AND rules_config->'testHarness'->>'kind'='jhbf_minimal_import'
+        AND updated_at IS NOT NULL AND archived_at IS NULL
+        FROM public.events
+        WHERE id='jhbf-import-test-00000000000000000000000000000010'),
+        'production event triggers coexist with pending shared approval guard');
     """
     sql("BEGIN;\n"
         + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
