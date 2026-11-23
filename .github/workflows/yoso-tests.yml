@@ -69,6 +69,13 @@ jobs:
           python3 scripts/verify-auto-result-write.py yoso_approval_revision_test
           python3 scripts/verify-auto-result-concurrency.py yoso_approval_revision_test
           python3 scripts/verify-reopen-concurrency.py yoso_approval_revision_test
+      - name: Reproduce roster and club deletion lock cycle in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_roster_delete_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_roster_delete_test' EXIT
+          python3 scripts/verify-roster-delete-deadlock.py yoso_roster_delete_test
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
