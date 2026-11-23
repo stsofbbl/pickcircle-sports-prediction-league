@@ -2140,12 +2140,13 @@ try:
         'event can reopen only after pending approval was superseded');
       -- The production import marker runs before the approval guards. Its
       -- protected event must still reject direct archival while a vote waits.
-      INSERT INTO public.events(id,preset_type,league_id,created_by,name,status,rules)
+      INSERT INTO public.events(id,preset_type,league_id,created_by,name,status,rules,rules_config)
       VALUES('jhbf-import-test-00000000000000000000000000000010','koshien',
         '00000000-0000-0000-0000-000000000010',
         '00000000-0000-0000-0000-000000000001',
         '【TEST】高野連結果取込確認','resultWait',
-        '{"testHarness":{"kind":"jhbf_minimal_import"},"approvalPolicy":"admin"}');
+        '{"testHarness":{"kind":"jhbf_minimal_import"},"approvalPolicy":"admin"}',
+        '{"testHarness":{"kind":"jhbf_minimal_import"}}');
       SELECT yoso_approval_private.lock_revision(
         'jhbf-import-test-00000000000000000000000000000010');
       INSERT INTO yoso_approval_private.submissions(
