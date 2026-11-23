@@ -17,7 +17,7 @@ DO $test$ BEGIN
 END $test$;
 DO $test$ BEGIN
   BEGIN
-    PERFORM public.finalize_koshien_admin_results('test-finalize',-1);
+    PERFORM public.finalize_koshien_admin_results('test-finalize',0);
     RAISE EXCEPTION 'stale version succeeded unexpectedly';
   EXCEPTION WHEN serialization_failure THEN NULL; END;
 END $test$;
@@ -42,7 +42,10 @@ DO $test$ BEGIN
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $test$;
 RESET ROLE;
-SELECT CASE WHEN count(*)=0 THEN 'PASS: no leaked permits'
-  ELSE (1/0)::text END
-FROM yoso_admin_finalize_private.permits;
+DO $test$ BEGIN
+  IF EXISTS (SELECT 1 FROM yoso_admin_finalize_private.permits) THEN
+    RAISE EXCEPTION 'finalization permit leaked after success';
+  END IF;
+END $test$;
+SELECT 'PASS: no leaked permits';
 SELECT 'PASS: admin-only finalization authorization, version, status, guards';
