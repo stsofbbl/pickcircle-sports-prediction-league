@@ -2808,12 +2808,25 @@ try:
         AND (SELECT count(*)=2 FROM yoso_approval_private.votes),
         'old submission superseded and votes never reused');
     """
+    # The post-install gate is a SELECT-only SQL audit. Check it in the
+    # disposable transaction where the full prototype is installed.
+    postinstall_audit = (root / "supabase/audits/shared-approval-postinstall-readonly.sql").read_text().strip()
+    assert postinstall_audit.endswith(";"), "postinstall SQL must be a SELECT statement"
+    postinstall_checks = (
+        "CREATE TEMP TABLE yoso_postinstall_gate ON COMMIT DROP AS\n"
+        + postinstall_audit + "\n"
+        + "SELECT public.test_assert((SELECT bool_and(passed) "
+          "AND count(*)=45 FROM yoso_postinstall_gate), "
+          "'postinstall RPC, private RLS, ACL and event/match triggers all pass');\n"
+    )
     sql("BEGIN;\n"
         + (root / "supabase/prototypes/koshien-shared-approval-read.sql").read_text()
         + (root / "supabase/prototypes/koshien-shared-approval-submit.sql").read_text()
         + (root / "supabase/prototypes/koshien-shared-approval-approve.sql").read_text()
         + (root / "supabase/prototypes/koshien-shared-approval-policy.sql").read_text()
-        + submit_checks + approve_checks + "\nROLLBACK;")
+        + postinstall_checks + submit_checks + approve_checks
+        + (root / "tests/sql/shared-approval-pause-resume.sql").read_text()
+        + "\nROLLBACK;")
     assert snapshot()==before, "shared approval submit/vote must roll back all changes"
     assert sql("SELECT to_regprocedure('public.submit_koshien_shared_results(text,bigint)') IS NULL;")=="t"
     assert sql("SELECT to_regprocedure('public.approve_koshien_shared_results(text,uuid,bigint)') IS NULL;")=="t"
