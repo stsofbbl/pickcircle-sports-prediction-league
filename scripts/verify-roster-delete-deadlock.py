@@ -141,3 +141,62 @@ race("review_club_join_request",
      "'49000000-0000-4000-8000-000000000001' FOR UPDATE",
      "SELECT count(*) FROM public.review_club_join_request(" +
      "'49000000-0000-4000-8000-000000000001',true);")
+
+# Compare fail-fast row locking without changing the PR's production prototype.
+# Recreate only the function body in this disposable database.
+trigger = (root / "supabase/prototypes/koshien-shared-approval-roster-lock.sql").read_text()
+trigger_function = trigger.split("$function$;", 1)[0] + "$function$;"
+trigger_function = trigger_function.replace("CREATE FUNCTION ", "CREATE OR REPLACE FUNCTION ", 1)
+trigger_function = trigger_function.replace(
+    "WHERE l.id=v_league FOR UPDATE;", "WHERE l.id=v_league FOR UPDATE NOWAIT;", 1)
+assert "FOR UPDATE NOWAIT" in trigger_function
+sql(trigger_function)
+
+def nowait_case(label, child_lock, mutation, league_lock="FOR UPDATE"):
+    a = b = None
+    try:
+        a = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(a, "BEGIN;SELECT 1 " + child_lock + ";")
+        assert line(a) == "1"
+        b = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(b, "BEGIN;SELECT 1 FROM public.leagues WHERE id='" + league +
+             "' " + league_lock + ";")
+        assert line(b) == "1"
+        send(a, auth + mutation)
+        a.stdin.close()
+        a.wait(timeout=5)
+        a_err = a.stderr.read()
+        assert a.returncode != 0 and "55P03" in a_err, (label, a_err)
+        send(b, auth + "SELECT public.delete_club('" + league + "','Delete race');"
+             if league_lock == "FOR UPDATE" else "SELECT 1;")
+        b.stdin.close()
+        b.wait(timeout=5)
+        assert b.returncode == 0, (label, b.stderr.read())
+        assert sql("SELECT count(*) FROM public.leagues WHERE id='" + league + "';") == "1"
+        print("PASS: NOWAIT " + label + " fails with 55P03 before deadlock")
+    finally:
+        for proc in (a,b):
+            if proc and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+nowait_case("manage_league_admin versus delete_club",
+            "FROM public.league_members WHERE league_id='" + league +
+            "' AND user_id='" + member + "' FOR UPDATE",
+            "SELECT public.manage_league_admin('" + league + "','" + member + "',true);")
+nowait_case("remove_club_member versus delete_club",
+            "FROM public.league_members WHERE league_id='" + league +
+            "' AND user_id='" + member + "' FOR UPDATE",
+            "SELECT public.remove_club_member('" + league + "','" + member + "');")
+nowait_case("review_club_join_request versus delete_club",
+            "FROM public.league_join_requests WHERE id=" +
+            "'49000000-0000-4000-8000-000000000001' FOR UPDATE",
+            "SELECT count(*) FROM public.review_club_join_request(" +
+            "'49000000-0000-4000-8000-000000000001',true);")
+nowait_case("member update versus shared league KEY SHARE",
+            "FROM public.league_members WHERE league_id='" + league +
+            "' AND user_id='" + member + "' FOR UPDATE",
+            "SELECT public.remove_club_member('" + league + "','" + member + "');",
+            "FOR KEY SHARE")
