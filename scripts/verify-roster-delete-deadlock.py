@@ -284,3 +284,49 @@ deleted_before_retry(
     "SELECT count(*) FROM public.review_club_join_request(" +
     "'49000000-0000-4000-8000-000000000001',true);",
     "P0002")
+
+def player_upsert_after_lock(commit_delete):
+    player_id = "80000000-0000-4000-8000-000000000099"
+    insert = ("INSERT INTO public.players(id,league_id,profile_id,display_name) VALUES"
+              "('" + player_id + "','" + league + "','" + owner + "','Owner retry');")
+    a = b = None
+    try:
+        b = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(b, "BEGIN;SELECT 1 FROM public.leagues WHERE id='" + league +
+             "' FOR UPDATE;")
+        assert line(b) == "1"
+        a = subprocess.Popen(psql, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, bufsize=1)
+        send(a, "BEGIN;" + auth + insert)
+        a.stdin.close()
+        a.wait(timeout=5)
+        assert a.returncode != 0 and "55P03" in a.stderr.read()
+        if commit_delete:
+            send(b, auth + "SELECT public.delete_club('" + league +
+                 "','Delete race');COMMIT;")
+        else:
+            send(b, "ROLLBACK;")
+        b.stdin.close()
+        b.wait(timeout=5)
+        assert b.returncode == 0, b.stderr.read()
+        if commit_delete:
+            retry = subprocess.run(psql, input=auth + insert, text=True,
+                                   capture_output=True, timeout=10)
+            assert retry.returncode != 0 and (
+                "23503" in retry.stderr or "42501" in retry.stderr), retry.stderr
+            assert sql("SELECT count(*) FROM public.leagues WHERE id='" + league + "';") == "0"
+            assert sql("SELECT count(*) FROM public.players WHERE id='" + player_id + "';") == "0"
+            print("PASS: direct player INSERT rejects retry after committed club deletion")
+        else:
+            sql("BEGIN;" + auth + insert + "ROLLBACK;")
+            assert sql("SELECT count(*) FROM public.players WHERE id='" + player_id + "';") == "0"
+            print("PASS: direct player INSERT retries after league lock rollback")
+    finally:
+        for proc in (a,b):
+            if proc and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+player_upsert_after_lock(False)
+player_upsert_after_lock(True)

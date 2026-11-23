@@ -900,6 +900,23 @@
     return { ok: true, eventId: normalizedEventId };
   }
 
+  async function upsertKoshienPlayerWithLockRetry(supabase, playerPayload) {
+    const upsert = () => supabase
+      .from("players")
+      .upsert(playerPayload, { onConflict: "league_id,profile_id" })
+      .select("id")
+      .single();
+    let result = await upsert();
+    if (result.error?.code === "55P03") {
+      // The failed statement rolled back. Recheck membership and league
+      // existence through RLS/FK in a new request after the lock is released.
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      result = await upsert();
+    }
+    if (result.error) throw result.error;
+    return result.data;
+  }
+
   async function saveKoshienStructuredTables({
     supabase,
     user,
@@ -918,12 +935,7 @@
       display_name: displayName,
       is_admin: isClubAdminRole(clubRoleFromMembership(membership)),
     };
-    const { data: player, error: playerError } = await supabase
-      .from("players")
-      .upsert(playerPayload, { onConflict: "league_id,profile_id" })
-      .select("id")
-      .single();
-    if (playerError) throw playerError;
+    const player = await upsertKoshienPlayerWithLockRetry(supabase, playerPayload);
 
     const eventId = String(event.id);
     const { data, error } = await supabase
