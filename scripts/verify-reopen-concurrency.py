@@ -2760,6 +2760,9 @@ try:
         (SELECT revision=1 FROM yoso_approval_private.revisions
          WHERE event_id='submit-probe'),
         'identical save advances submitted revision');
+      SELECT set_config('yoso.fixture_submission_id',(
+        SELECT id::text FROM yoso_approval_private.submissions
+        WHERE event_id='submit-probe' AND revision=0),false);
       SET ROLE authenticated;
       SELECT public.test_assert(
         (SELECT (x->>'submission_status')='none'
@@ -2767,8 +2770,7 @@ try:
         'old submission is no longer current after identical save');
       SELECT public.test_reject(
         $q$SELECT public.approve_koshien_shared_results('submit-probe',
-          (SELECT id FROM yoso_approval_private.submissions
-           WHERE event_id='submit-probe' AND revision=0),0)$q$,'40001');
+          current_setting('yoso.fixture_submission_id')::uuid,0)$q$,'40001');
       RESET ROLE;
       SELECT public.test_assert(
         (SELECT count(*)=1 FROM yoso_approval_private.votes),
