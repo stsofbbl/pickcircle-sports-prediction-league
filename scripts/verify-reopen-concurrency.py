@@ -148,6 +148,13 @@ GRANT UPDATE ON public.events TO authenticated;
 -- Recreated role must retain access used by the invoker import-sync trigger.
 GRANT SELECT,UPDATE ON public.external_match_imports TO authenticated;
 GRANT EXECUTE ON FUNCTION yoso_approval_private.begin_result_write(text) TO authenticated;
+-- CREATE OR REPLACE in production preserves the pre-existing save RPC ACL.
+-- The first-use disposable fixture creates it from scratch, so reproduce
+-- the actual production anon/authenticated execution boundary explicitly.
+REVOKE EXECUTE ON FUNCTION public.save_koshien_result_snapshot(text,jsonb,jsonb,jsonb)
+  FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.save_koshien_result_snapshot(text,jsonb,jsonb,jsonb)
+  TO authenticated;
 ALTER TABLE public.events ADD COLUMN status text DEFAULT 'resultWait';
 ALTER TABLE public.events ADD COLUMN rules jsonb DEFAULT '{}';
 -- Mirror production event scoring columns for the shared approval fixtures.
@@ -2816,7 +2823,7 @@ try:
         "CREATE TEMP TABLE yoso_postinstall_gate ON COMMIT DROP AS\n"
         + postinstall_audit + "\n"
         + "SELECT public.test_assert((SELECT bool_and(passed) "
-          "AND count(*)=62 FROM yoso_postinstall_gate), "
+          "AND count(*)=70 FROM yoso_postinstall_gate), "
           "'postinstall RPC, private RLS, ACL and event/match triggers all pass');\n"
     )
     sql("BEGIN;\n"

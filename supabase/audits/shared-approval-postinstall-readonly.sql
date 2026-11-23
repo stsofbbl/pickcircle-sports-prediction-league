@@ -10,6 +10,16 @@ WITH api_functions(signature) AS (
   SELECT f.signature,p.oid,p.prosecdef
   FROM api_functions f LEFT JOIN pg_catalog.pg_proc p
     ON p.oid=pg_catalog.to_regprocedure(f.signature)
+), legacy_rpc_specs(signature,expected_definer) AS (
+  -- These functions already serve the live app. They must keep their
+  -- original definer/invoker and role EXECUTE boundary after migration.
+  VALUES
+    ('public.save_koshien_result_snapshot(text,jsonb,jsonb,jsonb)',false),
+    ('public.reopen_koshien_results(text)',true)
+), legacy_rpc_details AS (
+  SELECT x.signature,x.expected_definer,p.oid,p.prosecdef
+  FROM legacy_rpc_specs x LEFT JOIN pg_catalog.pg_proc p
+    ON p.oid=pg_catalog.to_regprocedure(x.signature)
 ), private_function_specs(signature,expected_definer,allow_auth) AS (
   -- Existing public save_koshien_result_snapshot is SECURITY INVOKER and
   -- must reach only this guarded SECURITY DEFINER entry.
@@ -68,6 +78,21 @@ WITH api_functions(signature) AS (
   SELECT 'RPC allows authenticated EXECUTE: '||signature,
     coalesce(pg_catalog.has_function_privilege('authenticated',oid,'EXECUTE'),false)
   FROM api_details
+  UNION ALL
+  SELECT 'legacy RPC exists: '||signature,oid IS NOT NULL
+  FROM legacy_rpc_details
+  UNION ALL
+  SELECT 'legacy RPC definer mode: '||signature,
+    coalesce(prosecdef=expected_definer,false)
+  FROM legacy_rpc_details
+  UNION ALL
+  SELECT 'legacy RPC denies anon EXECUTE: '||signature,
+    coalesce(NOT pg_catalog.has_function_privilege('anon',oid,'EXECUTE'),false)
+  FROM legacy_rpc_details
+  UNION ALL
+  SELECT 'legacy RPC allows authenticated EXECUTE: '||signature,
+    coalesce(pg_catalog.has_function_privilege('authenticated',oid,'EXECUTE'),false)
+  FROM legacy_rpc_details
   UNION ALL
   SELECT 'private helper exists: '||signature,oid IS NOT NULL
   FROM private_function_details
