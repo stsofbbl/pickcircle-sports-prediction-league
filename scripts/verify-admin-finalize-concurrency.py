@@ -58,12 +58,14 @@ def close(*procs):
             p.wait(timeout=5)
 
 def restore():
-    sql("UPDATE public.events SET status='resultWait',"
-        "rules='{\"approvalPolicy\":\"admin\",\"resultFlow\":{\"status\":\"none\"}}' "
-        f"WHERE id='{EVENT}';"
-        "UPDATE public.matches SET team1_score=2,"
+    if sql(f"SELECT status FROM public.events WHERE id='{EVENT}';") == "finalized":
+        # Reuse the real audited RPC; direct state reversal must stay forbidden.
+        sql(AUTH + f"SELECT public.reopen_koshien_results('{EVENT}');")
+    sql("UPDATE public.matches SET team1_score=2,"
         "updated_at=updated_at-interval '10 seconds' "
         f"WHERE event_id='{EVENT}' AND round_key='F' AND team1_score=3;")
+    # This is a disposable test fixture, not the production audit ledger.
+    sql(f"DELETE FROM public.koshien_result_reopens WHERE event_id='{EVENT}';")
 
 assert sql("SELECT status FROM public.events WHERE id='test-finalize';") == "resultWait"
 baseline_version = sql("SELECT public.koshien_result_version('test-finalize');")
