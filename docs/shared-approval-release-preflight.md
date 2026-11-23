@@ -31,7 +31,7 @@
 ## 導入後の安全ゲートと「無損失の一時停止」（2026-11-23追加）
 
 - 導入前：`supabase/audits/shared-approval-release-preflight-readonly.sql`を**SELECTのみ**実行。2026-11-23の本番実測で**21項目すべてpassed=true**。既存6関数の定義ハッシュ（既存の確定取消RPC、イベント更新トリガー実装2件を含む）、既存イベントトリガー2件、必要9テーブル、4つの新設RPCの不在、private schemaの不在を確認。これは導入可否の一条件にすぎず、現行スキーマを凍結しない。
-- 導入後：`supabase/audits/shared-approval-postinstall-readonly.sql`の**45項目の読み取り監査**を通す。公開4RPCの存在・`SECURITY DEFINER`・`authenticated`のみのEXECUTE権限、private 5表のクライアントDML/`TRUNCATE`拒否、必要な4表のRLS、主要8トリガーの有効状態を検査する。構造・権限の静的ゲートであり、実認証E2Eや負荷の代わりにはならない。
+- 導入後：`supabase/audits/shared-approval-postinstall-readonly.sql`の**62項目の読み取り監査**を通す。公開4RPCの存在・`SECURITY DEFINER`・`authenticated`のみのEXECUTE権限、**内部4ヘルパーの存在・実行主体・anon/認証済みユーザーのEXECUTE境界**、既存結果保存RPC（invoker）に必要なprivate schemaの`USAGE`、private 5表のクライアントDML/`TRUNCATE`拒否、必要な4表のRLS、主要8トリガーの有効状態を検査する。構造・権限の静的ゲートであり、実認証E2Eや負荷の代わりにはならない。
 - 一時停止（**本番適用SQLではない**）：4つの**新設**public共有承認RPCの`EXECUTE`を`authenticated`から取り消す案を使い捨てDBで検証する。`tests/sql/shared-approval-pause-resume.sql`は受付拒否と、既存private提出・票・監査snapshotの不変を確認し、元の4権限のみを再付与して再開できることを確認する。テストは全体を`BEGIN/ROLLBACK`で囲む。
 - **一時停止は完全なロールバックではない。** 既存の結果保存/確定取消RPC、チーム編集、既存イベントの状態遷移は残る。停止中の新旧ルート混在とデータ不整合を防ぐには、UIの機能フラグ切替、既存RPCの権限・トリガー依存、操作中ユーザー、監査保存期間を別途審査する。旧版コードへ復元するための`CREATE OR REPLACE`実行順や権限復元は、導入前に本番定義の原本を保存してから設計する。
 - 既存の`public.reopen_koshien_results`などは**`CREATE OR REPLACE FUNCTION`時に既存の関数権限を保持する**。どの権限を止めて何を復元するかは本番カタログ実測に基づく一覧で扱う。事故防止のため新規監査・隔離試験のSQLを、そのまま本番migrationとして貼り付けない。参考：[PostgreSQL 17 CREATE FUNCTION](https://www.postgresql.org/docs/17/sql-createfunction.html)。

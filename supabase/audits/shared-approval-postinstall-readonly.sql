@@ -10,6 +10,18 @@ WITH api_functions(signature) AS (
   SELECT f.signature,p.oid,p.prosecdef
   FROM api_functions f LEFT JOIN pg_catalog.pg_proc p
     ON p.oid=pg_catalog.to_regprocedure(f.signature)
+), private_function_specs(signature,expected_definer,allow_auth) AS (
+  -- Existing public save_koshien_result_snapshot is SECURITY INVOKER and
+  -- must reach only this guarded SECURITY DEFINER entry.
+  VALUES
+    ('yoso_approval_private.begin_result_write(text)',true,true),
+    ('yoso_approval_private.lock_revision(text)',false,false),
+    ('yoso_approval_private.advance_revision(text,bigint)',false,false),
+    ('yoso_approval_private.issue_write_permit(text)',false,false)
+), private_function_details AS (
+  SELECT x.signature,x.expected_definer,x.allow_auth,p.oid,p.prosecdef
+  FROM private_function_specs x LEFT JOIN pg_catalog.pg_proc p
+    ON p.oid=pg_catalog.to_regprocedure(x.signature)
 ), private_tables(name,rls_required) AS (
   VALUES ('revisions',false),('write_permits',true),
          ('transition_permits',true),('submissions',true),('votes',true)
@@ -37,6 +49,12 @@ WITH api_functions(signature) AS (
       ELSE NOT pg_catalog.has_schema_privilege('anon','yoso_approval_private','USAGE')
     END
   UNION ALL
+  SELECT 'private schema allows authenticated USAGE',
+    CASE WHEN pg_catalog.to_regnamespace('yoso_approval_private') IS NULL
+      THEN false
+      ELSE pg_catalog.has_schema_privilege('authenticated','yoso_approval_private','USAGE')
+    END
+  UNION ALL
   SELECT 'RPC exists: '||signature,oid IS NOT NULL
   FROM api_details
   UNION ALL
@@ -50,6 +68,22 @@ WITH api_functions(signature) AS (
   SELECT 'RPC allows authenticated EXECUTE: '||signature,
     coalesce(pg_catalog.has_function_privilege('authenticated',oid,'EXECUTE'),false)
   FROM api_details
+  UNION ALL
+  SELECT 'private helper exists: '||signature,oid IS NOT NULL
+  FROM private_function_details
+  UNION ALL
+  SELECT 'private helper definer mode: '||signature,
+    coalesce(prosecdef=expected_definer,false)
+  FROM private_function_details
+  UNION ALL
+  SELECT 'private helper denies anon EXECUTE: '||signature,
+    coalesce(NOT pg_catalog.has_function_privilege('anon',oid,'EXECUTE'),false)
+  FROM private_function_details
+  UNION ALL
+  SELECT 'private helper authenticated EXECUTE: '||signature,
+    coalesce(pg_catalog.has_function_privilege('authenticated',oid,'EXECUTE')
+      =allow_auth,false)
+  FROM private_function_details
   UNION ALL
   SELECT 'private table exists: '||name,oid IS NOT NULL
   FROM private_details

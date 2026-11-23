@@ -2816,7 +2816,7 @@ try:
         "CREATE TEMP TABLE yoso_postinstall_gate ON COMMIT DROP AS\n"
         + postinstall_audit + "\n"
         + "SELECT public.test_assert((SELECT bool_and(passed) "
-          "AND count(*)=45 FROM yoso_postinstall_gate), "
+          "AND count(*)=62 FROM yoso_postinstall_gate), "
           "'postinstall RPC, private RLS, ACL and event/match triggers all pass');\n"
     )
     sql("BEGIN;\n"
