@@ -1,8 +1,40 @@
+-- The revision must distinguish subsecond match edits and score-only changes.
+SET request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
+SET ROLE authenticated;
+DO $revision$ DECLARE v_before text;
+BEGIN
+  v_before := public.koshien_admin_result_revision('test-finalize');
+  UPDATE public.matches SET updated_at=updated_at+interval '100 milliseconds'
+    WHERE event_id='test-finalize' AND round_key='F';
+  IF public.koshien_admin_result_revision('test-finalize') = v_before THEN
+    RAISE EXCEPTION 'subsecond match update did not change revision';
+  END IF;
+  UPDATE public.matches SET updated_at=updated_at-interval '100 milliseconds'
+    WHERE event_id='test-finalize' AND round_key='F';
+  IF public.koshien_admin_result_revision('test-finalize') <> v_before THEN
+    RAISE EXCEPTION 'match restoration did not restore revision';
+  END IF;
+  UPDATE public.scores SET total_score=total_score+1 WHERE event_id='test-finalize';
+  IF public.koshien_admin_result_revision('test-finalize') = v_before THEN
+    RAISE EXCEPTION 'score-only change did not change revision';
+  END IF;
+  BEGIN
+    PERFORM public.finalize_koshien_admin_results('test-finalize',v_before);
+    RAISE EXCEPTION 'stale reviewed scoreboard finalized';
+  EXCEPTION WHEN serialization_failure THEN NULL; END;
+  UPDATE public.scores SET total_score=total_score-1 WHERE event_id='test-finalize';
+  IF public.koshien_admin_result_revision('test-finalize') <> v_before THEN
+    RAISE EXCEPTION 'score restoration did not restore revision';
+  END IF;
+END $revision$;
+RESET ROLE;
+SELECT 'PASS: score-only and subsecond changes reject stale finalization';
+
 SET request.jwt.claim.sub = '00000000-0000-0000-0000-000000000002';
 SET ROLE authenticated;
 DO $test$ BEGIN
   BEGIN
-    PERFORM public.finalize_koshien_admin_results('test-finalize',0);
+    PERFORM public.finalize_koshien_admin_results('test-finalize','00000000000000000000000000000000');
     RAISE EXCEPTION 'non-admin succeeded unexpectedly';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $test$;
@@ -17,7 +49,7 @@ DO $test$ BEGIN
 END $test$;
 DO $test$ BEGIN
   BEGIN
-    PERFORM public.finalize_koshien_admin_results('test-finalize',0);
+    PERFORM public.finalize_koshien_admin_results('test-finalize','00000000000000000000000000000000');
     RAISE EXCEPTION 'stale version succeeded unexpectedly';
   EXCEPTION WHEN serialization_failure THEN NULL; END;
 END $test$;
@@ -28,7 +60,7 @@ UPDATE public.events SET rules=jsonb_set(rules,'{approvalPolicy}','"half"')
 DO $test$ BEGIN
   BEGIN
     PERFORM public.finalize_koshien_admin_results('test-finalize',
-      public.koshien_result_version('test-finalize'));
+      public.koshien_admin_result_revision('test-finalize'));
     RAISE EXCEPTION 'half-policy finalized unexpectedly';
   EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
 END $test$;
@@ -40,7 +72,7 @@ SET ROLE authenticated;
 DO $test$ BEGIN
   BEGIN
     PERFORM public.finalize_koshien_admin_results('test-finalize',
-      public.koshien_result_version('test-finalize'));
+      public.koshien_admin_result_revision('test-finalize'));
     RAISE EXCEPTION 'missing active score accepted unexpectedly';
   EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
 END $test$;
@@ -53,7 +85,7 @@ SET ROLE authenticated;
 DO $test$ BEGIN
   BEGIN
     PERFORM public.finalize_koshien_admin_results('test-finalize',
-      public.koshien_result_version('test-finalize'));
+      public.koshien_admin_result_revision('test-finalize'));
     RAISE EXCEPTION 'incomplete match accepted unexpectedly';
   EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
 END $test$;
@@ -62,7 +94,7 @@ UPDATE public.matches SET status='completed'
  WHERE event_id='test-finalize' AND round_key='F';
 SET ROLE authenticated;
 SELECT public.finalize_koshien_admin_results('test-finalize',
- public.koshien_result_version('test-finalize'));
+ public.koshien_admin_result_revision('test-finalize'));
 DO $test$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.events WHERE id='test-finalize'
     AND status='finalized' AND rules->'resultFlow'->>'status'='finalized') THEN
@@ -165,7 +197,7 @@ SELECT 'PASS: admin-only finalization authorization, version, status, guards';
 -- Exercise the real trigger ordering in this isolated schema (no real data).
 SET ROLE authenticated;
 SELECT public.finalize_koshien_admin_results('test-finalize',
- public.koshien_result_version('test-finalize'));
+ public.koshien_admin_result_revision('test-finalize'));
 RESET ROLE;
 DELETE FROM public.events WHERE id='test-finalize';
 DO $test$ BEGIN

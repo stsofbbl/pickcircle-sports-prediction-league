@@ -319,6 +319,7 @@ let onlineLeagueMembers = [];
 let onlineLeagueAdminMessage = "";
 let onlineLeagueAdminSaving = false;
 let loadedKoshienOnlineEventId = "";
+let loadedKoshienResultRevision = "";
 let clubPathwayState = {
   mode: "",
   busy: false,
@@ -1706,6 +1707,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
     && loadedKoshienOnlineEventId === selectedEventId) return null;
   if (pendingKoshienLoadPromise) return pendingKoshienLoadPromise;
   loadedKoshienOnlineEventId = "";
+  loadedKoshienResultRevision = "";
   setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
   pendingKoshienLoadPromise = (async () => {
     try {
@@ -1726,6 +1728,7 @@ async function loadKoshienOnlineState({ force = false } = {}) {
       return snapshot;
     } catch (error) {
       loadedKoshienOnlineEventId = "";
+      loadedKoshienResultRevision = "";
       console.warn("Koshien Supabase load failed", error);
       setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。");
       return null;
@@ -2078,6 +2081,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
   onlineLeagueId = String(snapshot.league?.id || "");
   onlineKoshienEventId = String(eventRow?.id || "");
+  loadedKoshienResultRevision = String(snapshot.resultRevision || "");
   onlineLeagueMembers = (snapshot.members || []).map((row) => ({
     userId: String(row.user_id || ""),
     displayName: row.profiles?.display_name
@@ -4197,7 +4201,8 @@ async function finalizeKoshienOnlineAsAdmin() {
   const eventId = String(state.event?.id || "");
   if (!currentAuthUser() || !eventId
     || String(loadedKoshienOnlineEventId || "") !== eventId
-    || String(onlineKoshienEventId || "") !== eventId) {
+    || String(onlineKoshienEventId || "") !== eventId
+    || !/^[0-9a-f]{32}$/.test(String(loadedKoshienResultRevision || ""))) {
     window.alert("最新のオンライン大会情報を再読込してから操作してください。");
     return;
   }
@@ -4214,7 +4219,7 @@ async function finalizeKoshienOnlineAsAdmin() {
   if (!window.confirm("保存済みの全48試合と得点を確認し、大会結果をオンラインで確定しますか？")) return;
   koshienAdminFinalizeBusy = true;
   try {
-    const response = await service.finalizeAdminResults(eventId);
+    const response = await service.finalizeAdminResults(eventId, loadedKoshienResultRevision);
     if (response?.event_status !== "finalized") throw new Error("確定結果を確認できませんでした。");
     if (String(state.event?.id || "") !== eventId) return;
     const snapshot = await loadKoshienOnlineState({ force: true });

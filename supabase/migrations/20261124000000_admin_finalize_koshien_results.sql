@@ -129,14 +129,43 @@ CREATE TRIGGER yoso_guard_finalized_event_teams
 BEFORE INSERT OR UPDATE OR DELETE ON public.event_teams
 FOR EACH ROW EXECUTE FUNCTION yoso_admin_finalize_private.guard_finalized_result_write();
 
+
+-- Stable, read-only snapshot fingerprint including subsecond and score-only edits.
+-- The legacy koshien_result_version function is not modified.
+CREATE FUNCTION public.koshien_admin_result_revision(p_event_id text)
+RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = ''
+AS $fn$
+DECLARE
+  v_event public.events;
+  v_revision text;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'authentication required' USING ERRCODE = '42501'; END IF;
+  SELECT * INTO v_event FROM public.events WHERE id=p_event_id AND preset_type='koshien';
+  IF v_event.id IS NULL OR NOT public.is_league_member(v_event.league_id) THEN
+    RAISE EXCEPTION 'league membership required' USING ERRCODE = '42501';
+  END IF;
+  SELECT md5(jsonb_build_object(
+    'event',to_jsonb(v_event),
+    'matches',(SELECT coalesce(jsonb_agg(to_jsonb(m) ORDER BY m.round_key,m.match_no),'[]'::jsonb) FROM public.matches m WHERE m.event_id=p_event_id),
+    'teams',(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id),'[]'::jsonb) FROM public.teams t WHERE t.event_id=p_event_id),
+    'event_teams',(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id),'[]'::jsonb) FROM public.event_teams t WHERE t.event_id=p_event_id),
+    'scores',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.player_id),'[]'::jsonb) FROM public.scores x WHERE x.event_id=p_event_id),
+    'results',(SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY r.event_id),'[]'::jsonb) FROM public.results r WHERE r.event_id=p_event_id)
+  )::text) INTO v_revision;
+  RETURN v_revision;
+END
+$fn$;
+REVOKE ALL ON FUNCTION public.koshien_admin_result_revision(text) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.koshien_admin_result_revision(text) TO authenticated;
+
 CREATE FUNCTION public.finalize_koshien_admin_results(
-  p_event_id text, p_expected_version bigint
+  p_event_id text, p_expected_revision text
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
 AS $fn$
 DECLARE
   v_event public.events;
-  v_version bigint;
+  v_revision text;
   v_total integer;
   v_valid integer;
   v_rounds jsonb;
@@ -155,16 +184,16 @@ BEGIN
     RAISE EXCEPTION 'event is not awaiting admin-only result approval'
       USING ERRCODE = '22023';
   END IF;
-  IF p_expected_version IS NULL OR p_expected_version < 0 THEN
-    RAISE EXCEPTION 'expected result version required' USING ERRCODE = '22023';
+  IF p_expected_revision IS NULL OR p_expected_revision !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'expected result revision required' USING ERRCODE = '22023';
   END IF;
 
   -- Read-lock the 48 source rows while checking the version and stored scores.
   PERFORM 1 FROM public.matches m WHERE m.event_id = p_event_id
     ORDER BY m.round_key, m.match_no FOR SHARE;
-  v_version := public.koshien_result_version(p_event_id);
-  IF v_version IS DISTINCT FROM p_expected_version THEN
-    RAISE EXCEPTION 'match results changed; refresh before finalizing'
+  v_revision := public.koshien_admin_result_revision(p_event_id);
+  IF v_revision IS DISTINCT FROM p_expected_revision THEN
+    RAISE EXCEPTION 'reviewed scoreboard changed; refresh before finalizing'
       USING ERRCODE = '40001';
   END IF;
   IF (SELECT count(*) FROM public.teams WHERE event_id = p_event_id) <> 49 THEN
@@ -211,12 +240,12 @@ BEGIN
         'finalizedAt',v_now),true)
   WHERE id = p_event_id;
   DELETE FROM yoso_admin_finalize_private.permits WHERE event_id = p_event_id;
-  RETURN jsonb_build_object('event_status','finalized','result_version',v_version);
+  RETURN jsonb_build_object('event_status','finalized','reviewed_revision',v_revision);
 END
 $fn$;
 
-REVOKE ALL ON FUNCTION public.finalize_koshien_admin_results(text,bigint) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.finalize_koshien_admin_results(text,bigint) TO authenticated;
+REVOKE ALL ON FUNCTION public.finalize_koshien_admin_results(text,text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.finalize_koshien_admin_results(text,text) TO authenticated;
 REVOKE ALL ON FUNCTION yoso_admin_finalize_private.guard_event_finalization()
   FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION yoso_admin_finalize_private.guard_finalized_result_write()

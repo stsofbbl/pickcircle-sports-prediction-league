@@ -385,23 +385,19 @@
     }, "result_reopen");
   }
 
-  async function finalizeKoshienAdminResults(eventId) {
+  async function finalizeKoshienAdminResults(eventId, expectedRevision) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("甲子園大会IDが必要です。");
     const supabase = await supabaseClient();
     const user = await window.YosoSupabase?.sessionUser?.();
     if (!supabase || !user) throw new Error("オンラインのログインが必要です。");
-    const { data: version, error: versionError } = await supabase.rpc("koshien_result_version", {
-      p_event_id: normalizedEventId,
-    });
-    if (versionError) throw versionError;
-    const expectedVersion = Number(version);
-    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) {
-      throw new Error("試合結果のバージョンを確認できませんでした。");
+    const reviewedRevision = String(expectedRevision || "");
+    if (!/^[0-9a-f]{32}$/.test(reviewedRevision)) {
+      throw new Error("画面で確認した大会結果がありません。再読込してください。");
     }
     const { data, error } = await supabase.rpc("finalize_koshien_admin_results", {
       p_event_id: normalizedEventId,
-      p_expected_version: expectedVersion,
+      p_expected_revision: reviewedRevision,
     });
     if (error) throw error;
     return data;
@@ -1213,6 +1209,18 @@
     const event = events?.[0];
     if (!event) return { skipped: true, reason: "koshien event is not found", league, membership };
 
+    const readResultRevision = async () => {
+      const { data, error } = await supabase.rpc("koshien_admin_result_revision", {
+        p_event_id: event.id,
+      });
+      if (error) throw error;
+      if (typeof data !== "string" || !/^[0-9a-f]{32}$/.test(data)) {
+        throw new Error("大会結果の照合情報を取得できませんでした。");
+      }
+      return data;
+    };
+    // Never combine tables from different versions into one reviewed snapshot.
+    const revisionBefore = await readResultRevision();
     const [
       { data: teams, error: teamsError },
       { data: structuredTeams, error: structuredTeamsError },
@@ -1304,6 +1312,10 @@
     const { data: predictions, error: predictionError } = await predictionSelect;
     if (predictionError) throw predictionError;
 
+    const revisionAfter = await readResultRevision();
+    if (revisionBefore !== revisionAfter) {
+      throw new Error("大会結果が読み込み中に変更されました。もう一度読み込んでください。");
+    }
     const mergedResults = results?.payload
       ? {
         ...results,
@@ -1317,6 +1329,7 @@
 
     return {
       ok: true,
+      resultRevision: revisionAfter,
       league,
       membership,
       currentUser: {

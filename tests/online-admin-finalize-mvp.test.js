@@ -6,30 +6,27 @@ const path = require("node:path");
 const serviceSource = fs.readFileSync(path.join(__dirname, "../js/data-service.js"), "utf8");
 const appSource = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
 
-test("online admin finalization reads a server version and uses only the authenticated RPC", async () => {
+test("online admin finalization uses the revision captured when data was loaded", async () => {
   const calls = [];
   const window = { YosoSupabase: {
     client: async () => ({ rpc: async (name, params) => {
       calls.push([name, params]);
-      return name === "koshien_result_version"
-        ? { data: 108, error: null }
-        : { data: { event_status: "finalized", result_version: 108 }, error: null };
+      return { data: { event_status: "finalized", reviewed_revision: "a".repeat(32) }, error: null };
     }}),
     sessionUser: async () => ({ id: "owner" }),
   }};
   vm.runInNewContext(serviceSource, { window, localStorage: {} });
-  const result = await window.YosoDataService.koshien.finalizeAdminResults("event-1");
+  const result = await window.YosoDataService.koshien.finalizeAdminResults("event-1", "a".repeat(32));
   assert.equal(result.event_status, "finalized");
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-    ["koshien_result_version", { p_event_id: "event-1" }],
-    ["finalize_koshien_admin_results", { p_event_id: "event-1", p_expected_version: 108 }],
+    ["finalize_koshien_admin_results", { p_event_id: "event-1", p_expected_revision: "a".repeat(32) }],
   ]);
 });
 
 test("online Koshien cannot finalize or approve through the browser's local state", () => {
   assert.match(appSource, /if \(isOnlineKoshienResultFlow\(\)\) return finalizeKoshienOnlineAsAdmin\(\)/);
   assert.match(appSource, /if \(isOnlineKoshienResultFlow\(\)\) return;\s+ensureResultFlow\(\)/);
-  assert.match(appSource, /await service\.finalizeAdminResults\(eventId\)/);
+  assert.match(appSource, /await service\.finalizeAdminResults\(eventId, loadedKoshienResultRevision\)/);
   assert.match(appSource, /await loadKoshienOnlineState\(\{ force: true \}\)/);
   assert.match(appSource, /!isResultFinalized\(state\.event\)/);
 });
@@ -45,6 +42,7 @@ function adminActionHarness({ confirmed = true, serverError = false, refreshOk =
   const ctx = {
     state,
     loadedKoshienOnlineEventId: loadedId,
+    loadedKoshienResultRevision: "a".repeat(32),
     onlineKoshienEventId: "event-1",
     currentAuthUser: () => ({ id: "owner" }),
     isCurrentUserAdmin: () => true,
@@ -54,8 +52,8 @@ function adminActionHarness({ confirmed = true, serverError = false, refreshOk =
     window: {
       confirm: () => { calls.push(["confirm"]); return confirmed; },
       alert: (message) => calls.push(["alert",message]),
-      YosoDataService: { koshien: { finalizeAdminResults: async (id) => {
-        calls.push(["server",id,state.event.status]);
+      YosoDataService: { koshien: { finalizeAdminResults: async (id, revision) => {
+        calls.push(["server",id,state.event.status,revision]);
         if (serverError) throw new Error("RPC rejected");
         return { event_status: "finalized" };
       }}},
@@ -80,7 +78,7 @@ test("admin result finalization commits via server then reloads before reporting
   const {ctx,calls,state} = adminActionHarness();
   await ctx.finalizeKoshienOnlineAsAdmin();
   assert.deepEqual(calls.map(c=>c[0]),["confirm","server","refresh","message","render"]);
-  assert.deepEqual(calls.find(c=>c[0]==="server"),["server","event-1","resultWait"]);
+  assert.deepEqual(calls.find(c=>c[0]==="server"),["server","event-1","resultWait","a".repeat(32)]);
   assert.equal(state.event.resultFlow.status,"finalized");
   assert.equal(calls.find(c=>c[0]==="message")[1],"success");
 });
@@ -221,4 +219,20 @@ test("online admin may finalize a submitted result, but no local approve button 
   html=ctx.resultFlowPanel();
   assert.doesNotMatch(html,/data-result-submit/);
   assert.doesNotMatch(html,/data-result-approve/);
+});
+
+test("snapshot revision is checked before and after data reads", () => {
+  assert.match(serviceSource, /const revisionBefore = await readResultRevision\(\)/);
+  assert.match(serviceSource, /const revisionAfter = await readResultRevision\(\)/);
+  assert.match(serviceSource, /if \(revisionBefore !== revisionAfter\)/);
+  assert.match(serviceSource, /resultRevision: revisionAfter/);
+  assert.match(appSource, /loadedKoshienResultRevision = String\(snapshot\.resultRevision \|\| ""\)/);
+});
+
+test("no reviewed revision means no online finalization", async () => {
+  const {ctx,calls} = adminActionHarness();
+  ctx.loadedKoshienResultRevision = "";
+  await ctx.finalizeKoshienOnlineAsAdmin();
+  assert.equal(calls.some(row=>row[0]==="server"),false);
+  assert.equal(calls[0][0],"alert");
 });

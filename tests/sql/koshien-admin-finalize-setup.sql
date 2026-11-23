@@ -45,6 +45,11 @@ ALTER TABLE public.scores ADD FOREIGN KEY (event_id)
   REFERENCES public.events(id) ON DELETE CASCADE;
 ALTER TABLE public.koshien_result_reopens ADD FOREIGN KEY (event_id)
   REFERENCES public.events(id) ON DELETE CASCADE;
+CREATE FUNCTION public.is_league_member(p_league_id uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
+ SELECT EXISTS(SELECT 1 FROM public.league_members
+ WHERE league_id=p_league_id AND user_id=auth.uid() AND membership_status='active')
+$f$;
 CREATE FUNCTION public.is_league_admin(p_league_id uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.league_members

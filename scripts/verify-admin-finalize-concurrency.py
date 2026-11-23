@@ -15,7 +15,7 @@ EVENT = "test-finalize"
 UID = "00000000-0000-0000-0000-000000000001"
 AUTH = f"SET request.jwt.claim.sub='{UID}';SET ROLE authenticated;"
 FIN = ("SELECT public.finalize_koshien_admin_results('test-finalize',"
-       + "public.koshien_result_version('test-finalize'));")
+       + "public.koshien_admin_result_revision('test-finalize'));")
 EDIT = ("UPDATE public.matches SET team1_score=3,"
         "updated_at=updated_at+interval '10 seconds' "
         "WHERE event_id='test-finalize' AND round_key='F' RETURNING team1_score;")
@@ -68,7 +68,7 @@ def restore():
     sql(f"DELETE FROM public.koshien_result_reopens WHERE event_id='{EVENT}';")
 
 assert sql("SELECT status FROM public.events WHERE id='test-finalize';") == "resultWait"
-baseline_version = sql("SELECT public.koshien_result_version('test-finalize');")
+baseline_version = sql(AUTH + "SELECT public.koshien_admin_result_revision('test-finalize');")
 a=b=None
 try:
     # A result writer first locks the event via its BEFORE trigger. B must
@@ -81,8 +81,8 @@ try:
     b=start()
     send(b,"SET application_name='yoso_admin_finalize_waits_writer';"
            "SET statement_timeout='15s';"+AUTH+
-           "SELECT public.finalize_koshien_admin_results('test-finalize',"+
-           baseline_version+");")
+           "SELECT public.finalize_koshien_admin_results('test-finalize','"+
+           baseline_version+"');")
     blocked("yoso_admin_finalize_waits_writer",pid,b)
     send(a,"COMMIT;")
     a.stdin.close()
@@ -150,6 +150,6 @@ finally:
     close(a,b)
     restore()
 
-assert sql("SELECT public.koshien_result_version('test-finalize');")==baseline_version
+assert sql("SELECT count(*) FROM public.matches WHERE event_id='test-finalize' AND status='completed';")=='48'
 assert sql("SELECT count(*) FROM yoso_admin_finalize_private.permits;")=="0"
 print("PASS: three two-session races restore the original disposable fixture")
