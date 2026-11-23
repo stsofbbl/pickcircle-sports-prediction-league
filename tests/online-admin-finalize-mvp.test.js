@@ -103,3 +103,64 @@ test("server error or refresh error never reports an accepted finalization", asy
   assert.equal(stale.state.event.resultFlow.status,"none");
   assert.equal(stale.calls.some(c=>c[0]==="message"&&c[1]==="success"),false);
 });
+
+// Server-side reopen must be followed by a fresh snapshot; do not trust
+// an optimistic local status or claim success on a failed refresh.
+function reopenActionHarness({ rpcFailure = false, refreshFailure = false } = {}) {
+  const calls = [];
+  const state = { event: { id: "event-1", templateId: "koshien", status: "finalized",
+    approvalPolicy: "admin", resultFlow: { status: "finalized" } } };
+  const ctx = {
+    state,
+    isCurrentUserAdmin: () => true,
+    isResultFinalized: (event) => event.resultFlow.status === "finalized",
+    currentAuthUser: () => ({ id: "owner" }),
+    baseTemplateId: () => "koshien",
+    createResultFlow: () => ({ status: "none", approvals: {} }),
+    saveLocalStateOnly: () => { throw new Error("online path must not optimistically persist"); },
+    render: () => calls.push(["render"]),
+    setKoshienMatchMessage: (message, kind) => calls.push(["message", kind, message]),
+    window: {
+      confirm: () => true,
+      YosoDataService: {
+        shouldAutoSaveKoshien: () => true,
+        koshien: {
+          reopenKoshienResults: async (eventId) => {
+            calls.push(["rpc", eventId, state.event.status]);
+            if (rpcFailure) throw new Error("reopen rejected");
+          },
+        },
+      },
+    },
+    loadKoshienOnlineState: async () => {
+      calls.push(["refresh"]);
+      if (refreshFailure) return null;
+      state.event.status = "resultWait";
+      state.event.resultFlow.status = "none";
+      return { ok: true };
+    },
+  };
+  vm.createContext(ctx);
+  const begin = appSource.indexOf("async function reopenFinalizedResults()");
+  const end = appSource.indexOf("\nfunction updatePresetSummary()", begin);
+  assert.ok(begin >= 0 && end > begin);
+  vm.runInContext(appSource.slice(begin, end), ctx);
+  return {ctx, state, calls};
+}
+
+test("official reopen reflects server-owned status only after successful reload", async () => {
+  const {ctx, state, calls} = reopenActionHarness();
+  await ctx.reopenFinalizedResults();
+  assert.equal(state.event.status, "resultWait");
+  assert.deepEqual(calls.map(c => c[0]), ["rpc", "refresh", "message", "render"]);
+  assert.equal(calls.find(c => c[0] === "message")[1], "success");
+});
+test("failed reopen or refresh never reports confirmed cancellation", async () => {
+  for (const options of [{ rpcFailure: true }, { refreshFailure: true }]) {
+    const {ctx, state, calls} = reopenActionHarness(options);
+    await ctx.reopenFinalizedResults();
+    assert.equal(state.event.status, "finalized");
+    assert.ok(calls.some(c => c[0] === "message" && c[1] === "error"));
+    assert.equal(calls.some(c => c[0] === "message" && c[1] === "success"), false);
+  }
+});

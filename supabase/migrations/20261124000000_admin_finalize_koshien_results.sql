@@ -13,6 +13,9 @@ REVOKE ALL ON yoso_admin_finalize_private.permits FROM PUBLIC, anon, authenticat
 CREATE FUNCTION yoso_admin_finalize_private.guard_event_finalization()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
 AS $fn$
+DECLARE
+  v_old_final boolean;
+  v_identity_same boolean;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.preset_type = 'koshien' AND (
@@ -33,6 +36,37 @@ BEGIN
     WHERE p.event_id = NEW.id AND p.txid = txid_current() AND p.actor = auth.uid()
   ) THEN
     RAISE EXCEPTION 'Koshien result finalization requires server validation'
+      USING ERRCODE = '42501';
+  END IF;
+  -- Existing production reopen_koshien_results() records an audit row
+  -- BEFORE it updates events. Require that specific insert in this transaction.
+  -- Authenticated clients cannot insert audit rows (RLS has SELECT only).
+  v_old_final := OLD.preset_type = 'koshien'
+    AND (OLD.status = 'finalized'
+      OR OLD.rules->'resultFlow'->>'status' = 'finalized');
+  v_identity_same := NEW.id IS NOT DISTINCT FROM OLD.id
+    AND NEW.preset_type IS NOT DISTINCT FROM OLD.preset_type
+    AND NEW.league_id IS NOT DISTINCT FROM OLD.league_id;
+  IF v_old_final AND (
+    OLD.status IS DISTINCT FROM NEW.status
+    OR OLD.rules IS DISTINCT FROM NEW.rules
+    OR NOT v_identity_same
+  ) AND NOT (
+    v_identity_same
+    AND OLD.status = 'finalized' AND NEW.status = 'archive'
+    AND NEW.rules IS NOT DISTINCT FROM OLD.rules
+  ) AND NOT (
+    v_identity_same AND NEW.status = 'resultWait'
+    AND NEW.rules->'resultFlow'->>'status' = 'none'
+    AND EXISTS (
+      SELECT 1 FROM public.koshien_result_reopens a
+      WHERE a.event_id = OLD.id
+        AND a.reopened_by = auth.uid()
+        AND a.previous_event = to_jsonb(OLD)
+        AND a.xmin::text::bigint = (txid_current() % 4294967296::bigint)
+    )
+  ) THEN
+    RAISE EXCEPTION 'finalized Koshien result requires audited reopen'
       USING ERRCODE = '42501';
   END IF;
   RETURN NEW;

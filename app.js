@@ -4685,9 +4685,17 @@ async function reopenFinalizedResults() {
       if (!window.YosoDataService?.koshien?.reopenKoshienResults) {
         throw new Error("結果確定取消のDB更新機能を利用できません。");
       }
-      await window.YosoDataService.koshien.reopenKoshienResults(String(state.event.id));
+      const reopenedEventId = String(state.event.id);
+      await window.YosoDataService.koshien.reopenKoshienResults(reopenedEventId);
+      const snapshot = await loadKoshienOnlineState({ force: true });
+      if (!snapshot?.ok || String(state.event?.id || "") !== reopenedEventId
+        || state.event.status !== "resultWait"
+        || state.event.resultFlow?.status !== "none") {
+        throw new Error("サーバーで確定取消が受理されましたが、再取得できませんでした。画面を再読込してください。");
+      }
+    } else {
+      applyReopenedState();
     }
-    applyReopenedState();
     setKoshienMatchMessage("大会全体の結果確定を取り消しました。必要な結果を修正して再提出してください。", "success");
   } catch (error) {
     state.event.status = previousStatus;

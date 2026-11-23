@@ -103,7 +103,56 @@ DO $test$ BEGIN
     RAISE EXCEPTION 'archived finalized event could be rewritten';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $test$;
+DO $test$ BEGIN
+  BEGIN
+    UPDATE public.events SET status='resultWait',
+      rules=jsonb_set(rules,'{resultFlow,status}','"none"')
+      WHERE id='test-finalize';
+    RAISE EXCEPTION 'unaudited direct reopen succeeded';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    UPDATE public.events SET
+      rules=jsonb_set(rules,'{config}','{"scoreMultiplier":100}')
+      WHERE id='test-finalize';
+    RAISE EXCEPTION 'finalized scoring configuration was changed';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  BEGIN
+    INSERT INTO public.koshien_result_reopens(event_id,previous_event,reopened_by)
+    SELECT id,to_jsonb(e),'00000000-0000-0000-0000-000000000001'::uuid
+    FROM public.events e WHERE id='test-finalize';
+    RAISE EXCEPTION 'authenticated user forged a reopen audit';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+END $test$;
+SELECT public.reopen_koshien_results('test-finalize');
+DO $test$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.events
+    WHERE id='test-finalize' AND status='resultWait'
+      AND rules->'resultFlow'->>'status'='none') THEN
+    RAISE EXCEPTION 'official reopen failed';
+  END IF;
+  IF (SELECT count(*) FROM public.koshien_result_reopens
+      WHERE event_id='test-finalize') <> 1 THEN
+    RAISE EXCEPTION 'official reopen did not record exactly one audit';
+  END IF;
+  IF (SELECT count(*) FROM public.matches
+      WHERE event_id='test-finalize' AND status='completed') <> 48 THEN
+    RAISE EXCEPTION 'reopen unexpectedly changed official matches';
+  END IF;
+END $test$;
+UPDATE public.matches SET team1_score=3 WHERE event_id='test-finalize' AND round_key='F';
+DO $test$ BEGIN
+  IF (SELECT team1_score FROM public.matches
+      WHERE event_id='test-finalize' AND round_key='F') <> 3 THEN
+    RAISE EXCEPTION 'edits did not resume after audited reopen';
+  END IF;
+  BEGIN
+    PERFORM public.reopen_koshien_results('test-finalize');
+    RAISE EXCEPTION 'second reopen unexpectedly succeeded';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+END $test$;
 RESET ROLE;
+SELECT 'PASS: direct reopen blocked, audited reopen works, editing resumes';
+
 DO $test$ BEGIN
   IF EXISTS (SELECT 1 FROM yoso_admin_finalize_private.permits) THEN
     RAISE EXCEPTION 'finalization permit leaked after success';
