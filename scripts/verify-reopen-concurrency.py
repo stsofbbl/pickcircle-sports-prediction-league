@@ -2744,6 +2744,51 @@ try:
         AND (SELECT count(*)=1 FROM yoso_approval_private.votes),
         'repeat creates no duplicate submission or votes');
       RESET ROLE;
+      SAVEPOINT identical_save_after_submission;
+      -- The admin save sends the stored match/score rows and unchanged payload.
+      SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+      SET ROLE authenticated;
+      SELECT public.save_koshien_result_snapshot(
+        'submit-probe',
+        (SELECT jsonb_agg(to_jsonb(m) ORDER BY m.round_key,m.match_no)
+         FROM public.matches m WHERE m.event_id='submit-probe'),
+        (SELECT jsonb_agg(to_jsonb(s) ORDER BY s.player_id)
+         FROM public.scores s WHERE s.event_id='submit-probe'),
+        (SELECT payload FROM public.results WHERE event_id='submit-probe'));
+      SELECT public.test_assert(
+        (SELECT revision=1 FROM yoso_approval_private.revisions
+         WHERE event_id='submit-probe'),
+        'identical save advances submitted revision');
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='none'
+         FROM (SELECT public.get_koshien_shared_approval_state('submit-probe') x) q),
+        'old submission is no longer current after identical save');
+      SELECT public.test_reject(
+        $q$SELECT public.approve_koshien_shared_results('submit-probe',
+          (SELECT id FROM yoso_approval_private.submissions
+           WHERE event_id='submit-probe' AND revision=0),0)$q$,'40001');
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM yoso_approval_private.votes),
+        'stale approval attempt adds no vote');
+      SELECT public.test_assert(
+        (SELECT (x->>'submission_status')='submitted'
+         FROM (SELECT public.submit_koshien_shared_results('submit-probe',1) x) q),
+        'new revision can be submitted after identical save');
+      RESET ROLE;
+      SELECT public.test_assert(
+        (SELECT count(*)=1 FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe' AND status='superseded')
+        AND (SELECT count(*)=1 FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe' AND revision=1 AND status='submitted'),
+        'old submission superseded without reusing vote');
+      ROLLBACK TO SAVEPOINT identical_save_after_submission;
+      SELECT public.test_assert(
+        (SELECT revision=0 FROM yoso_approval_private.revisions
+         WHERE event_id='submit-probe')
+        AND (SELECT count(*)=1 FROM yoso_approval_private.submissions
+         WHERE event_id='submit-probe' AND revision=0 AND status='submitted')
+        AND (SELECT count(*)=1 FROM yoso_approval_private.votes),
+        'replay scenario restores original submitted state');
       SELECT public.test_assert(
         (SELECT count(*)=4 FROM
           yoso_approval_private.submissions s,
