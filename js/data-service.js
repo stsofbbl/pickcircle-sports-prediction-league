@@ -193,11 +193,11 @@
       throw new Error("管理者変更payloadを確認してください。");
     }
     const { supabase } = await laterPhaseContext();
-    const { data, error } = await supabase.rpc("manage_league_admin", {
+    const { data, error } = await retryRosterLockOnce(() => supabase.rpc("manage_league_admin", {
       p_league_id: normalizedLeagueId,
       p_user_id: normalizedUserId,
       p_make_admin: makeAdmin,
-    });
+    }));
     if (error) throw koshienSaveError("league_admin", error, "管理者権限を変更できませんでした。");
     return data;
   }
@@ -677,10 +677,22 @@
     return null;
   }
 
-  async function clubRpc(name, args = {}) {
+  async function retryRosterLockOnce(call) {
+    let result = await call();
+    if (result?.error?.code !== "55P03") return result;
+    // Retry only the failed atomic RPC; it rechecks club existence and
+    // caller authorization after the competing transaction finishes.
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    result = await call();
+    return result;
+  }
+
+  async function clubRpc(name, args = {}, { retryRosterLock = false } = {}) {
     const supabase = await supabaseClient();
     if (!supabase) throw new Error("Supabase is not configured");
-    const { data, error } = await supabase.rpc(name, args);
+    const call = () => supabase.rpc(name, args);
+    const { data, error } = retryRosterLock
+      ? await retryRosterLockOnce(call) : await call();
     if (error) throw error;
     return data;
   }
@@ -723,16 +735,9 @@
       p_request_id: String(requestId || "").trim(),
       p_approve: Boolean(approve),
     };
-    let rows;
-    try {
-      rows = await clubRpc("review_club_join_request", args);
-    } catch (error) {
-      if (!args.p_approve || error?.code !== "55P03") throw error;
-      // The first RPC rolled back. The second call must recheck the request
-      // and caller's admin role after the competing league lock is released.
-      await new Promise((resolve) => window.setTimeout(resolve, 100));
-      rows = await clubRpc("review_club_join_request", args);
-    }
+    const rows = await clubRpc("review_club_join_request", args, {
+      retryRosterLock: args.p_approve,
+    });
     return Array.isArray(rows) ? rows[0] || null : rows;
   }
 
@@ -755,7 +760,7 @@
     return clubRpc("remove_club_member", {
       p_league_id: String(leagueId || "").trim(),
       p_user_id: String(userId || "").trim(),
-    });
+    }, { retryRosterLock: true });
   }
 
   async function replaceKoshienRepresentatives({ eventId, rows, year } = {}) {
