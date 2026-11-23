@@ -212,8 +212,8 @@ test("a newly accepted shared vote still reports success", async () => {
 function sharedPendingSaveHarness({ confirmed = true, saveResult = {}, refreshedStatus = "none", refreshFails = false } = {}) {
   const calls = [];
   const ctx = {
-    state: { event: { id: "event-A", templateId: "koshien" } },
-    koshienSharedApprovalView: { eventId: "event-A", loadedFromDb: true, submission_status: "submitted" },
+    state: { event: { id: "event-A", templateId: "koshien", status: "resultWait" } },
+    koshienSharedApprovalView: { eventId: "event-A", loadedFromDb: true, submission_status: "submitted", event_status: "resultWait", current_user_eligible: true, current_user_voted: false },
     koshienSharedApprovalNotice: { eventId: "", message: "", kind: "" },
     window: {
       confirm: () => { calls.push("confirm"); return confirmed; },
@@ -221,6 +221,10 @@ function sharedPendingSaveHarness({ confirmed = true, saveResult = {}, refreshed
     },
     baseTemplateId: (id) => id,
     isCurrentUserAdmin: () => true,
+    isOnlineKoshienResultFlow: () => true,
+    currentAuthUser: () => ({ id: "admin-a" }),
+    escapeHtml: (value) => String(value),
+    koshienSharedApprovalBusy: false,
     koshienHasScorableResults: () => true,
     persist: () => calls.push("persist"),
     saveKoshienOnlineNow: async () => {
@@ -233,6 +237,7 @@ function sharedPendingSaveHarness({ confirmed = true, saveResult = {}, refreshed
       if (refreshFails) throw new Error("read failed");
       ctx.koshienSharedApprovalView = {
         eventId: "event-A", loadedFromDb: true, submission_status: refreshedStatus,
+        event_status: "resultWait", current_user_eligible: true, current_user_voted: false,
       };
     },
     render: () => calls.push("render"),
@@ -249,6 +254,10 @@ function sharedPendingSaveHarness({ confirmed = true, saveResult = {}, refreshed
   assert.ok(begin >= 0 && end > begin);
   vm.createContext(ctx);
   vm.runInContext(appSource.slice(begin, end), ctx);
+  const panelBegin = appSource.indexOf("function resultFlowPanel() {");
+  const panelEnd = appSource.indexOf("\nfunction ", panelBegin + 10);
+  assert.ok(panelBegin >= 0 && panelEnd > panelBegin);
+  vm.runInContext(appSource.slice(panelBegin, panelEnd), ctx);
   return { ctx, calls };
 }
 
@@ -290,4 +299,24 @@ test("a skipped online save preserves the submitted server approval state", asyn
   assert.deepEqual(calls, ["confirm", "persist", "save"]);
   assert.equal(ctx.koshienSharedApprovalView.loadedFromDb, true);
   assert.equal(ctx.koshienSharedApprovalView.submission_status, "submitted");
+});
+
+test("result panel changes from approval to resubmission after result save", async () => {
+  const { ctx } = sharedPendingSaveHarness();
+  assert.match(ctx.resultFlowPanel(), /data-result-approve/);
+  assert.doesNotMatch(ctx.resultFlowPanel(), /data-result-submit/);
+  await ctx.confirmSave();
+  const html = ctx.resultFlowPanel();
+  assert.match(html, /data-result-submit/);
+  assert.doesNotMatch(html, /data-result-approve/);
+  assert.match(html, /再提出/);
+});
+
+test("failed refresh hides both submission and approval actions until retry", async () => {
+  const { ctx } = sharedPendingSaveHarness({ refreshFails: true });
+  await ctx.confirmSave();
+  const html = ctx.resultFlowPanel();
+  assert.doesNotMatch(html, /data-result-submit|data-result-approve/);
+  assert.match(html, /data-shared-approval-refresh/);
+  assert.match(html, /最新状態を確認/);
 });
