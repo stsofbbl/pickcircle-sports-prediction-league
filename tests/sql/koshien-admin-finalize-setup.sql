@@ -12,6 +12,7 @@ CREATE TABLE public.events(
   id text PRIMARY KEY, league_id uuid NOT NULL, preset_type text NOT NULL,
   status text NOT NULL, rules jsonb NOT NULL DEFAULT '{}'::jsonb);
 CREATE TABLE public.teams(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id text);
+CREATE TABLE public.event_teams(id bigserial PRIMARY KEY,event_id text NOT NULL);
 CREATE TABLE public.matches(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id text NOT NULL,
   round_key text, match_no int, team1_id uuid,team2_id uuid,
@@ -34,7 +35,7 @@ LANGUAGE sql STABLE SET search_path='' AS $f$
 $f$;
 GRANT USAGE ON SCHEMA public,auth TO authenticated;
 GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated;
-GRANT SELECT,UPDATE ON public.events,public.matches,public.scores,public.results TO authenticated;
+GRANT SELECT,UPDATE ON public.events,public.matches,public.scores,public.results,public.teams,public.event_teams TO authenticated;
 INSERT INTO public.leagues VALUES('00000000-0000-0000-0000-000000000010');
 INSERT INTO public.league_members VALUES
  ('00000000-0000-0000-0000-000000000010',
@@ -58,6 +59,7 @@ SELECT 'test-finalize',v.round_key,g.no,
 FROM (VALUES('R1',17),('R2',16),('R3',8),('QF',4),('SF',2),('F',1)) v(round_key,n)
 CROSS JOIN LATERAL generate_series(1,v.n) g(no)
 CROSS JOIN paired p;
+INSERT INTO public.event_teams(event_id) VALUES ('test-finalize');
 INSERT INTO public.results VALUES('test-finalize','{"finishes":{}}');
 INSERT INTO public.players VALUES(
  '00000000-0000-0000-0000-000000000011',

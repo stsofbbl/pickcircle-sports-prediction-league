@@ -51,6 +51,7 @@ AS $fn$
 DECLARE
   v_event_id text;
   v_status text;
+  v_flow_status text;
 BEGIN
   FOR v_event_id IN
     SELECT DISTINCT id
@@ -62,11 +63,12 @@ BEGIN
     ORDER BY id
   LOOP
     v_status := NULL;
-    SELECT e.status INTO v_status
+    v_flow_status := NULL;
+    SELECT e.status, e.rules->'resultFlow'->>'status' INTO v_status, v_flow_status
     FROM public.events e
     WHERE e.id = v_event_id AND e.preset_type = 'koshien'
     FOR SHARE NOWAIT;
-    IF v_status = 'finalized' THEN
+    IF v_status = 'finalized' OR v_flow_status = 'finalized' THEN
       RAISE EXCEPTION 'reopen finalized Koshien results before editing'
         USING ERRCODE = '42501';
     END IF;
@@ -84,6 +86,13 @@ BEFORE INSERT OR UPDATE OR DELETE ON public.scores
 FOR EACH ROW EXECUTE FUNCTION yoso_admin_finalize_private.guard_finalized_result_write();
 CREATE TRIGGER yoso_guard_finalized_results
 BEFORE INSERT OR UPDATE OR DELETE ON public.results
+FOR EACH ROW EXECUTE FUNCTION yoso_admin_finalize_private.guard_finalized_result_write();
+
+CREATE TRIGGER yoso_guard_finalized_teams
+BEFORE INSERT OR UPDATE OR DELETE ON public.teams
+FOR EACH ROW EXECUTE FUNCTION yoso_admin_finalize_private.guard_finalized_result_write();
+CREATE TRIGGER yoso_guard_finalized_event_teams
+BEFORE INSERT OR UPDATE OR DELETE ON public.event_teams
 FOR EACH ROW EXECUTE FUNCTION yoso_admin_finalize_private.guard_finalized_result_write();
 
 CREATE FUNCTION public.finalize_koshien_admin_results(
