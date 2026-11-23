@@ -1,16 +1,25 @@
 -- Read-only release preflight for PR #47. Review every failed row before assembling
 -- or applying a migration. No RPC is invoked and no production data is written.
 -- Baseline captured from project gubsrwaxpifhvwommpos on 2026-11-23.
--- Definition hashes cover pg_get_functiondef output on PostgreSQL 17.6;
+-- Definition hashes cover pg_get_functiondef output on the observed DB;
+-- baseline now also covers the existing reopen RPC and event-trigger bodies.
 -- a changed hash requires review, not automatic replacement.
 WITH expected_functions(signature, definition_md5) AS (
   VALUES
     ('public.save_koshien_result_snapshot(text,jsonb,jsonb,jsonb)',
      '6443a7d5501cfda739cadab8a43ea31b'),
+    ('public.reopen_koshien_results(text)',
+     '5ec4ce9202c5b53dd8b925175f871dec'),
     ('public.review_club_join_request(uuid,boolean)',
      '942f039924ce9678bd6dbca226645fa0'),
     ('public.delete_club(uuid,text)',
-     '36d416e67899d02cedbb378b4f28e0f4')
+     '36d416e67899d02cedbb378b4f28e0f4'),
+    -- Both functions implement BEFORE UPDATE triggers that new guards must
+    -- coexist with. Trigger-name checks alone cannot detect body drift.
+    ('public.set_updated_at()',
+     '02092079ad584cbf7c3fd90ac7ab8e3d'),
+    ('public.protect_jhbf_import_test_event_marker()',
+     '0753345215c3872ddd46f9af36e51b22')
 ), function_checks AS (
   SELECT e.signature,
     e.definition_md5 AS expected_md5,
