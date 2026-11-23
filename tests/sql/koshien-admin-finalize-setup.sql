@@ -30,10 +30,6 @@ CREATE TABLE public.koshien_result_reopens (
 );
 ALTER TABLE public.koshien_result_reopens ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON public.koshien_result_reopens TO authenticated;
-CREATE POLICY koshien_result_reopens_select_admins
-  ON public.koshien_result_reopens FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM public.events e
-    WHERE e.id = event_id AND public.is_league_admin(e.league_id)));
 CREATE TABLE public.players(id uuid PRIMARY KEY,league_id uuid,profile_id uuid);
 CREATE TABLE public.scores(event_id text,player_id uuid,total_score integer);
 CREATE FUNCTION public.is_league_admin(p_league_id uuid) RETURNS boolean
@@ -42,6 +38,10 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
  WHERE league_id=p_league_id AND user_id=auth.uid()
  AND membership_status='active' AND role IN ('owner','co_owner'))
 $f$;
+CREATE POLICY koshien_result_reopens_select_admins
+  ON public.koshien_result_reopens FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.events e
+    WHERE e.id = event_id AND public.is_league_admin(e.league_id)));
 CREATE FUNCTION public.koshien_result_version(p_event_id text) RETURNS bigint
 LANGUAGE sql STABLE SET search_path='' AS $f$
  SELECT coalesce(sum(extract(epoch from m.updated_at)::bigint),0)
