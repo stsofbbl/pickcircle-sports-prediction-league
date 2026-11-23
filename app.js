@@ -4668,6 +4668,8 @@ async function reopenFinalizedResults() {
   if (!window.confirm("大会全体の結果確定を取り消しますか？入力済みの試合結果は残り、承認だけがリセットされます。")) return;
   const previousStatus = state.event.status;
   const previousFlow = JSON.parse(JSON.stringify(state.event.resultFlow || createResultFlow()));
+  const shouldSaveOnline = baseTemplateId(state.event?.templateId) === "koshien"
+    && window.YosoDataService?.shouldAutoSaveKoshien?.();
   const applyReopenedState = () => {
     state.event.status = "resultWait";
     state.event.resultFlow.status = "none";
@@ -4678,8 +4680,6 @@ async function reopenFinalizedResults() {
     saveLocalStateOnly();
   };
   try {
-    const shouldSaveOnline = baseTemplateId(state.event?.templateId) === "koshien"
-      && window.YosoDataService?.shouldAutoSaveKoshien?.();
     if (shouldSaveOnline) {
       if (!currentAuthUser()) throw new Error("オンラインの管理者ログインが必要です。");
       if (!window.YosoDataService?.koshien?.reopenKoshienResults) {
@@ -4700,7 +4700,7 @@ async function reopenFinalizedResults() {
   } catch (error) {
     state.event.status = previousStatus;
     state.event.resultFlow = previousFlow;
-    saveLocalStateOnly();
+    if (!shouldSaveOnline) saveLocalStateOnly();
     setKoshienMatchMessage(error?.message || "結果確定を取り消せませんでした。", "error");
   }
   render();
