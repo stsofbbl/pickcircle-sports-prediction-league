@@ -360,6 +360,21 @@
     });
   }
 
+  // The server writes approval voters by auth.uid(); the local UI and
+  // normalizeResultFlow() use participant display keys. Map only for display,
+  // leaving the server's immutable voter IDs untouched.
+  function displayOnlineResultApprovals(flow, participantKeyByUserId) {
+    if (!flow || !flow.approvals || typeof flow.approvals !== "object"
+      || Array.isArray(flow.approvals)) return flow;
+    return {
+      ...flow,
+      approvals: Object.fromEntries(Object.entries(flow.approvals).map(([userId, timestamp]) => [
+        participantKeyByUserId.get(userId) || userId,
+        timestamp,
+      ])),
+    };
+  }
+
   function buildOfficialScoreRows({ members = [], players = [], scores = [] } = {}) {
     const playersByProfileId = new Map(players.map((player) => [String(player.profile_id || ""), player]));
     const scoresByPlayerId = new Map(scores.map((score) => [String(score.player_id || ""), score]));
@@ -412,6 +427,7 @@
     buildMatchRows,
     mergeStructuredMatchesIntoResults,
     buildOfficialScoreRows,
+    displayOnlineResultApprovals,
     buildScoreRows,
     calculatePhase1Breakdown,
     completeMatch,

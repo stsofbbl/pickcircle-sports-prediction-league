@@ -22,9 +22,11 @@ function createSupabaseMock({
   structuredTeamRows = null,
   resultPayload = null,
   matchRows = null,
+  revisionSequence = null,
 } = {}) {
   const calls = [];
   const queries = [];
+  let revisionReadCount = 0;
   const baseTeamNames = [
     "Team A", "Team B", "Team C", "Team D",
     "Team E", "Team F", "Team G", "Team H",
@@ -194,6 +196,11 @@ function createSupabaseMock({
       },
       rpc(name, args) {
         calls.push({ operation: "rpc", name, args });
+        if (name === "koshien_admin_result_revision") {
+          const revision = revisionSequence?.[revisionReadCount] || "a".repeat(32);
+          revisionReadCount += 1;
+          return Promise.resolve({ data: revision, error: null });
+        }
         const error = name === "save_koshien_result_snapshot"
           ? rpcError
           : (name === "save_koshien_phase1_prediction" ? phase1RpcError : null);
@@ -1026,4 +1033,21 @@ test("game multiplier save rejects values outside the greater-than-zero through 
   rows[0].gameMultiplier = 50.1;
   await assert.rejects(service.koshien.updateGameMultipliers({ eventId: "event-id", rows }), /0より大きく50以下/);
   assert.equal(supabase.calls.some((call) => call.name === "update_koshien_game_multipliers"), false);
+});
+
+test("snapshot preserves exactly the reviewed server revision", async () => {
+  const supabase = createSupabaseMock();
+  const snapshot = await loadDataService(supabase.client).koshien.loadSnapshot();
+  assert.equal(snapshot.resultRevision, "a".repeat(32));
+  const reads = supabase.calls.filter(call => call.name === "koshien_admin_result_revision");
+  assert.equal(reads.length, 2);
+});
+
+test("snapshot rejects a scoreboard modified between revision reads", async () => {
+  const supabase = createSupabaseMock({ revisionSequence: ["a".repeat(32), "b".repeat(32)] });
+  await assert.rejects(
+    loadDataService(supabase.client).koshien.loadSnapshot(),
+    /大会結果が読み込み中に変更されました/,
+  );
+  assert.equal(supabase.calls.filter(call => call.name === "koshien_admin_result_revision").length, 2);
 });
