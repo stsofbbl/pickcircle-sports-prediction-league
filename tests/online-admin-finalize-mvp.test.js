@@ -164,3 +164,61 @@ test("failed reopen or refresh never reports confirmed cancellation", async () =
     assert.equal(calls.some(c => c[0] === "message" && c[1] === "success"), false);
   }
 });
+
+
+test("online confirmation uses the identity-to-display projection without altering server approvals", () => {
+  const { displayOnlineResultApprovals, buildOfficialScoreRows, rankScoreRows } =
+    require("../js/koshien-results.js");
+  const stored = { status: "finalized", submittedBy: "owner-uuid",
+    approvals: { "owner-uuid": "2026-11-24T01:00:00Z" } };
+  const names = new Map([["owner-uuid","管理者"], ["member-uuid","参加者"]]);
+  const visible = displayOnlineResultApprovals(stored, names);
+  assert.deepEqual(visible.approvals, { "管理者": "2026-11-24T01:00:00Z" });
+  assert.equal(visible.status, "finalized");
+  assert.deepEqual(stored.approvals, { "owner-uuid": "2026-11-24T01:00:00Z" });
+  assert.match(appSource, /const displayedResultFlow = window\.YosoKoshienResults\.displayOnlineResultApprovals\(/);
+  assert.match(appSource, /resultFlow: displayedResultFlow/);
+
+  const snapshot = {
+    members: [{ user_id: "owner-uuid", display_name: "管理者" },
+      { user_id: "member-uuid", display_name: "参加者" }],
+    players: [{ id: "player-1", profile_id: "owner-uuid" },
+      { id: "player-2", profile_id: "member-uuid" }],
+    scores: [{ player_id: "player-1", total_score: 10 },
+      { player_id: "player-2", total_score: 20 }],
+  };
+  const ranking = rankScoreRows(buildOfficialScoreRows(snapshot));
+  assert.deepEqual(ranking.map(x => [x.name,x.rank,x.score]),
+    [["参加者",1,20],["管理者",2,10]]);
+});
+
+test("online admin may finalize a submitted result, but no local approve button is shown", () => {
+  const start = appSource.indexOf("function resultFlowPanel()");
+  const end = appSource.indexOf("\nfunction resultFlowMessage()",start);
+  assert.ok(start>=0 && end>start);
+  const state = {
+    participants: ["管理者","参加者"],
+    approvalPolicy: "admin",
+    event: {
+      templateId: "koshien", status:"resultWait", approvalPolicy:"admin",
+      resultFlow:{ status:"submitted", approvals:{"管理者":"2026-11-24T01:00:00Z"} }
+    }
+  };
+  const ctx = {
+    state, ensureResultFlow:()=>{},
+    baseTemplateId:()=> "koshien", requiredApprovalCountForEvent:()=>1,
+    isCurrentUserAdmin:()=>true, isResultFinalized:()=>false,
+    isOnlineKoshienResultFlow:()=>true,
+    approvalCount:()=>1, resultFlowMessage:()=>"",
+    escapeHtml:(x)=>String(x), escapeAttr:(x)=>String(x)
+  };
+  vm.createContext(ctx);
+  vm.runInContext(appSource.slice(start,end),ctx);
+  let html=ctx.resultFlowPanel();
+  assert.match(html,/data-result-submit/);
+  assert.doesNotMatch(html,/data-result-approve/);
+  state.event.approvalPolicy="half";
+  html=ctx.resultFlowPanel();
+  assert.doesNotMatch(html,/data-result-submit/);
+  assert.doesNotMatch(html,/data-result-approve/);
+});

@@ -2134,6 +2134,10 @@ function applyKoshienOnlineSnapshot(snapshot) {
   };
   const teams = (snapshot.teams || []).map((team) => team.name).filter(Boolean);
   const rules = eventRow.rules || {};
+  const displayedResultFlow = window.YosoKoshienResults.displayOnlineResultApprovals(
+    rules.resultFlow,
+    participantKeyByUserId,
+  );
   const storedTeamMeta = rules.config?.teamMeta || {};
   const loadedTeamMeta = Object.fromEntries((snapshot.teams || []).map((team, index) => {
     const name = String(team.name || "");
@@ -2169,8 +2173,8 @@ function applyKoshienOnlineSnapshot(snapshot) {
     },
     predictions: Object.fromEntries(participants.map((name) => [name, createPrediction("koshien")])),
     results: snapshot.results?.payload || createResults("koshien"),
-    resultFlow: rules.resultFlow && Object.keys(rules.resultFlow).length
-      ? rules.resultFlow
+    resultFlow: displayedResultFlow && Object.keys(displayedResultFlow).length
+      ? displayedResultFlow
       : statusToResultFlow(eventRow.status),
   }, { ...state, participants });
 
@@ -4604,11 +4608,10 @@ function resultFlowPanel() {
   const approvedText = approvedNames.length ? approvedNames.join("、") : "まだ承認なし";
   const isResultWait = state.event.status === "resultWait";
   const finalized = isResultFinalized(state.event);
-  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized
-    && flow.status !== "submitted"
-    && (!isOnlineKoshienResultFlow() || (state.event.approvalPolicy || state.approvalPolicy) === "admin");
   const onlineKoshien = isOnlineKoshienResultFlow();
   const adminPolicy = (state.event.approvalPolicy || state.approvalPolicy) === "admin";
+  const canSubmit = isResultWait && isCurrentUserAdmin() && !finalized
+    && (onlineKoshien ? adminPolicy : flow.status !== "submitted");
   const canApprove = !onlineKoshien && isResultWait && flow.status === "submitted" && !finalized;
   const approverOptions = state.participants
     .filter((name) => !flow.approvals?.[name])
