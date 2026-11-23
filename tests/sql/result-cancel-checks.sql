@@ -1,0 +1,34 @@
+BEGIN;
+SET LOCAL ROLE authenticated;
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[]')$q$,'42501');
+SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[]')$q$,'42501');
+SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000003';
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[]')$q$,'42501');
+SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[]')$q$,'P0002');
+RESET ROLE;
+SELECT public.test_assert(NOT EXISTS(SELECT 1 FROM yoso_approval_private.revisions WHERE event_id='save'),'missing match does not advance revision');
+-- Synthetic completed match; no production predictions or results are used.
+INSERT INTO public.matches(event_id,round_key,match_no,team1_score,team2_score,status)
+ VALUES('save','R1',1,3,1,'completed');
+INSERT INTO public.phase2_drafts VALUES('save','open');
+SET LOCAL ROLE authenticated;
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[]')$q$,'55000');
+RESET ROLE;
+SELECT public.test_assert(NOT EXISTS(SELECT 1 FROM yoso_approval_private.revisions WHERE event_id='save'),'downstream refusal rolls back revision');
+SELECT public.test_assert((SELECT status='completed' FROM public.matches WHERE event_id='save'),'downstream refusal preserves match');
+UPDATE public.phase2_drafts SET status='not_ready';
+SET LOCAL ROLE authenticated;
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[{"event_id":"foreign","player_id":"20000000-0000-0000-0000-000000000001"}]')$q$,'22023');
+SELECT public.cancel_koshien_match_result('save','R1',1,'{"writer":"canceled"}','[]');
+RESET ROLE;
+SELECT public.test_assert((SELECT revision=1 FROM yoso_approval_private.revisions WHERE event_id='save'),'cancel advances revision once');
+SELECT public.test_assert((SELECT status='scheduled' AND team1_score IS NULL AND team2_score IS NULL FROM public.matches WHERE event_id='save'),'cancel clears match result');
+SELECT public.test_assert((SELECT count(*)=1 FROM public.koshien_result_cancellations WHERE event_id='save' AND previous_match->>'team1_score'='3' AND canceled_by='00000000-0000-0000-0000-000000000001'),'cancel audits original result and actor');
+SET LOCAL ROLE authenticated;
+SELECT public.test_reject($q$SELECT public.cancel_koshien_match_result('save','R1',1,'{}','[]')$q$,'55000');
+RESET ROLE;
+SELECT public.test_assert((SELECT revision=1 FROM yoso_approval_private.revisions WHERE event_id='save'),'duplicate cancel does not advance revision');
+SELECT public.test_assert((SELECT count(*)=1 FROM public.koshien_result_cancellations),'duplicate cancel does not add audit');
+ROLLBACK;

@@ -43,6 +43,39 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test -f "$stage_dir/tests/sql/phase3-visibility.sql"
           # The fixture must leave no relations or role after its ROLLBACK.
           test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
+      - name: Verify result approval version contract in isolated PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Previous SQL fixture rolls back; no Supabase URL or credential is used.
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test < tests/sql/koshien-result-version-contract.sql
+          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regclass('public.matches') IS NULL AND to_regprocedure('public.koshien_result_version(text)') IS NULL")" = t
+      - name: Verify TRUNCATE privileges and RLS in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never call production: isolated roles/schema exist only inside BEGIN/ROLLBACK.
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_phase3_rls_test < tests/sql/public-truncate-privileges.sql
+          test "$(sudo -u postgres psql -X -At -d yoso_phase3_rls_test -c "SELECT to_regnamespace('yoso_acl_probe') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('yoso_acl_anon','yoso_acl_authenticated'))")" = t
+      - name: Verify approval revision prototype with two PostgreSQL sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_approval_revision_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_approval_revision_test' EXIT
+          python3 scripts/verify-approval-revision.py yoso_approval_revision_test
+          python3 scripts/verify-result-write.py yoso_approval_revision_test
+          python3 scripts/verify-result-write-concurrency.py yoso_approval_revision_test
+          python3 scripts/verify-auto-result-write.py yoso_approval_revision_test
+          python3 scripts/verify-auto-result-concurrency.py yoso_approval_revision_test
+          python3 scripts/verify-reopen-concurrency.py yoso_approval_revision_test
+      - name: Reproduce roster and club deletion lock cycle in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_roster_delete_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_roster_delete_test' EXIT
+          python3 scripts/verify-roster-delete-deadlock.py yoso_roster_delete_test
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
@@ -56,6 +89,7 @@ jobs:
           test -n "$CHROME_BIN"
           curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
           node scripts/verify-supabase-browser.cjs "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          node scripts/verify-shared-approval-browser.cjs
       - name: Check Edge Functions
         run: |
           deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
@@ -72,6 +106,11 @@ jobs:
           set +e
           node --test tests/*.test.js tests/*.test.mjs > test-output.txt 2>&1
           status=$?
+          if [ "$status" -ne 0 ]; then
+            # Keep the failure and its assertion details visible even when
+            # it occurs before the last 160 lines of the full test report.
+            grep -n -A 35 -B 2 '^not ok ' test-output.txt || true
+          fi
           tail -n 160 test-output.txt
           exit $status
       - name: Upload Node test output

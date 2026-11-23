@@ -1,0 +1,20 @@
+# 確定後の結果書込み制御（試作）
+2026-11-16、基準 e8e0efc。migrationではなく隔離検証専用。
+
+## 根拠
+本番カタログのSELECTでsave_koshien_result_snapshot、cancel_koshien_match_result、auto_apply_koshien_official_resultsとmatchesの非内部trigger定義を確認。大会finalizedの判定はない。前回と今回のguard導入前の競合fixtureでも確定大会への保存/取消が通ることを再現。
+app.jsの管理画面はisResultFinalizedにより結果編集を無効化し、resultFlowMessageは「管理者は確定を取り消して修正できます」と表示。reopenFinalizedResultsは認証済み管理者のreopen RPC成功後だけローカル承認を解除する。
+正式KOSHIEN_2026_RULESは採点と予想期限を規定するが、この編集制御は規定していない。今回の根拠は既存の管理画面と再開RPCの契約であり、採点・30点条件は変更しない。
+
+## 実装境界
+matches/results/scoresのINSERT/UPDATE/DELETEに共通triggerを追加。大会statusまたは旧形式rules.resultFlow.statusのどちらかがfinalizedなら55000で拒否。古いwriter permitを同じtransactionで持っていても拒否する。
+既存writer permitとevent承認状態gateを必須の前提とする。結果更新者はevent行を先にロック済みなので、このtriggerは追加ロックを取らず状態だけを読む。単体適用しない。
+保存/取消/自動適用の途中で拒否すると、同じtransactionのrevision・permit・監査もrollbackする。自動適用のskip/blockなど子テーブルを書かない処理はそのまま。予想締切やarchiveの意味を変更せず、正規reopen後の編集は既存条件を維持する。
+
+## 検証
+verify-reopen-concurrency.pyを拡張。guard導入前の5競合に続け、確定/旧形式の保存・取消拒否を10表のsnapshot一致で検査。再開commit後の保存/取消成功、再開rollback後の待機writer拒否を実2接続で検査。同transactionの既発行permit迂回と、service_roleによる自動適用拒否・正規再開後の成功も検査。
+実行結果はPR #47 / Issue #42に記録。最小fixtureであり全本番trigger・得点再計算・所属競合・公開承認UIの完成を意味しない。
+
+## 復旧と残作業
+本番変更なし。試作ファイル/テスト変更をrevert可能。
+次: 全本番triggerを含む統合fixtureへこの制御を移し、直接DML・後続試合/得点再計算との互換性を検証。migration/merge/deployはその後。

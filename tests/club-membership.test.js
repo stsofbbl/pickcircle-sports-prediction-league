@@ -11,6 +11,7 @@ const serviceSource = fs.readFileSync(path.join(root, "js", "data-service.js"), 
 function loadService(client) {
   const window = {
     location: { href: "https://example.test/?league=g-unit-koshien-2026" },
+    setTimeout: (callback) => callback(),
     YosoSupabase: {
       config: () => ({ inviteCode: "g-unit-koshien-2026", sync: { autoSaveKoshien: true } }),
       hasConfig: () => true,
@@ -124,4 +125,146 @@ test("club search rejects fewer than two characters before calling the API", asy
     /クラブ名は2文字以上で入力してください。/,
   );
   assert.equal(calls.length, 0);
+});
+
+test("approved join retries one transient league lock conflict and reuses the authenticated RPC", async () => {
+  const calls = [];
+  const service = loadService({
+    async rpc(name, args) {
+      calls.push({ name, args });
+      if (calls.length === 1) return { data: null, error: { code: "55P03", message: "lock unavailable" } };
+      return { data: [{ request_id: "request-id", request_status: "approved" }], error: null };
+    },
+  });
+  const result = await service.league.reviewJoinRequest({ requestId: "request-id", approve: true });
+  assert.equal(result.request_status, "approved");
+  assert.deepEqual(calls.map((call) => call.name), [
+    "review_club_join_request", "review_club_join_request",
+  ]);
+  assert.deepEqual(calls[0].args, calls[1].args);
+});
+
+test("join approval never retries authorization or stale-request errors", async () => {
+  for (const code of ["42501", "P0002"]) {
+    let calls = 0;
+    const service = loadService({
+      async rpc() { calls++; return { data: null, error: { code, message: code } }; },
+    });
+    await assert.rejects(
+      service.league.reviewJoinRequest({ requestId: "request-id", approve: true }),
+      (error) => error.code === code,
+    );
+    assert.equal(calls, 1);
+  }
+});
+
+test("join approval bounds retries and propagates a deleted request", async () => {
+  let calls = 0;
+  const service = loadService({
+    async rpc() {
+      calls++;
+      return { data: null, error: calls === 1
+        ? { code: "55P03", message: "lock unavailable" }
+        : { code: "P0002", message: "request no longer exists" } };
+    },
+  });
+  await assert.rejects(
+    service.league.reviewJoinRequest({ requestId: "request-id", approve: true }),
+    (error) => error.code === "P0002",
+  );
+  assert.equal(calls, 2);
+});
+
+test("rejected joins do not retry a lock error from another source", async () => {
+  let calls = 0;
+  const service = loadService({
+    async rpc() { calls++; return { data: null, error: { code: "55P03", message: "lock unavailable" } }; },
+  });
+  await assert.rejects(
+    service.league.reviewJoinRequest({ requestId: "request-id", approve: false }),
+    (error) => error.code === "55P03",
+  );
+  assert.equal(calls, 1);
+});
+
+test("join approval stops after a second lock conflict", async () => {
+  let calls = 0;
+  const service = loadService({
+    async rpc() { calls++; return { data: null, error: { code: "55P03", message: "still locked" } }; },
+  });
+  await assert.rejects(
+    service.league.reviewJoinRequest({ requestId: "request-id", approve: true }),
+    (error) => error.code === "55P03",
+  );
+  assert.equal(calls, 2);
+});
+
+test("admin role changes and member removal retry one transient roster lock", async () => {
+  for (const [action, expectedName] of [
+    [(service) => service.league.manageAdmin({
+      leagueId: "league-id", userId: "member-id", makeAdmin: true,
+    }), "manage_league_admin"],
+    [(service) => service.league.removeMember({
+      leagueId: "league-id", userId: "member-id",
+    }), "remove_club_member"],
+  ]) {
+    const calls = [];
+    const service = loadService({
+      async rpc(name, args) {
+        calls.push({ name, args });
+        if (calls.length === 1) return { data: null, error: { code: "55P03", message: "locked" } };
+        return { data: { ok: true }, error: null };
+      },
+    });
+    assert.equal((await action(service)).ok, true);
+    assert.deepEqual(calls.map((call) => call.name), [expectedName, expectedName]);
+    assert.equal(JSON.stringify(calls[0].args), JSON.stringify(calls[1].args));
+  }
+});
+
+test("admin role and removal RPCs preserve authorization and retry bounds", async () => {
+  for (const action of [
+    (service) => service.league.manageAdmin({
+      leagueId: "league-id", userId: "member-id", makeAdmin: true,
+    }),
+    (service) => service.league.removeMember({ leagueId: "league-id", userId: "member-id" }),
+  ]) {
+    for (const code of ["42501", "P0002"]) {
+      let calls = 0;
+      const service = loadService({
+        async rpc() { calls++; return { data: null, error: { code, message: code } }; },
+      });
+      await assert.rejects(action(service), (error) => error.code === code);
+      assert.equal(calls, 1);
+    }
+    let calls = 0;
+    const service = loadService({
+      async rpc() { calls++; return { data: null, error: { code: "55P03", message: "locked" } }; },
+    });
+    await assert.rejects(action(service), (error) => error.code === "55P03");
+    assert.equal(calls, 2);
+  }
+});
+
+test("roster retry propagates deletion or lost authorization on the second RPC", async () => {
+  for (const [action, code] of [
+    [(service) => service.league.manageAdmin({
+      leagueId: "league-id", userId: "member-id", makeAdmin: true,
+    }), "42501"],
+    [(service) => service.league.removeMember({
+      leagueId: "league-id", userId: "member-id",
+    }), "P0002"],
+  ]) {
+    let calls = 0;
+    const service = loadService({
+      async rpc() {
+        calls++;
+        return { data: null, error: calls === 1
+          ? { code: "55P03", message: "locked" }
+          : { code, message: "state changed" } };
+      },
+    });
+    await assert.rejects(action(service), (error) => error.code === code);
+    assert.equal(calls, 2);
+  }
 });

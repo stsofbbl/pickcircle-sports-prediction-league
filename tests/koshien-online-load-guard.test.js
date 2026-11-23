@@ -31,6 +31,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
       if (refreshError) throw refreshError;
     },
     refreshKoshienLaterPhaseState: async () => {},
+    refreshKoshienSharedApprovalState: async () => {},
     applyKoshienOnlineSnapshot(snapshot) {
       context.onlineKoshienEventId = snapshot.event.id;
       context.state.event = { id: snapshot.event.id, templateId: "koshien", results: { matches: [], finishes: {} } };

@@ -193,11 +193,11 @@
       throw new Error("管理者変更payloadを確認してください。");
     }
     const { supabase } = await laterPhaseContext();
-    const { data, error } = await supabase.rpc("manage_league_admin", {
+    const { data, error } = await retryRosterLockOnce(() => supabase.rpc("manage_league_admin", {
       p_league_id: normalizedLeagueId,
       p_user_id: normalizedUserId,
       p_make_admin: makeAdmin,
-    });
+    }));
     if (error) throw koshienSaveError("league_admin", error, "管理者権限を変更できませんでした。");
     return data;
   }
@@ -375,6 +375,53 @@
     });
     if (error) throw koshienSaveError("result_cancel", error, "試合結果を取り消せませんでした。");
     return data;
+  }
+
+  async function loadSharedApprovalState(eventId) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("共有結果承認のevent_idが必要です。");
+    return laterPhaseRpc("get_koshien_shared_approval_state", {
+      p_event_id: normalizedEventId,
+    }, "shared_approval_read");
+  }
+
+  async function submitSharedApprovalResults(eventId, revision) {
+    const id = String(eventId || "").trim();
+    if (!id || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("大会IDと承認revisionを再取得してください。");
+    }
+    return laterPhaseRpc("submit_koshien_shared_results", {
+      p_event_id: id,
+      p_expected_revision: revision,
+    }, "shared_approval_submit");
+  }
+
+  async function approveSharedApprovalResults(eventId, submissionId, revision) {
+    const id = String(eventId || "").trim();
+    const submission = String(submissionId || "").trim();
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(submission)
+        || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("承認対象を最新状態から再取得してください。");
+    }
+    return laterPhaseRpc("approve_koshien_shared_results", {
+      p_event_id: id,
+      p_submission_id: submission,
+      p_expected_revision: revision,
+    }, "shared_approval_vote");
+  }
+
+  async function setSharedApprovalPolicy(eventId, policy, revision) {
+    const id = String(eventId || "").trim();
+    const nextPolicy = String(policy || "").trim();
+    if (!id || !["admin", "half", "unanimous"].includes(nextPolicy)
+        || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error("大会ID・承認方式・revisionを再取得してください。");
+    }
+    return laterPhaseRpc("set_koshien_shared_approval_policy", {
+      p_event_id: id,
+      p_policy: nextPolicy,
+      p_expected_revision: revision,
+    }, "shared_approval_policy");
   }
 
   async function reopenKoshienResults(eventId) {
@@ -630,10 +677,22 @@
     return null;
   }
 
-  async function clubRpc(name, args = {}) {
+  async function retryRosterLockOnce(call) {
+    let result = await call();
+    if (result?.error?.code !== "55P03") return result;
+    // Retry only the failed atomic RPC; it rechecks club existence and
+    // caller authorization after the competing transaction finishes.
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    result = await call();
+    return result;
+  }
+
+  async function clubRpc(name, args = {}, { retryRosterLock = false } = {}) {
     const supabase = await supabaseClient();
     if (!supabase) throw new Error("Supabase is not configured");
-    const { data, error } = await supabase.rpc(name, args);
+    const call = () => supabase.rpc(name, args);
+    const { data, error } = retryRosterLock
+      ? await retryRosterLockOnce(call) : await call();
     if (error) throw error;
     return data;
   }
@@ -672,9 +731,12 @@
   }
 
   async function reviewClubJoinRequest({ requestId, approve } = {}) {
-    const rows = await clubRpc("review_club_join_request", {
+    const args = {
       p_request_id: String(requestId || "").trim(),
       p_approve: Boolean(approve),
+    };
+    const rows = await clubRpc("review_club_join_request", args, {
+      retryRosterLock: args.p_approve,
     });
     return Array.isArray(rows) ? rows[0] || null : rows;
   }
@@ -698,7 +760,7 @@
     return clubRpc("remove_club_member", {
       p_league_id: String(leagueId || "").trim(),
       p_user_id: String(userId || "").trim(),
-    });
+    }, { retryRosterLock: true });
   }
 
   async function replaceKoshienRepresentatives({ eventId, rows, year } = {}) {
@@ -843,6 +905,23 @@
     return { ok: true, eventId: normalizedEventId };
   }
 
+  async function upsertKoshienPlayerWithLockRetry(supabase, playerPayload) {
+    const upsert = () => supabase
+      .from("players")
+      .upsert(playerPayload, { onConflict: "league_id,profile_id" })
+      .select("id")
+      .single();
+    let result = await upsert();
+    if (result.error?.code === "55P03") {
+      // The failed statement rolled back. Recheck membership and league
+      // existence through RLS/FK in a new request after the lock is released.
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      result = await upsert();
+    }
+    if (result.error) throw result.error;
+    return result.data;
+  }
+
   async function saveKoshienStructuredTables({
     supabase,
     user,
@@ -861,12 +940,7 @@
       display_name: displayName,
       is_admin: isClubAdminRole(clubRoleFromMembership(membership)),
     };
-    const { data: player, error: playerError } = await supabase
-      .from("players")
-      .upsert(playerPayload, { onConflict: "league_id,profile_id" })
-      .select("id")
-      .single();
-    if (playerError) throw playerError;
+    const player = await upsertKoshienPlayerWithLockRetry(supabase, playerPayload);
 
     const eventId = String(event.id);
     const { data, error } = await supabase
@@ -1372,6 +1446,10 @@
       setLaterPhaseStatus,
       cancelKoshienMatchResult,
       reopenKoshienResults,
+      loadSharedApprovalState,
+      submitSharedApprovalResults,
+      approveSharedApprovalResults,
+      setSharedApprovalPolicy,
     },
     local: {
       loadState: loadLocalState,
