@@ -2755,10 +2755,12 @@ try:
         (SELECT jsonb_agg(to_jsonb(s) ORDER BY s.player_id)
          FROM public.scores s WHERE s.event_id='submit-probe'),
         (SELECT payload FROM public.results WHERE event_id='submit-probe'));
+      RESET ROLE;
       SELECT public.test_assert(
         (SELECT revision=1 FROM yoso_approval_private.revisions
          WHERE event_id='submit-probe'),
         'identical save advances submitted revision');
+      SET ROLE authenticated;
       SELECT public.test_assert(
         (SELECT (x->>'submission_status')='none'
          FROM (SELECT public.get_koshien_shared_approval_state('submit-probe') x) q),
@@ -2767,9 +2769,11 @@ try:
         $q$SELECT public.approve_koshien_shared_results('submit-probe',
           (SELECT id FROM yoso_approval_private.submissions
            WHERE event_id='submit-probe' AND revision=0),0)$q$,'40001');
+      RESET ROLE;
       SELECT public.test_assert(
         (SELECT count(*)=1 FROM yoso_approval_private.votes),
         'stale approval attempt adds no vote');
+      SET ROLE authenticated;
       SELECT public.test_assert(
         (SELECT (x->>'submission_status')='submitted'
          FROM (SELECT public.submit_koshien_shared_results('submit-probe',1) x) q),
