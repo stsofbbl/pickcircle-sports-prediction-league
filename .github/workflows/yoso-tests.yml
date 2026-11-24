@@ -58,6 +58,17 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-draft-open.sql
           python3 scripts/verify-admin-finalize-concurrency.py yoso_admin_finalize_mvp_test
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-checks.sql
+      - name: Verify Koshien draft lifecycle with captured production RPCs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_koshien_lifecycle_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_koshien_lifecycle_test' EXIT
+          # Roles are cluster-wide and already exist from the previous disposable DB.
+          sed '/^CREATE ROLE anon NOLOGIN;/d; /^CREATE ROLE authenticated NOLOGIN;/d' tests/sql/koshien-admin-finalize-setup.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test
+          for f in tests/sql/fixtures/koshien-production-reopen.sql supabase/migrations/20261124000000_admin_finalize_koshien_results.sql tests/sql/fixtures/koshien-lifecycle-setup.sql tests/sql/fixtures/koshien-lifecycle-production-functions.sql supabase/migrations/20261124100000_guard_koshien_draft_open.sql tests/sql/koshien-lifecycle-integration.sql; do
+            sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test < "$f"
+          done
       - name: Verify Koshien cron gate in disposable PostgreSQL
         run: python3 scripts/verify-koshien-cron-gate.py
       - name: Run Koshien schedule and automation tests
