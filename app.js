@@ -2189,6 +2189,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
     templateId: "koshien",
     sport: "baseball",
     status: eventRow.status || "open",
+    season: eventRow.season || "",
     deadline: eventRow.prediction_deadline || "",
     approvalPolicy: rules.approvalPolicy || state.approvalPolicy,
     config: {
@@ -3044,7 +3045,11 @@ function renderActiveEventManager() {
       </div>
       <div class="approval-segment active-manager-status" aria-label="大会状態">
         ${statusActions}
+        ${onlineKoshien && event.status === "draft" && isAdmin
+          ? `<button type="button" class="primary-button" data-koshien-open-draft="${escapeAttr(event.id)}" ${event.config?.startRoundsConfirmed === true && event.config?.teams?.length === 49 ? "" : "disabled"}>受付開始</button>`
+          : ""}
       </div>
+      ${onlineKoshien && event.status === "draft" ? '<p class="helper-text">公式代表校49校と開始ラウンドを確定後に受付を開始してください。締切・年度は作成時の正式データを使用します。</p>' : ""}
       ${base === "koshien" ? renderKoshienManagerPanel({ canEditSettings, canEditResults }) : renderGenericManagerPanel(base)}
     </div>
   `;
@@ -7939,6 +7944,40 @@ els.navLinks.forEach((link) => {
   });
 });
 
+let onlineKoshienDraftOpening = false;
+
+async function openOnlineKoshienDraft(eventId) {
+  const id = String(eventId || "");
+  const leagueId = String(onlineLeagueId || "");
+  const userId = String(currentAuthUser()?.id || "");
+  if (onlineKoshienDraftOpening || pendingKoshienLoadPromise) return;
+  if (!userId || !leagueId || !isClubAdmin()
+    || state.event?.status !== "draft" || String(state.event?.id || "") !== id
+    || String(state.activeEventId || "") !== id || String(loadedKoshienOnlineEventId || "") !== id
+    || String(onlineKoshienEventId || "") !== id
+    || !/^[0-9a-f]{32}$/.test(String(loadedKoshienResultRevision || ""))
+    || state.event.config?.startRoundsConfirmed !== true || state.event.config?.teams?.length !== 49) {
+    window.alert("公式代表校と開始ラウンドを確定し、オンライン大会を再読込してください。");
+    return;
+  }
+  if (!window.confirm("49校と開始ラウンドを確認し、予想受付を開始しますか？")) return;
+  onlineKoshienDraftOpening = true;
+  try {
+    await window.YosoDataService.koshien.openDraft({ eventId: id, expectedRevision: loadedKoshienResultRevision });
+    if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId
+      || String(state.activeEventId || "") !== id) return;
+    const snapshot = await loadKoshienOnlineState({ force: true, exactEventId: id, expectedLeagueId: leagueId });
+    if (!snapshot?.ok || snapshot.event?.id !== id || snapshot.event?.status !== "open"
+      || String(state.event?.id || "") !== id) throw new Error("受付開始後の再取得を確認できませんでした。大会一覧から再読込してください。");
+    setConnectionMessage("予想受付を開始しました。");
+    await refreshOnlineKoshienCatalog();
+  } catch (error) {
+    if (String(currentAuthUser()?.id || "") === userId && String(onlineLeagueId || "") === leagueId) {
+      window.alert(error?.message || "受付を開始できませんでした。");
+    }
+  } finally { onlineKoshienDraftOpening = false; }
+}
+
 let onlineKoshienArchiveBusy = false;
 
 async function archiveOnlineKoshienEvent(item, requestedStatus) {
@@ -8007,6 +8046,11 @@ document.addEventListener("click", async (event) => {
     state.events = state.events.filter((candidate) => candidate.id !== eventId);
     if (state.activeEventId === eventId) setActiveEvent(state.events[0]?.id);
     render();
+    return;
+  }
+  const openDraftButton = event.target.closest("[data-koshien-open-draft]");
+  if (openDraftButton) {
+    await openOnlineKoshienDraft(openDraftButton.dataset.koshienOpenDraft);
     return;
   }
   const statusButton = event.target.closest("[data-event-status]");

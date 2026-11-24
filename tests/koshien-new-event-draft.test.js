@@ -9,7 +9,7 @@ const eventId = "11111111-1111-4111-8111-111111111111";
 const leagueId = "22222222-2222-4222-8222-222222222222";
 const args = { eventId, leagueId, name: "大会", season: 2027, deadline: "2035-08-01T00:00:00Z" };
 
-function harness({ user = { id: "admin" }, role = "owner", membershipLeague = leagueId, insertError = null, response = null, missing = false, existingRow = null, readError = null, listRows = null, listError = null } = {}) {
+function harness({ user = { id: "admin" }, role = "owner", membershipLeague = leagueId, insertError = null, response = null, missing = false, existingRow = null, readError = null, listRows = null, listError = null, rpcResponse = null, rpcError = null } = {}) {
   const calls = [];
   const queries = [];
   class Query {
@@ -38,7 +38,7 @@ function harness({ user = { id: "admin" }, role = "owner", membershipLeague = le
   const window = {YosoSupabase:{
     config:()=>({inviteCode:"club",sync:{autoSaveKoshien:true}}),
     hasConfig:()=>true,
-    client:()=>({from:table=>new Query(table)}),
+    client:()=>({from:table=>new Query(table), rpc:async(name,args)=>{calls.push({name,args});return {data:rpcResponse,error:rpcError};}}),
     sessionUser:async()=>user,
   }};
   vm.runInNewContext(source,{window,localStorage:{},console});
@@ -185,4 +185,30 @@ test("catalog selection requires strict server load and never locally switches o
   assert.equal(applied[0][1].expectedLeagueId,leagueId);
   assert.equal(ctx.state.event.id,"previous");
   assert.equal(alerts.length,1);
+});
+
+test("opening calls only the server RPC with the reviewed event revision", async () => {
+  const revision="a".repeat(32);
+  const h=harness({rpcResponse:{event_id:eventId,status:"open"}});
+  const result=await h.service.koshien.openDraft({eventId,expectedRevision:revision});
+  assert.equal(result.status,"open");
+  assert.equal(h.calls.length,1);
+  assert.equal(h.calls[0].name,"open_koshien_draft");
+  assert.equal(h.calls[0].args.p_event_id,eventId);
+  assert.equal(h.calls[0].args.p_expected_revision,revision);
+  for (const opts of [{rpcError:{message:"stale"}},{rpcResponse:{event_id:"wrong",status:"open"}},{rpcResponse:{event_id:eventId,status:"draft"}}]) {
+    const failed=harness(opts);
+    await assert.rejects(failed.service.koshien.openDraft({eventId,expectedRevision:revision}));
+  }
+  const invalid=harness();
+  await assert.rejects(invalid.service.koshien.openDraft({eventId,expectedRevision:"invalid"}));
+  assert.equal(invalid.calls.length,0);
+});
+test("draft open UI uses loaded ID and exact reload; official draft year is fixed",()=>{
+  assert.match(app,/async function openOnlineKoshienDraft/);
+  assert.match(app,/openDraft\(\{ eventId: id, expectedRevision: loadedKoshienResultRevision \}\)/);
+  assert.match(app,/exactEventId: id, expectedLeagueId: leagueId/);
+  const source=fs.readFileSync(path.join(__dirname,"../js/jhbf-result-import.js"),"utf8");
+  assert.match(source,/fixedDraftSeason: true/);
+  assert.equal((source.match(/config\.fixedDraftSeason \? config\.year : Number/g)||[]).length,3);
 });

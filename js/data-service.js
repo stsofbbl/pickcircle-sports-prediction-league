@@ -1253,6 +1253,22 @@
     return { ok: true, eventId: id, status: "draft" };
   }
 
+  async function openKoshienDraft({ eventId, expectedRevision } = {}) {
+    const id = String(eventId || "").trim();
+    if (!id || !/^[0-9a-f]{32}$/.test(String(expectedRevision || ""))) {
+      throw new Error("最新の大会情報を取得してください。");
+    }
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user?.id) throw new Error("オンラインログインが必要です。");
+    const { data, error } = await supabase.rpc("open_koshien_draft", {
+      p_event_id: id, p_expected_revision: expectedRevision,
+    });
+    if (error) throw koshienSaveError("event_open", error, "受付を開始できませんでした。");
+    if (data?.event_id !== id || data?.status !== "open") throw new Error("受付開始を確認できませんでした。");
+    return data;
+  }
+
   async function archiveKoshienEvent({ eventId } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("アーカイブする大会を指定してください。");
@@ -1324,7 +1340,7 @@
     const selectedEventId = String(eventId || "").trim();
     const eventQuery = () => supabase
       .from("events")
-      .select("id, league_id, name, preset_type, status, archived_at, prediction_deadline, rules, created_by, updated_at")
+      .select("id, league_id, name, preset_type, status, archived_at, prediction_deadline, rules, created_by, updated_at, season")
       .eq("league_id", league.id)
       .eq("preset_type", "koshien");
     let eventResponse = selectedEventId
@@ -1520,6 +1536,7 @@
     },
     koshien: {
       createDraft: createKoshienDraft,
+      openDraft: openKoshienDraft,
       listEvents: listKoshienEvents,
       saveSnapshot: saveKoshienSnapshot,
       loadSnapshot: loadKoshienSnapshot,

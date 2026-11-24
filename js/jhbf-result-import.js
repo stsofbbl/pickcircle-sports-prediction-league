@@ -575,6 +575,10 @@
   }
 
   function sourceConfig() {
+    const draftYear = Number(state.event?.season);
+    if (state.event?.status === "draft" && Number.isInteger(draftYear) && draftYear >= 2020 && draftYear <= 2035) {
+      return { competitionType: "summer", year: draftYear, fixedDraftSeason: true };
+    }
     const config = state.event?.config?.externalResults || {};
     const eventYear = Number((String(state.event?.name || "").match(/20\d{2}/) || [])[0]);
     return {
@@ -823,11 +827,11 @@
           <span class="status-label pending">半自動</span>
         </div>
         <div class="form-grid">
-          <label class="field"><span>大会</span><select data-jhbf-competition ${disabled}>
+          <label class="field"><span>大会</span><select data-jhbf-competition ${config.fixedDraftSeason ? "disabled" : disabled}>
             <option value="summer" ${config.competitionType === "summer" ? "selected" : ""}>夏の選手権</option>
             <option value="senbatsu" ${config.competitionType === "senbatsu" ? "selected" : ""}>春の選抜</option>
           </select></label>
-          <label class="field"><span>年度</span><input data-jhbf-year type="number" min="2020" max="2035" value="${config.year}" ${disabled}></label>
+          <label class="field"><span>年度</span><input data-jhbf-year type="number" min="2020" max="2035" value="${config.year}" ${config.fixedDraftSeason ? "disabled" : disabled}></label>
           <label class="field"><span>取得基準日</span><input data-jhbf-base-date type="date" value="${escapeHtml(view.baseDate)}" ${disabled}></label>
         </div>
         <div class="result-flow-actions">
@@ -910,8 +914,8 @@
 
   async function handleFetch(root) {
     const config = sourceConfig();
-    const competitionType = root.querySelector("[data-jhbf-competition]")?.value === "senbatsu" ? "senbatsu" : "summer";
-    const year = Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    const competitionType = config.fixedDraftSeason ? "summer" : (root.querySelector("[data-jhbf-competition]")?.value === "senbatsu" ? "senbatsu" : "summer");
+    const year = config.fixedDraftSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
     const baseDate = root.querySelector("[data-jhbf-base-date]")?.value || jstDateValue();
     state.event.config.externalResults = { competitionType, year };
     saveLocalStateOnly();
@@ -943,7 +947,7 @@
 
   async function handleFetchRepresentatives(root) {
     const config = sourceConfig();
-    const year = Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    const year = config.fixedDraftSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
     state.event.config.externalResults = { competitionType: "summer", year };
     saveLocalStateOnly();
     view.loading = true;
@@ -976,7 +980,7 @@
 
   async function handleFetchStartRounds(root) {
     const config = sourceConfig();
-    const year = Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    const year = config.fixedDraftSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
     view.loading = true;
     view.startRoundMessage = "日本高野連公式の組み合わせ表を取得しています…";
     view.startRoundMessageKind = "pending";
