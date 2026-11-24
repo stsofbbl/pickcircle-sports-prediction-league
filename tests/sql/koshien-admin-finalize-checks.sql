@@ -128,7 +128,81 @@ DO $test$ BEGIN
     RAISE EXCEPTION 'post-finalization event-team edit succeeded';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $test$;
-UPDATE public.events SET status='archive' WHERE id='test-finalize';
+-- Reproduce the browser's archive UPDATE in the disposable database.
+RESET ROLE;
+SET request.jwt.claim.sub = '00000000-0000-0000-0000-000000000002';
+SET ROLE authenticated;
+DO $archive_member$ DECLARE v_rows integer;
+BEGIN
+  UPDATE public.events SET status='archive', archived_at=now()
+    WHERE id='test-finalize' AND preset_type='koshien'
+      AND status='finalized' AND archived_at IS NULL;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION 'non-admin archived a finalized event';
+  END IF;
+END $archive_member$;
+RESET ROLE;
+SET request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
+SET ROLE authenticated;
+BEGIN;
+UPDATE public.events SET status='archive', archived_at=now()
+  WHERE id='test-finalize' AND preset_type='koshien'
+    AND status='finalized' AND archived_at IS NULL;
+DO $archive_rollback$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.events WHERE id='test-finalize'
+    AND status='archive' AND archived_at IS NOT NULL) THEN
+    RAISE EXCEPTION 'archive transaction did not update both fields';
+  END IF;
+END $archive_rollback$;
+ROLLBACK;
+DO $archive_rollback$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.events WHERE id='test-finalize'
+    AND status='finalized' AND archived_at IS NULL) THEN
+    RAISE EXCEPTION 'archive rollback did not restore both fields';
+  END IF;
+END $archive_rollback$;
+DO $archive_admin$ DECLARE
+  v_rows integer;
+  v_rules jsonb;
+  v_matches text;
+  v_scores text;
+  v_results text;
+BEGIN
+  SELECT rules INTO v_rules FROM public.events WHERE id='test-finalize';
+  SELECT md5(coalesce(string_agg(to_jsonb(m)::text,'|' ORDER BY m.id::text),''))
+    INTO v_matches FROM public.matches m WHERE event_id='test-finalize';
+  SELECT md5(coalesce(string_agg(to_jsonb(s)::text,'|' ORDER BY s.player_id::text),''))
+    INTO v_scores FROM public.scores s WHERE event_id='test-finalize';
+  SELECT md5(coalesce(string_agg(to_jsonb(r)::text,'|' ORDER BY r.event_id),''))
+    INTO v_results FROM public.results r WHERE event_id='test-finalize';
+  UPDATE public.events SET status='archive', archived_at=now()
+    WHERE id='test-finalize' AND preset_type='koshien'
+      AND status='finalized' AND archived_at IS NULL;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 1 OR NOT EXISTS (SELECT 1 FROM public.events
+    WHERE id='test-finalize' AND status='archive'
+      AND archived_at IS NOT NULL AND rules=v_rules) THEN
+    RAISE EXCEPTION 'admin archive did not persist expected fields';
+  END IF;
+  UPDATE public.events SET status='archive', archived_at=now()
+    WHERE id='test-finalize' AND preset_type='koshien'
+      AND status='finalized' AND archived_at IS NULL;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION 'stale archive precondition did not reject duplicate';
+  END IF;
+  IF v_matches IS DISTINCT FROM (SELECT md5(coalesce(string_agg(to_jsonb(m)::text,'|' ORDER BY m.id::text),''))
+    FROM public.matches m WHERE event_id='test-finalize')
+    OR v_scores IS DISTINCT FROM (SELECT md5(coalesce(string_agg(to_jsonb(s)::text,'|' ORDER BY s.player_id::text),''))
+      FROM public.scores s WHERE event_id='test-finalize')
+    OR v_results IS DISTINCT FROM (SELECT md5(coalesce(string_agg(to_jsonb(r)::text,'|' ORDER BY r.event_id),''))
+      FROM public.results r WHERE event_id='test-finalize') THEN
+    RAISE EXCEPTION 'archive modified matches, scores or results';
+  END IF;
+END $archive_admin$;
+SELECT 'PASS: archive RLS, status, archived_at, rollback, duplicate, child data';
+
 DO $test$ BEGIN
   BEGIN
     UPDATE public.matches SET team1_score=9 WHERE event_id='test-finalize';
