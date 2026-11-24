@@ -4677,7 +4677,9 @@ function resultFlowPanel() {
 }
 
 function resultFlowMessage() {
-  if (isResultFinalized(state.event)) return "承認条件を満たしたためランキングへ反映済みです。管理者は確定を取り消して修正できます。";
+  if (isResultFinalized(state.event)) return state.event.status === "archive"
+    ? "アーカイブ済みです。管理者が確定を取り消すとアーカイブも解除されます。"
+    : "承認条件を満たしたためランキングへ反映済みです。管理者は確定を取り消して修正できます。";
   if (state.event.status === "resultWait" && state.event.resultFlow?.status === "submitted") {
     return "結果は提出済みです。必要承認数に達するまでランキングには反映されません。";
   }
@@ -4690,7 +4692,10 @@ function resultFlowMessage() {
 
 async function reopenFinalizedResults() {
   if (!isCurrentUserAdmin() || !isResultFinalized(state.event)) return;
-  if (!window.confirm("大会全体の結果確定を取り消しますか？入力済みの試合結果は残り、承認だけがリセットされます。")) return;
+  const archived = state.event.status === "archive";
+  if (!window.confirm(archived
+    ? "アーカイブと結果確定を取り消しますか？大会は結果待ちに戻り、自動同期の対象に戻ります。入力済みの試合結果は残ります。"
+    : "大会全体の結果確定を取り消しますか？入力済みの試合結果は残り、承認だけがリセットされます。")) return;
   const previousStatus = state.event.status;
   const previousFlow = JSON.parse(JSON.stringify(state.event.resultFlow || createResultFlow()));
   const shouldSaveOnline = baseTemplateId(state.event?.templateId) === "koshien"
@@ -4715,7 +4720,8 @@ async function reopenFinalizedResults() {
       const snapshot = await loadKoshienOnlineState({ force: true });
       if (!snapshot?.ok || String(state.event?.id || "") !== reopenedEventId
         || state.event.status !== "resultWait"
-        || state.event.resultFlow?.status !== "none") {
+        || state.event.resultFlow?.status !== "none"
+        || (archived && snapshot.event?.archived_at !== null)) {
         throw new Error("サーバーで確定取消が受理されましたが、再取得できませんでした。画面を再読込してください。");
       }
     } else {
