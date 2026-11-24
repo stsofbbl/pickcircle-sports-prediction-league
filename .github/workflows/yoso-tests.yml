@@ -66,7 +66,7 @@ jobs:
           trap 'sudo -u postgres dropdb --if-exists yoso_koshien_lifecycle_test' EXIT
           # Roles are cluster-wide and already exist from the previous disposable DB.
           sed '/^CREATE ROLE anon NOLOGIN;/d; /^CREATE ROLE authenticated NOLOGIN;/d' tests/sql/koshien-admin-finalize-setup.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test
-          for f in tests/sql/fixtures/koshien-production-reopen.sql supabase/migrations/20261124000000_admin_finalize_koshien_results.sql tests/sql/fixtures/koshien-lifecycle-setup.sql tests/sql/fixtures/koshien-lifecycle-production-functions.sql supabase/migrations/20261124100000_guard_koshien_draft_open.sql tests/sql/koshien-lifecycle-integration.sql; do
+          for f in tests/sql/fixtures/koshien-production-reopen.sql supabase/migrations/20261124000000_admin_finalize_koshien_results.sql tests/sql/fixtures/koshien-lifecycle-setup.sql tests/sql/fixtures/koshien-lifecycle-production-functions.sql supabase/migrations/20261124100000_guard_koshien_draft_open.sql supabase/migrations/20261124110000_keep_open_koshien_rounds_confirmed.sql tests/sql/koshien-lifecycle-integration.sql; do
             sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test < "$f"
           done
           python3 scripts/verify-koshien-draft-open-concurrency.py yoso_koshien_lifecycle_test

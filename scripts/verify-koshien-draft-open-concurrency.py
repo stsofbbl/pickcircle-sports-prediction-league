@@ -88,7 +88,7 @@ finally:
 confirm()
 a=b=None
 try:
-    # Characterize the reverse order; the legacy roster RPC currently permits open events.
+    # Opening wins; the waiting roster RPC must roll back when it tries to clear confirmation.
     a=start()
     send(a,"SELECT pg_backend_pid();")
     pid=int(line(a))
@@ -100,12 +100,8 @@ try:
     finish(a,"COMMIT;")
     out,err=b.communicate(timeout=15)
     status=sql(f"SELECT status||':'||(rules->'config'->>'startRoundsConfirmed') FROM public.events WHERE id='{EVENT}';")
-    if b.returncode==0 and status=="open:false":
-        print("KNOWN RELEASE BLOCKER: waiting roster RPC succeeds after open and clears start-round confirmation")
-    elif b.returncode!=0 and status=="open:true":
-        print("Characterization changed: waiting roster RPC rejected; inspect release policy")
-    else:
-        raise AssertionError((status,out,err))
+    assert b.returncode!=0 and "22023" in err and status=="open:true", (status,out,err)
+    print("PASS: opening wins; waiting roster import is rejected and confirmation remains true")
 finally:
     close(a,b)
 

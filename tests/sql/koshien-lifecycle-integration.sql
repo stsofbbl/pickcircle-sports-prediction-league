@@ -62,16 +62,23 @@ DO $$ BEGIN
 END $$;
 SELECT 'PASS: actual roster import -> confirm -> open -> member prediction with pre-deadline privacy';
 
--- Characterization only: known release blocker, NOT a desired acceptance condition.
--- In the existing RPC, a same-roster re-import after opening clears confirmation
--- while prediction submission still remains enabled. Roll back this repro.
-BEGIN;
-SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
-SET LOCAL ROLE authenticated;
-SELECT public.replace_koshien_representatives('lifecycle-draft',public.fixture_roster(),2027)->>'startRoundsConfirmed' AS reset_flag;
-DO $$ BEGIN
- IF EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft' AND status='open' AND rules->'config'->'startRoundsConfirmed'='false'::jsonb) THEN
- RAISE NOTICE 'KNOWN RELEASE BLOCKER: roster import clears confirmation after open';
- ELSE RAISE NOTICE 'Characterization changed: inspect new behavior'; END IF;
-END $$;
-ROLLBACK;
+-- Re-import and direct confirmation reset must both fail atomically after opening.
+SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+SET ROLE authenticated;
+DO $ BEGIN
+ BEGIN
+   PERFORM public.replace_koshien_representatives('lifecycle-draft',public.fixture_roster(),2027);
+   RAISE EXCEPTION 'open roster re-import succeeded';
+ EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+ BEGIN
+   UPDATE public.events SET rules=jsonb_set(rules,'{config,startRoundsConfirmed}','false')
+   WHERE id='lifecycle-draft';
+   RAISE EXCEPTION 'open confirmation reset succeeded';
+ EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+END $;
+RESET ROLE;
+DO $ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft'
+   AND status='open' AND rules->'config'->'startRoundsConfirmed'='true'::jsonb)
+ THEN RAISE EXCEPTION 'open event confirmation changed'; END IF;
+END $;
