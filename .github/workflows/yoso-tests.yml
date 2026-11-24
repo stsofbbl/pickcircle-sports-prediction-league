@@ -73,6 +73,8 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test < tests/sql/fixtures/koshien-schedule-production-functions.sql
           python3 scripts/assemble-koshien-integrity-test.py tests/sql/koshien-schedule-year-integration.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test
           python3 scripts/verify-koshien-draft-open-concurrency.py yoso_koshien_lifecycle_test
+          curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          bash scripts/verify-koshien-http.sh yoso_koshien_lifecycle_test
       - name: Verify Koshien cron gate in disposable PostgreSQL
         run: python3 scripts/verify-koshien-cron-gate.py
       - name: Run Koshien schedule and automation tests
@@ -86,7 +88,7 @@ jobs:
         run: |
           export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           test -n "$CHROME_BIN"
-          curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          test -s "$RUNNER_TEMP/yoso-supabase-sdk.js"
           node scripts/verify-supabase-browser.cjs "$RUNNER_TEMP/yoso-supabase-sdk.js"
           node scripts/verify-koshien-lifecycle-browser.cjs
       - name: Check Edge Functions
