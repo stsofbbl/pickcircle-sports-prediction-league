@@ -1214,7 +1214,7 @@
     const selectedEventId = String(eventId || "").trim();
     const eventQuery = () => supabase
       .from("events")
-      .select("id, league_id, name, preset_type, status, prediction_deadline, rules, created_by, updated_at")
+      .select("id, league_id, name, preset_type, status, archived_at, prediction_deadline, rules, created_by, updated_at")
       .eq("league_id", league.id)
       .eq("preset_type", "koshien");
     let eventResponse = selectedEventId
