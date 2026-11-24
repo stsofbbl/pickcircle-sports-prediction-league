@@ -234,10 +234,28 @@ DO $test$ BEGIN
     RAISE EXCEPTION 'authenticated user forged a reopen audit';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $test$;
+-- An archived result cannot be reopened by a non-admin. No audit row is written.
+RESET ROLE;
+SET request.jwt.claim.sub = '00000000-0000-0000-0000-000000000002';
+SET ROLE authenticated;
+DO $archive_reopen_member$ BEGIN
+  BEGIN
+    PERFORM public.reopen_koshien_results('test-finalize');
+    RAISE EXCEPTION 'non-admin reopened archived results';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  IF EXISTS (SELECT 1 FROM public.koshien_result_reopens
+      WHERE event_id='test-finalize') THEN
+    RAISE EXCEPTION 'denied archived reopen wrote an audit row';
+  END IF;
+END $archive_reopen_member$;
+RESET ROLE;
+SET request.jwt.claim.sub = '00000000-0000-0000-0000-000000000001';
+SET ROLE authenticated;
 SELECT public.reopen_koshien_results('test-finalize');
 DO $test$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.events
     WHERE id='test-finalize' AND status='resultWait'
+      AND archived_at IS NULL
       AND rules->'resultFlow'->>'status'='none') THEN
     RAISE EXCEPTION 'official reopen failed';
   END IF;
