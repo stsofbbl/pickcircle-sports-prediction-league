@@ -9,7 +9,7 @@ const eventId = "11111111-1111-4111-8111-111111111111";
 const leagueId = "22222222-2222-4222-8222-222222222222";
 const args = { eventId, leagueId, name: "大会", season: 2027, deadline: "2035-08-01T00:00:00Z" };
 
-function harness({ user = { id: "admin" }, role = "owner", membershipLeague = leagueId, insertError = null, response = null, missing = false } = {}) {
+function harness({ user = { id: "admin" }, role = "owner", membershipLeague = leagueId, insertError = null, response = null, missing = false, existingRow = null, readError = null } = {}) {
   const calls = [];
   const queries = [];
   class Query {
@@ -27,7 +27,10 @@ function harness({ user = { id: "admin" }, role = "owner", membershipLeague = le
       if (this.table === "league_members") return {data:{league_id:membershipLeague,role},error:null};
       if (this.table === "profiles") return {data:{display_name:"admin"},error:null};
       if (this.table === "events" && this.payload) return {data:response || this.payload,error:insertError};
-      if (this.table === "events" && missing) return {data:null,error:null};
+      if (this.table === "events" && (missing || existingRow || readError)) {
+        return {data: existingRow === "same" ? calls[0].payload
+          : (typeof existingRow === "function" ? existingRow(calls[0].payload) : existingRow), error: readError};
+      }
       throw Error("unexpected query: "+this.table);
     }
   }
@@ -70,8 +73,27 @@ test("draft creation rejects login, wrong club, regular member and invalid input
     assert.equal(h.calls.length,0);
   }
 });
-test("duplicate, permission error and wrong response never become success", async () => {
-  for(const opts of [{insertError:{code:"23505",message:"duplicate"}},{insertError:{code:"42501",message:"denied"}},{response:{id:"other"}}]){
+test("duplicate INSERT recovers only the same unchanged draft after ambiguous reload", async () => {
+  const h = harness({insertError:{code:"23505",message:"duplicate"},existingRow:"same"});
+  const result = await h.service.koshien.createDraft(args);
+  assert.equal(result.recovered,true);
+  assert.equal(result.eventId,eventId);
+  assert.equal(h.calls.length,1);
+  const eventReads = h.queries.filter(x=>x.table==="events" && x.filters.id);
+  assert.equal(eventReads.length,1);
+  assert.equal(eventReads[0].filters.league_id,leagueId);
+});
+test("unrelated duplicate, inaccessible row, read error and wrong response never become success", async () => {
+  const duplicate={code:"23505",message:"duplicate"};
+  for(const opts of [
+    {insertError:duplicate,missing:true},
+    {insertError:duplicate,readError:{code:"42501",message:"denied"}},
+    {insertError:duplicate,existingRow:{id:eventId,league_id:leagueId,status:"draft"}},
+    {insertError:duplicate,existingRow:payload=>({...payload,name:"別大会"})},
+    {insertError:duplicate,existingRow:payload=>({...payload,rules:{...payload.rules,config:{...payload.rules.config,teams:["fake"]}}})},
+    {insertError:{code:"42501",message:"denied"}},
+    {response:{id:"other"}},
+  ]){
     const h=harness(opts);
     await assert.rejects(h.service.koshien.createDraft(args));
     assert.equal(h.calls.length,1);

@@ -1213,6 +1213,36 @@
       .insert(payload)
       .select("id,league_id,preset_type,status,season")
       .single();
+    if (error?.code === "23505") {
+      // The previous INSERT may have committed while its response or strict reload failed.
+      // Recover only this exact untouched draft through the caller's normal RLS.
+      const { data: existing, error: readError } = await supabase.from("events")
+        .select("id,league_id,name,preset_type,sport_type,season,status,prediction_deadline,rules,created_by")
+        .eq("id", id)
+        .eq("league_id", requestedLeagueId)
+        .maybeSingle();
+      if (readError) throw koshienSaveError("event_create_recovery", readError, "保存済み大会を確認できませんでした。");
+      const sameJson = (left, right) => {
+        if (left === right) return true;
+        if (!left || !right || typeof left !== "object" || typeof right !== "object"
+          || Array.isArray(left) !== Array.isArray(right)) return false;
+        const keys = Object.keys(left);
+        return keys.length === Object.keys(right).length
+          && keys.every((key) => Object.hasOwn(right, key) && sameJson(left[key], right[key]));
+      };
+      const draftMatches = existing?.id === id
+        && existing.league_id === requestedLeagueId
+        && existing.name === normalizedName
+        && existing.preset_type === "koshien"
+        && existing.sport_type === "baseball"
+        && String(existing.season) === String(year)
+        && existing.status === "draft"
+        && Date.parse(existing.prediction_deadline) === deadlineMs
+        && existing.created_by === user.id
+        && sameJson(existing.rules, payload.rules);
+      if (!draftMatches) throw koshienSaveError("event_create", error, "新規大会を保存できませんでした。");
+      return { ok: true, eventId: id, status: "draft", recovered: true };
+    }
     if (error) throw koshienSaveError("event_create", error, "新規大会を保存できませんでした。");
     if (String(data?.id || "") !== id
       || String(data?.league_id || "") !== requestedLeagueId
