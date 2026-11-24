@@ -104,9 +104,9 @@ test("server error or refresh error never reports an accepted finalization", asy
 
 // Server-side reopen must be followed by a fresh snapshot; do not trust
 // an optimistic local status or claim success on a failed refresh.
-function reopenActionHarness({ rpcFailure = false, refreshFailure = false } = {}) {
+function reopenActionHarness({ rpcFailure = false, refreshFailure = false, archived = false, archiveStillSet = false } = {}) {
   const calls = [];
-  const state = { event: { id: "event-1", templateId: "koshien", status: "finalized",
+  const state = { event: { id: "event-1", templateId: "koshien", status: archived ? "archive" : "finalized",
     approvalPolicy: "admin", resultFlow: { status: "finalized" } } };
   const ctx = {
     state,
@@ -135,7 +135,7 @@ function reopenActionHarness({ rpcFailure = false, refreshFailure = false } = {}
       if (refreshFailure) return null;
       state.event.status = "resultWait";
       state.event.resultFlow.status = "none";
-      return { ok: true };
+      return { ok: true, event: { archived_at: archiveStillSet ? "2026-11-24T00:00:00Z" : null } };
     },
   };
   vm.createContext(ctx);
@@ -153,6 +153,19 @@ test("official reopen reflects server-owned status only after successful reload"
   assert.deepEqual(calls.map(c => c[0]), ["rpc", "refresh", "message", "render"]);
   assert.equal(calls.find(c => c[0] === "message")[1], "success");
 });
+test("archived reopen requires a cleared archive timestamp after server reload", async () => {
+  const restored = reopenActionHarness({ archived: true });
+  await restored.ctx.reopenFinalizedResults();
+  assert.equal(restored.state.event.status, "resultWait");
+  assert.ok(restored.calls.some(c => c[0] === "message" && c[1] === "success"));
+  const stale = reopenActionHarness({ archived: true, archiveStillSet: true });
+  await stale.ctx.reopenFinalizedResults();
+  assert.equal(stale.state.event.status, "archive");
+  assert.ok(stale.calls.some(c => c[0] === "message" && c[1] === "error"));
+  assert.match(appSource, /アーカイブと結果確定を取り消しますか/);
+  assert.match(serviceSource, /status, archived_at, prediction_deadline/);
+});
+
 test("failed reopen or refresh never reports confirmed cancellation", async () => {
   for (const options of [{ rpcFailure: true }, { refreshFailure: true }]) {
     const {ctx, state, calls} = reopenActionHarness(options);
