@@ -105,3 +105,29 @@ test("online Koshien status buttons do not offer local-only transitions", () => 
   assert.match(appSource, /event.status === "finalized" && finalized \? \["archive"\] : \[\]/);
   assert.match(appSource, /await archiveOnlineKoshienEvent\(item, statusButton.dataset.eventStatus\)/);
 });
+
+test("online finalized Koshien DELETE UI has the same guard as the RLS policy", () => {
+  const start = appSource.indexOf("function isProtectedOnlineKoshienEvent(event) {");
+  const end = appSource.indexOf("let koshienAdminFinalizeBusy", start);
+  assert.ok(start >= 0 && end > start);
+  const context = {
+    isSupabaseAuthEnabled: () => true,
+    currentAuthUser: () => ({ id: "owner" }),
+    baseTemplateId: (id) => id,
+  };
+  vm.createContext(context);
+  vm.runInContext(appSource.slice(start, end), context);
+  const guarded = context.isProtectedOnlineKoshienEvent;
+  const event = (templateId, status, resultStatus) => ({
+    templateId, status, resultFlow: { status: resultStatus },
+  });
+  assert.equal(guarded(event("koshien", "finalized", "finalized")), true);
+  assert.equal(guarded(event("koshien", "archive", "none")), true);
+  assert.equal(guarded(event("koshien", "resultWait", "finalized")), true);
+  assert.equal(guarded(event("koshien", "resultWait", "none")), false);
+  assert.equal(guarded(event("worldCup", "finalized", "finalized")), false);
+  context.currentAuthUser = () => null;
+  assert.equal(guarded(event("koshien", "finalized", "finalized")), false);
+  assert.match(appSource, /isProtectedOnlineKoshienEvent\(event\) \? "" : /);
+  assert.match(appSource, /if \(isProtectedOnlineKoshienEvent\(target\)\)/);
+});

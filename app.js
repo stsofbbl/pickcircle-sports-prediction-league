@@ -4198,6 +4198,15 @@ function isResultFinalized(event = state.event) {
   return event?.resultFlow?.status === "finalized";
 }
 
+function isProtectedOnlineKoshienEvent(event) {
+  return isSupabaseAuthEnabled()
+    && Boolean(currentAuthUser())
+    && baseTemplateId(event?.templateId) === "koshien"
+    && (event.status === "finalized"
+      || event.status === "archive"
+      || event.resultFlow?.status === "finalized");
+}
+
 let koshienAdminFinalizeBusy = false;
 
 async function finalizeKoshienOnlineAsAdmin() {
@@ -4447,7 +4456,7 @@ function renderTournamentManageList() {
                 : `<button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
                   <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
                   <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>`}
-              <button type="button" class="danger-action" data-event-delete data-event-id="${escapeAttr(event.id)}">削除</button>
+              ${isProtectedOnlineKoshienEvent(event) ? "" : `<button type="button" class="danger-action" data-event-delete data-event-id="${escapeAttr(event.id)}">削除</button>`}
             ` : ""}
           </div>
         </article>
@@ -7782,6 +7791,10 @@ document.addEventListener("click", async (event) => {
     const eventId = deleteButton.dataset.eventId;
     const target = (state.events || []).find((candidate) => candidate.id === eventId);
     if (!target) return;
+    if (isProtectedOnlineKoshienEvent(target)) {
+      alert("結果確定済み・アーカイブ済みの甲子園大会は削除できません。");
+      return;
+    }
     if ((state.events || []).length <= 1) {
       alert("最後の大会は削除できません。");
       return;
