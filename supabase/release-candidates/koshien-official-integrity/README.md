@@ -14,3 +14,16 @@ These SQL files are **not applied to Supabase** and must not be run outside an a
 5. Run isolated authenticated E2E as admin/member and verify old finalized results/scores unchanged, no duplicate event, strict reload, valid prediction. No real tournament or user data writes without separate approval.
 
 Known gap: direct writes to match dates/results do not pass through schedule RPC validation. The import FKs cover identity, not authenticity of scores or arbitrary date validity. Full-schema club deletion and genuine Supabase browser E2E remain release blockers. Candidate fixture tests alone are insufficient for production approval.
+
+## Migration history drift (read-only inventory, 2026-11-25 JST)
+
+At branch `8b8150f`, GitHub contained 54 migration files; production history contained 57 recorded migrations. By migration name: 3 exact version matches, 47 same-name entries with different versions, 4 Git-only names and 7 DB-only names. A name match alone does not prove equal SQL. **Never run a bulk `db push`, replay all repo migrations or repair historical versions blindly.** First reconcile history and effective definitions in isolation; do not alter production migration history as part of this PR.
+
+The three PR #58 draft lifecycle SQL files not yet present by name in production history are:
+- `20261124100000_guard_koshien_draft_open.sql`
+- `20261124110000_keep_open_koshien_rounds_confirmed.sql`
+- `20261124120000_keep_confirmed_koshien_start_rounds.sql`
+
+The fourth Git-only name is `allow_cron_automation_secret`; production has `allow_cron_to_read_automation_secret`. This is a prior history discrepancy, not a #58 migration; confirm live privilege rather than replaying it. Do not assume the listed three are absent from effective DB solely from their names; verify definitions/trigger inventory before approved application.
+
+The auto-sync deployment wrapper on the draft branch pins the reviewed worker at `c6ad7ceff3a53f3855c9dd89e08cff45a93f069f`. Existing core override at `2510ca0bc737796d6345420ca806d4f81e72cda2` is retained (identical Git blob to the new worker's core). Deno CI verifies this immutable dependency. Updating the draft pin does not deploy the Edge Function; actual deployment and post-deploy verification remain separate approval gates.

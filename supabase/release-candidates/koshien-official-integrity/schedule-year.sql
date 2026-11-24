@@ -38,4 +38,3 @@ BEGIN
   EXECUTE modified;
  END LOOP;
 END $test$;
-
