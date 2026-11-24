@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 import { parseJhbfRepresentativeTeamsHtml, parseJhbfResultsHtml, parseJhbfStartRoundsHtml } from "../_shared/jhbf-parser.mjs";
 import { authorizeJhbfEventFetch } from "../_shared/jhbf-event-fetch-guard.mjs";
+import { isJhbfDateKey, jhbfResultDates, jhbfResultSourceUrl, assertSameJhbfResultSource } from "../_shared/jhbf-result-source.mjs";
 
 const CORS_HEADERS = Object.freeze({
   "Access-Control-Allow-Origin": "*",
@@ -46,29 +47,12 @@ function parseRequest(value: unknown): FetchRequest {
   if (!competitionType) throw new Error("competitionType must be summer or senbatsu");
   if (!Number.isInteger(year) || year < 2020 || year > 2035) throw new Error("year must be between 2020 and 2035");
   if (kind === "results") {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(baseDate) || Number.isNaN(Date.parse(`${baseDate}T00:00:00+09:00`))) {
-      throw new Error("baseDate must be YYYY-MM-DD");
-    }
-    if (Number(baseDate.slice(0, 4)) !== year) throw new Error("baseDate year must match year");
+    if (!isJhbfDateKey(baseDate, year)) throw new Error("baseDate must be a valid date in the requested year");
   }
   if (["representatives", "start_rounds"].includes(kind) && competitionType !== "summer") {
     throw new Error(`${kind} is only supported for summer`);
   }
   return { kind, eventId, competitionType, year, baseDate: kind === "results" ? baseDate : undefined };
-}
-
-function dateInJapan(value: string, offsetDays: number): string {
-  const date = new Date(`${value}T00:00:00+09:00`);
-  date.setUTCDate(date.getUTCDate() + offsetDays);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(date);
-}
-
-function sourceUrlFor(request: FetchRequest, date: string): URL {
-  const compactDate = date.replaceAll("-", "");
-  const root = request.competitionType === "summer" ? "sensyuken" : "senbatsu";
-  return new URL(`https://www.jhbf.or.jp/${root}/${request.year}/schedule/schedule_${compactDate}.html`);
 }
 
 function representativeSourceUrlFor(request: FetchRequest): URL {
@@ -96,6 +80,7 @@ async function fetchAllowedHtml(initialUrl: URL, request: FetchRequest): Promise
   let current = initialUrl;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     assertAllowedJhbfUrl(current, request);
+    if (request.kind === "results") assertSameJhbfResultSource(current, initialUrl);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let response: Response;
@@ -216,14 +201,14 @@ Deno.serve(async (req: Request) => {
   }
 
   const fetchId = String(fetchState?.fetchId || fetchState?.fetch_id || "");
-  const dates = [dateInJapan(request.baseDate || "", 0), dateInJapan(request.baseDate || "", -1)];
+  const dates = jhbfResultDates(request.baseDate || "", request.year);
   const sourceUrls: string[] = [];
   const rows: Record<string, unknown>[] = [];
   const warnings: string[] = [];
 
   try {
     for (const matchDate of dates) {
-      const requestedUrl = sourceUrlFor(request, matchDate);
+      const requestedUrl = jhbfResultSourceUrl(request.competitionType, request.year, matchDate);
       assertAllowedJhbfUrl(requestedUrl, request);
       const fetched = await fetchAllowedHtml(requestedUrl, request);
       sourceUrls.push(fetched.url);
