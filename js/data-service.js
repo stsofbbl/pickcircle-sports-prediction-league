@@ -1170,6 +1170,59 @@
     };
   }
 
+  // A new event has no loaded snapshot. Create a draft explicitly; never upsert
+  // or copy a local event's predictions, results, roster or scores into it.
+  async function createKoshienDraft({ eventId, leagueId, name, season, deadline } = {}) {
+    const id = String(eventId || "").trim();
+    const requestedLeagueId = String(leagueId || "").trim();
+    const normalizedName = String(name || "").trim();
+    const year = Number(season);
+    const deadlineMs = Date.parse(deadline);
+    if (!shouldAutoSaveKoshien() || !/^[0-9a-f-]{36}$/i.test(id)
+      || !requestedLeagueId || !normalizedName || normalizedName.length > 120
+      || !Number.isInteger(year) || year < 2020 || year > 2035
+      || !Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) {
+      throw new Error("新規大会の年度・名前・未来の締切を確認してください。");
+    }
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user?.id) throw new Error("オンラインログインが必要です。");
+    const league = await ensureLeagueMembership();
+    const membership = await getCurrentMembership(user.id);
+    if (String(league?.id || "") !== requestedLeagueId
+      || String(membership?.league_id || "") !== requestedLeagueId
+      || !isClubAdminRole(clubRoleFromMembership(membership))) {
+      throw new Error("選択中のクラブの管理者権限が必要です。");
+    }
+    const payload = {
+      id, league_id: requestedLeagueId, name: normalizedName,
+      preset_type: "koshien", sport_type: "baseball", season: String(year),
+      status: "draft", prediction_deadline: new Date(deadlineMs).toISOString(),
+      rules: {
+        approvalPolicy: "admin",
+        resultFlow: { status: "none", submittedBy: "", submittedAt: "", approvals: {}, finalizedAt: "" },
+        config: {
+          teams: [], teamMeta: {}, startRoundsConfirmed: false,
+          externalResults: { competitionType: "summer", year },
+        },
+        localEventId: id,
+      },
+      created_by: user.id,
+    };
+    const { data, error } = await supabase.from("events")
+      .insert(payload)
+      .select("id,league_id,preset_type,status,season")
+      .single();
+    if (error) throw koshienSaveError("event_create", error, "新規大会を保存できませんでした。");
+    if (String(data?.id || "") !== id
+      || String(data?.league_id || "") !== requestedLeagueId
+      || data?.preset_type !== "koshien" || data?.status !== "draft"
+      || String(data?.season || "") !== String(year)) {
+      throw new Error("新規大会の保存結果を確認できませんでした。再読込してください。");
+    }
+    return { ok: true, eventId: id, status: "draft" };
+  }
+
   async function archiveKoshienEvent({ eventId } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     if (!normalizedEventId) throw new Error("アーカイブする大会を指定してください。");
@@ -1199,7 +1252,7 @@
     return Date.now() >= Date.parse(event.prediction_deadline);
   }
 
-  async function loadKoshienSnapshot({ eventId } = {}) {
+  async function loadKoshienSnapshot({ eventId, strictEventId = false } = {}) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
 
     const supabase = await supabaseClient();
@@ -1220,7 +1273,7 @@
     let eventResponse = selectedEventId
       ? await eventQuery().eq("id", selectedEventId).maybeSingle()
       : await eventQuery().order("updated_at", { ascending: false }).limit(1);
-    if (selectedEventId && !eventResponse.error && !eventResponse.data) {
+    if (selectedEventId && !strictEventId && !eventResponse.error && !eventResponse.data) {
       eventResponse = await eventQuery().order("updated_at", { ascending: false }).limit(1);
     }
     const events = Array.isArray(eventResponse.data)
@@ -1229,7 +1282,7 @@
     const eventError = eventResponse.error;
     if (eventError) throw eventError;
     const event = events?.[0];
-    if (!event) return { skipped: true, reason: "koshien event is not found", league, membership };
+    if (!event || (strictEventId && String(event.id) !== selectedEventId)) return { skipped: true, reason: "koshien event is not found", league, membership };
 
     const readResultRevision = async () => {
       const { data, error } = await supabase.rpc("koshien_admin_result_revision", {
@@ -1409,6 +1462,7 @@
       removeMember: removeClubMember,
     },
     koshien: {
+      createDraft: createKoshienDraft,
       saveSnapshot: saveKoshienSnapshot,
       loadSnapshot: loadKoshienSnapshot,
       replaceRepresentatives: replaceKoshienRepresentatives,
