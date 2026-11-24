@@ -12,6 +12,8 @@ CREATE TABLE public.events(
   id text PRIMARY KEY, league_id uuid NOT NULL, preset_type text NOT NULL,
   status text NOT NULL, rules jsonb NOT NULL DEFAULT '{}'::jsonb,
   updated_at timestamptz NOT NULL DEFAULT now());
+ALTER TABLE public.events ADD CONSTRAINT events_league_id_fkey
+  FOREIGN KEY (league_id) REFERENCES public.leagues(id) ON DELETE CASCADE;
 CREATE TABLE public.teams(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),event_id text);
 CREATE TABLE public.event_teams(id bigserial PRIMARY KEY,event_id text NOT NULL);
 CREATE TABLE public.matches(
@@ -68,6 +70,7 @@ $f$;
 GRANT USAGE ON SCHEMA public,auth TO authenticated;
 GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated;
 GRANT SELECT,UPDATE ON public.events,public.matches,public.scores,public.results,public.teams,public.event_teams TO authenticated;
+GRANT DELETE ON public.events TO authenticated;
 INSERT INTO public.leagues VALUES('00000000-0000-0000-0000-000000000010');
 INSERT INTO public.league_members VALUES
  ('00000000-0000-0000-0000-000000000010',
@@ -107,3 +110,5 @@ CREATE POLICY events_select_members ON public.events FOR SELECT TO authenticated
 CREATE POLICY events_update_admin ON public.events FOR UPDATE TO authenticated
   USING (public.is_league_admin(league_id))
   WITH CHECK (public.is_league_admin(league_id));
+CREATE POLICY events_delete_admin ON public.events FOR DELETE TO authenticated
+  USING (public.is_league_admin(league_id));
