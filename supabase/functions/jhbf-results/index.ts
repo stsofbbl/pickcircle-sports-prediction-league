@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 import { parseJhbfRepresentativeTeamsHtml, parseJhbfResultsHtml, parseJhbfStartRoundsHtml } from "../_shared/jhbf-parser.mjs";
+import { authorizeJhbfEventFetch } from "../_shared/jhbf-event-fetch-guard.mjs";
 
 const CORS_HEADERS = Object.freeze({
   "Access-Control-Allow-Origin": "*",
@@ -157,6 +158,10 @@ Deno.serve(async (req: Request) => {
   } catch (error) {
     return jsonResponse({ error: "invalid_request", message: errorMessage(error) }, 400);
   }
+
+  // Check the persisted tournament and caller before any fetch log or external request.
+  const guard = await authorizeJhbfEventFetch(supabase, request);
+  if (!guard.ok) return jsonResponse({ error: guard.error, message: guard.message }, guard.status);
 
   if (request.kind === "representatives") {
     try {
