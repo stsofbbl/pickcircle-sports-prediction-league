@@ -86,7 +86,7 @@ async function main() {
   assert.equal((await b.service.loadSnapshot({eventId:randomUUID(),strictEventId:true})).skipped,true);
   await assert.rejects(m.service.createDraft({...args,eventId:randomUUID()}));
   denied(await m.client.from("events").insert({id:randomUUID(),league_id:leagueId,preset_type:"koshien",status:"draft",created_by:member}));
-  assert.deepEqual(ok(await o.client.from("events").select("id").eq("id",eventId)),[]);
+  assert.equal(ok(await o.client.from("events").select("id").eq("id",eventId)).length,0);
   denied(await o.client.rpc("koshien_admin_result_revision",{p_event_id:eventId}));
   for (const opts of [{forged:true},{expired:true}]) {
     const bad=sdkFor(owner,opts);
@@ -118,8 +118,8 @@ async function main() {
   assert.equal(mine.predictions.length,1);
   assert.equal(admin.predictions.length,0);
   assert.equal(ok(await m.client.from("phase1_picks").select("id,captain").eq("event_id",eventId)).length,8);
-  assert.deepEqual(ok(await a.client.from("predictions").select("user_id").eq("event_id",eventId)),[]);
-  assert.deepEqual(ok(await a.client.from("phase1_picks").select("id").eq("event_id",eventId)),[]);
+  assert.equal(ok(await a.client.from("predictions").select("user_id").eq("event_id",eventId)).length,0);
+  assert.equal(ok(await a.client.from("phase1_picks").select("id").eq("event_id",eventId)).length,0);
   await assert.rejects(a.service.replaceRepresentatives({eventId,rows:roster,year:2027}));
   assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"open");
   console.log("PASS: HTTP roster 49, confirmed start rounds, admin open, member prediction, pre-deadline privacy and open roster guard");
