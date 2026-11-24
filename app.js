@@ -2995,7 +2995,7 @@ function renderActiveEventManager() {
   const finalized = isResultFinalized(event);
   const canEditSettings = isAdmin && !finalized;
   const canEditResults = isAdmin && !finalized;
-  const onlineKoshien = isSupabaseAuthEnabled() && Boolean(currentAuthUser()) && base === "koshien";
+  const onlineKoshien = isSupabaseAuthEnabled() && base === "koshien";
   const availableStatuses = onlineKoshien
     ? (event.status === "finalized" && finalized ? ["archive"] : [])
     : ["open", "resultWait", "archive"];
@@ -4440,7 +4440,7 @@ function renderTournamentManageList() {
           <div class="tournament-manage-actions">
             <button type="button" data-event-manage="select" data-event-id="${escapeAttr(event.id)}">選択</button>
             ${canManage ? `
-              ${onlineClubMode && baseTemplateId(event.templateId) === "koshien"
+              ${isSupabaseAuthEnabled() && baseTemplateId(event.templateId) === "koshien"
                 ? (isActive && event.status === "finalized" && isResultFinalized(event)
                   ? `<button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>`
                   : "")
@@ -7808,7 +7808,7 @@ document.addEventListener("click", async (event) => {
     if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
     const item = (state.events || []).find((candidate) => candidate.id === statusButton.dataset.eventId);
     if (!item) return;
-    if (isSupabaseAuthEnabled() && currentAuthUser() && baseTemplateId(item.templateId) === "koshien") {
+    if (isSupabaseAuthEnabled() && baseTemplateId(item.templateId) === "koshien") {
       await archiveOnlineKoshienEvent(item, statusButton.dataset.eventStatus);
       return;
     }
