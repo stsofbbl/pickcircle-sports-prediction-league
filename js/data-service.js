@@ -1282,6 +1282,33 @@
     return Date.now() >= Date.parse(event.prediction_deadline);
   }
 
+  // Summaries are deliberately separate from the loaded scoring/prediction snapshot.
+  async function listKoshienEvents({ leagueId } = {}) {
+    const id = String(leagueId || "").trim();
+    if (!id || !shouldAutoSaveKoshien()) throw new Error("オンラインクラブを選択してください。");
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user?.id) throw new Error("オンラインログインが必要です。");
+    const league = await ensureLeagueMembership();
+    const membership = await getCurrentMembership(user.id);
+    if (String(league?.id || "") !== id || String(membership?.league_id || "") !== id) {
+      throw new Error("選択中のクラブへの参加を確認できませんでした。");
+    }
+    const { data, error } = await supabase.from("events")
+      .select("id,league_id,name,preset_type,status,season,prediction_deadline,archived_at,created_at")
+      .eq("league_id", id)
+      .eq("preset_type", "koshien")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(101);
+    if (error) throw koshienSaveError("event_list", error, "大会一覧を取得できませんでした。");
+    if (!Array.isArray(data) || data.some(row => !row?.id || String(row.league_id) !== id || row.preset_type !== "koshien"
+      || !["draft","open","resultWait","finalized","archive"].includes(row.status))) {
+      throw new Error("大会一覧の取得結果を確認できませんでした。");
+    }
+    return { leagueId: id, userId: String(user.id), events: data.slice(0, 100), truncated: data.length > 100 };
+  }
+
   async function loadKoshienSnapshot({ eventId, strictEventId = false } = {}) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
 
@@ -1493,6 +1520,7 @@
     },
     koshien: {
       createDraft: createKoshienDraft,
+      listEvents: listKoshienEvents,
       saveSnapshot: saveKoshienSnapshot,
       loadSnapshot: loadKoshienSnapshot,
       replaceRepresentatives: replaceKoshienRepresentatives,

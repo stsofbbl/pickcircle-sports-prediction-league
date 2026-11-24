@@ -9,24 +9,25 @@ const eventId = "11111111-1111-4111-8111-111111111111";
 const leagueId = "22222222-2222-4222-8222-222222222222";
 const args = { eventId, leagueId, name: "大会", season: 2027, deadline: "2035-08-01T00:00:00Z" };
 
-function harness({ user = { id: "admin" }, role = "owner", membershipLeague = leagueId, insertError = null, response = null, missing = false, existingRow = null, readError = null } = {}) {
+function harness({ user = { id: "admin" }, role = "owner", membershipLeague = leagueId, insertError = null, response = null, missing = false, existingRow = null, readError = null, listRows = null, listError = null } = {}) {
   const calls = [];
   const queries = [];
   class Query {
     constructor(table) { this.table = table; this.filters = {}; }
-    select() { return this; }
+    select(columns) { this.columns = columns; return this; }
     eq(k,v) { this.filters[k] = v; return this; }
     order() { return this; }
-    limit() { return this.resolve(); }
+    limit(n) { this.limitCount = n; return this.resolve(); }
     maybeSingle() { return this.resolve(); }
     single() { return this.resolve(); }
     insert(payload) { this.payload = payload; calls.push({table:this.table, payload}); return this; }
     resolve() {
-      queries.push({table:this.table, filters:this.filters});
+      queries.push({table:this.table, filters:this.filters, columns:this.columns, limit:this.limitCount});
       if (this.table === "leagues") return {data:[{id:leagueId,invite_code:"club"}],error:null};
       if (this.table === "league_members") return {data:{league_id:membershipLeague,role},error:null};
       if (this.table === "profiles") return {data:{display_name:"admin"},error:null};
       if (this.table === "events" && this.payload) return {data:response || this.payload,error:insertError};
+      if (this.table === "events" && this.limitCount === 101) return {data:listRows,error:listError};
       if (this.table === "events" && (missing || existingRow || readError)) {
         return {data: existingRow === "same" ? calls[0].payload
           : (typeof existingRow === "function" ? existingRow(calls[0].payload) : existingRow), error: readError};
@@ -113,4 +114,75 @@ test("online creation uses a separate confirmed path, exact reload and preserves
   assert.match(app,/loadedEventId !== displayedEventId/);
   assert.match(app,/if \(state\.event\?\.status === "draft"\)/);
   assert.match(app,/button\.disabled = onlineKoshien/);
+});
+
+const catalogRow = { id:eventId, league_id:leagueId, preset_type:"koshien", name:"2027大会", status:"draft", season:"2027" };
+test("member can read the selected club catalog without downloading scores or predictions", async () => {
+  const h = harness({ role:"member", listRows:[catalogRow] });
+  const result = await h.service.koshien.listEvents({leagueId});
+  assert.equal(result.events[0].id,eventId);
+  assert.equal(result.userId,"admin");
+  const query = h.queries.find(q=>q.table==="events");
+  assert.equal(query.filters.league_id,leagueId);
+  assert.equal(query.filters.preset_type,"koshien");
+  assert.equal(query.limit,101);
+  assert.doesNotMatch(query.columns,/rules|predictions|scores/);
+  assert.equal(h.calls.length,0);
+});
+test("catalog fails closed for cross-club rows, missing membership and server error", async () => {
+  for(const opts of [{membershipLeague:"wrong"},{listRows:[{...catalogRow,league_id:"wrong"}]},{listError:{message:"offline"}}]) {
+    const h=harness(opts);
+    await assert.rejects(h.service.koshien.listEvents({leagueId}));
+    assert.equal(h.calls.length,0);
+  }
+});
+test("catalog marks an incomplete list rather than claiming all events were downloaded", async () => {
+  const h=harness({listRows:Array.from({length:101},(_,i)=>({...catalogRow,id:String(i)}))});
+  const result=await h.service.koshien.listEvents({leagueId});
+  assert.equal(result.events.length,100);
+  assert.equal(result.truncated,true);
+});
+function catalogUiHarness() {
+  const start=app.indexOf("function onlineKoshienCatalogScope()");
+  const end=app.indexOf("function renderTournamentManageList()",start);
+  const queue=[], applied=[], alerts=[];
+  const ctx=vm.createContext({
+    onlineLeagueId:leagueId, onlineKoshienCatalog:{scope:"",rows:[]}, onlineKoshienCatalogSequence:0,
+    currentAuthUser:()=>({id:"admin"}), isSupabaseAuthEnabled:()=>true,
+    window:{YosoDataService:{shouldAutoSaveKoshien:()=>true,koshien:{listEvents:()=>new Promise(resolve=>queue.push(resolve))}},alert:m=>alerts.push(m)},
+    els:{onlineKoshienCatalog:null}, state:{events:[],event:{id:"previous"},activeEventId:"previous"},
+    loadedKoshienOnlineEventId:"previous", pendingKoshienLoadPromise:null, onlineKoshienDraftCreating:false,
+    baseTemplateId:x=>x,
+    setActiveEvent:id=>applied.push(["local",id]), render(){},
+    loadKoshienOnlineState:async opts=>{applied.push(["read",opts]);return null;},
+  });
+  vm.runInContext(app.slice(start,end),ctx);
+  return {ctx,queue,applied,alerts};
+}
+test("late catalog response after club switch is discarded; metadata never becomes scoring state", async () => {
+  const {ctx,queue}=catalogUiHarness();
+  const first=ctx.refreshOnlineKoshienCatalog();
+  ctx.onlineLeagueId="other";
+  const second=ctx.refreshOnlineKoshienCatalog();
+  queue[0]({leagueId,userId:"admin",events:[catalogRow]});
+  await first;
+  assert.equal(ctx.onlineKoshienCatalog.scope,JSON.stringify(["admin","other"]));
+  queue[1]({leagueId:"other",userId:"admin",events:[]});
+  await second;
+  assert.equal(ctx.onlineKoshienCatalog.rows.length,0);
+  assert.equal(ctx.state.events.length,0);
+  assert.equal(ctx.state.event.id,"previous");
+});
+test("catalog selection requires strict server load and never locally switches on failure", async () => {
+  const {ctx,queue,applied,alerts}=catalogUiHarness();
+  const request=ctx.refreshOnlineKoshienCatalog();
+  queue[0]({leagueId,userId:"admin",events:[catalogRow]});
+  await request;
+  await ctx.selectTournamentFromUi(eventId);
+  assert.equal(applied.length,1);
+  assert.equal(applied[0][0],"read");
+  assert.equal(applied[0][1].exactEventId,eventId);
+  assert.equal(applied[0][1].expectedLeagueId,leagueId);
+  assert.equal(ctx.state.event.id,"previous");
+  assert.equal(alerts.length,1);
 });

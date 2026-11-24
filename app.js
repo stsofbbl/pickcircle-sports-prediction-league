@@ -253,6 +253,7 @@ const els = {
   activeEventManager: document.querySelector("#activeEventManager"),
   archiveList: document.querySelector("#archiveList"),
   tournamentManageList: document.querySelector("#tournamentManageList"),
+  onlineKoshienCatalog: document.querySelector("#onlineKoshienCatalog"),
   approvalRuleText: document.querySelector("#approvalRuleText"),
   approvalPolicyGroup: document.querySelector("#approvalPolicyGroup"),
   leagueName: document.querySelector("#leagueName"),
@@ -315,6 +316,8 @@ let authRecoveryMode = false;
 let lastAuthActivityWrite = 0;
 let onlineAuthUser = null;
 let onlineLeagueId = "";
+let onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
+let onlineKoshienCatalogSequence = 0;
 let onlineKoshienEventId = "";
 let onlineLeagueMembers = [];
 let onlineLeagueAdminMessage = "";
@@ -469,6 +472,8 @@ function applyOnlineAuthUser(user) {
   const nextUserId = String(user?.id || "");
   onlineAuthUser = user || null;
   if (previousUserId !== nextUserId) {
+    onlineKoshienCatalogSequence++;
+    onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
     loadedKoshienOnlineEventId = "";
     lastKoshienOnlineLoadUserId = "";
   }
@@ -2770,6 +2775,8 @@ function saveActiveClub(club) {
   });
   onlineLeagueId = leagueId;
   if (leagueChanged) {
+    onlineKoshienCatalogSequence++;
+    onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
     onlineKoshienEventId = "";
     loadedKoshienOnlineEventId = "";
   }
@@ -2804,6 +2811,7 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
     clubPathwayState.messageKind = "error";
   }
   if (renderAfter) renderClubPathways();
+  await refreshOnlineKoshienCatalog();
 }
 
 async function handleClubPathwayAction(button) {
@@ -4469,6 +4477,7 @@ async function createTournamentFromSettingsAction(options = {}) {
       throw new Error("大会は保存されましたが、再取得を確認できませんでした。再読込してください。");
     }
     pendingOnlineKoshienDraftRequest = null;
+    await refreshOnlineKoshienCatalog();
     if (els.newTournamentName) els.newTournamentName.value = "";
     setConnectionMessage("新しい甲子園大会を準備中として保存しました。");
     render();
@@ -4524,9 +4533,97 @@ function renderArchive() {
     : `<div class="history-row"><strong>アーカイブ済みの大会はまだありません</strong><small>結果確定後の大会がここに入ります。</small></div>`;
 }
 
+function onlineKoshienCatalogScope() {
+  const userId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  if (!isSupabaseAuthEnabled() || !userId || !leagueId || !window.YosoDataService?.shouldAutoSaveKoshien?.()) return "";
+  return JSON.stringify([userId, leagueId]);
+}
+
+function renderOnlineKoshienCatalog() {
+  const host = els.onlineKoshienCatalog;
+  if (!host) return;
+  const scope = onlineKoshienCatalogScope();
+  host.hidden = !scope;
+  if (!scope) { host.innerHTML = ""; return; }
+  const view = onlineKoshienCatalog.scope === scope ? onlineKoshienCatalog : { rows: [], busy: false, error: "", truncated: false };
+  const label = view.busy ? "読込中…" : "オンライン大会を更新";
+  host.innerHTML = `
+    <button class="ghost-button small-button" type="button" data-online-koshien-list-refresh ${view.busy ? "disabled" : ""}>${label}</button>
+    ${view.error ? `<p class="auth-message is-error" role="status">${escapeHtml(view.error)}</p>` : ""}
+    ${view.truncated ? '<p class="field-note">最新100件を表示しています。</p>' : ""}
+    ${view.rows.map(row => `
+      <article class="tournament-manage-row">
+        <div>
+          <span>${escapeHtml(statusLabel(row.status))}${row.season ? " / " + escapeHtml(String(row.season)) + "年" : ""}</span>
+          <strong>${escapeHtml(row.name || "甲子園大会")}</strong>
+          <small>${row.prediction_deadline ? "締切 " + escapeHtml(formatDeadline(row.prediction_deadline)) : ""}</small>
+        </div>
+        <button type="button" data-online-koshien-select="${escapeAttr(row.id)}">${row.id === loadedKoshienOnlineEventId && row.id === state.activeEventId ? "再読込" : "選択"}</button>
+      </article>`).join("")}
+    ${!view.busy && !view.error && !view.rows.length ? '<p class="field-note">オンライン大会がないか、一覧が未取得です。</p>' : ""}
+  `;
+}
+
+async function refreshOnlineKoshienCatalog() {
+  const scope = onlineKoshienCatalogScope();
+  const request = ++onlineKoshienCatalogSequence;
+  if (!scope || typeof window.YosoDataService?.koshien?.listEvents !== "function") {
+    onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
+    renderOnlineKoshienCatalog();
+    return;
+  }
+  const [userId, leagueId] = JSON.parse(scope);
+  onlineKoshienCatalog = { scope, rows: [], busy: true, error: "", truncated: false };
+  renderOnlineKoshienCatalog();
+  try {
+    const result = await window.YosoDataService.koshien.listEvents({ leagueId });
+    if (request !== onlineKoshienCatalogSequence || onlineKoshienCatalogScope() !== scope) return;
+    if (result?.leagueId !== leagueId || result?.userId !== userId || !Array.isArray(result.events)
+      || result.events.some(row => String(row.league_id) !== leagueId || row.preset_type !== "koshien")) {
+      throw new Error("大会一覧の所属先を確認できませんでした。");
+    }
+    onlineKoshienCatalog = { scope, rows: result.events, busy: false, error: "", truncated: Boolean(result.truncated) };
+  } catch (error) {
+    if (request !== onlineKoshienCatalogSequence || onlineKoshienCatalogScope() !== scope) return;
+    onlineKoshienCatalog = { scope, rows: [], busy: false, error: error?.message || "大会一覧を取得できませんでした。", truncated: false };
+  }
+  renderOnlineKoshienCatalog();
+}
+
+async function selectTournamentFromUi(eventId) {
+  const id = String(eventId || "");
+  if (!id) return;
+  const scope = onlineKoshienCatalogScope();
+  const row = scope && onlineKoshienCatalog.scope === scope
+    ? onlineKoshienCatalog.rows.find(item => String(item.id) === id) : null;
+  const local = (state.events || []).find(item => String(item.id) === id);
+  const online = Boolean(row) || (isSupabaseAuthEnabled() && currentAuthUser()
+    && local && baseTemplateId(local.templateId) === "koshien"
+    && window.YosoDataService?.shouldAutoSaveKoshien?.());
+  if (!online) {
+    if (local) { setActiveEvent(id); render(); }
+    return;
+  }
+  if (!scope || pendingKoshienLoadPromise || onlineKoshienDraftCreating) {
+    window.alert("オンラインクラブまたは読込状況を確認してください。");
+    return;
+  }
+  const [, leagueId] = JSON.parse(scope);
+  const snapshot = await loadKoshienOnlineState({ force: true, exactEventId: id, expectedLeagueId: leagueId });
+  if (!snapshot?.ok || String(snapshot.event?.id || "") !== id || String(state.event?.id || "") !== id) {
+    window.alert("選択した大会を読み込めませんでした。大会一覧を更新してください。");
+    return;
+  }
+  await refreshOnlineKoshienCatalog();
+}
+
 function renderTournamentManageList() {
+  renderOnlineKoshienCatalog();
   if (!els.tournamentManageList) return;
-  const events = state.events || [];
+  const scope = onlineKoshienCatalogScope();
+  const events = (state.events || []).filter(event => !scope || baseTemplateId(event.templateId) !== "koshien"
+    || (String(event.id) === String(loadedKoshienOnlineEventId) && String(event.id) === String(state.activeEventId)));
   const onlineClubMode = isSupabaseAuthEnabled() && Boolean(currentAuthUser());
   const canManage = !onlineClubMode || isClubAdmin();
   if (els.settingsNewEventButton) els.settingsNewEventButton.disabled = !canManage;
@@ -7926,16 +8023,28 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
+  const refreshCatalog = event.target.closest("[data-online-koshien-list-refresh]");
+  if (refreshCatalog) {
+    await refreshOnlineKoshienCatalog();
+    return;
+  }
+  const catalogSelection = event.target.closest("[data-online-koshien-select]");
+  if (catalogSelection) {
+    const scope = onlineKoshienCatalogScope();
+    const id = catalogSelection.dataset.onlineKoshienSelect;
+    if (scope && onlineKoshienCatalog.scope === scope && onlineKoshienCatalog.rows.some(row => row.id === id)) {
+      await selectTournamentFromUi(id);
+    }
+    return;
+  }
   const manageButton = event.target.closest("[data-event-manage]");
   if (manageButton) {
-    setActiveEvent(manageButton.dataset.eventId);
-    render();
+    await selectTournamentFromUi(manageButton.dataset.eventId);
     return;
   }
   const trigger = event.target.closest("[data-event-id]");
   if (!trigger) return;
-  setActiveEvent(trigger.dataset.eventId);
-  render();
+  await selectTournamentFromUi(trigger.dataset.eventId);
 });
 
 els.rankingTabs?.querySelectorAll("button").forEach((button) => {
