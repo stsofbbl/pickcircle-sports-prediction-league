@@ -234,7 +234,8 @@ test("late official results/context and start-round responses cannot populate an
   const h=createOfficialFetchRaceHarness();
   const result=h.ctx.handleFetch(h.root);
   h.requests[0].resolve({rows:[{name:"A result"}]});
-  await Promise.resolve();
+  // A promise crossing a VM realm may need more than one microtask.
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.requests[1].kind,"context");
   h.switchEvent("B");
   h.requests[1].resolve({matches:[]});
