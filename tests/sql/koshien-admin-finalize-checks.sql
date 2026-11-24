@@ -192,6 +192,11 @@ BEGIN
   IF v_rows <> 0 THEN
     RAISE EXCEPTION 'stale archive precondition did not reject duplicate';
   END IF;
+  DELETE FROM public.events WHERE id='test-finalize';
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION 'archived finalized event was deleted by authenticated admin';
+  END IF;
   IF v_matches IS DISTINCT FROM (SELECT md5(coalesce(string_agg(to_jsonb(m)::text,'|' ORDER BY m.id::text),''))
     FROM public.matches m WHERE event_id='test-finalize')
     OR v_scores IS DISTINCT FROM (SELECT md5(coalesce(string_agg(to_jsonb(s)::text,'|' ORDER BY s.player_id::text),''))
@@ -267,21 +272,92 @@ END $test$;
 SELECT 'PASS: no leaked permits';
 SELECT 'PASS: admin-only finalization authorization, version, status, guards';
 
--- Finalized event deletion is supported by production FK ON DELETE CASCADE.
--- Exercise the real trigger ordering in this isolated schema (no real data).
+-- #53: Verify real authenticated delete RLS without touching real events.
+-- Direct deletion must be denied even for the owner of finalized Koshien.
 SET ROLE authenticated;
 SELECT public.finalize_koshien_admin_results('test-finalize',
  public.koshien_admin_result_revision('test-finalize'));
+DO $finalized_delete$ DECLARE v_rows integer;
+BEGIN
+  DELETE FROM public.events WHERE id='test-finalize';
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 OR NOT EXISTS (SELECT 1 FROM public.events
+      WHERE id='test-finalize' AND status='finalized') THEN
+    RAISE EXCEPTION 'owner directly deleted finalized Koshien';
+  END IF;
+  IF (SELECT count(*) FROM public.matches WHERE event_id='test-finalize') <> 48
+     OR (SELECT count(*) FROM public.scores WHERE event_id='test-finalize') <> 1
+     OR (SELECT count(*) FROM public.results WHERE event_id='test-finalize') <> 1
+     OR (SELECT count(*) FROM public.koshien_result_reopens
+         WHERE event_id='test-finalize') <> 1 THEN
+    RAISE EXCEPTION 'denied direct deletion modified child or audit rows';
+  END IF;
+END $finalized_delete$;
+-- The finalized status and the finalized flow status both protect archived rows.
+BEGIN;
+UPDATE public.events SET status='archive',archived_at=now()
+ WHERE id='test-finalize' AND status='finalized';
+DO $archive_delete$ DECLARE v_rows integer;
+BEGIN
+  DELETE FROM public.events WHERE id='test-finalize';
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION 'owner directly deleted archived finalized Koshien';
+  END IF;
+END $archive_delete$;
+ROLLBACK;
+
+-- Other sports and unfinished Koshien retain their prior admin-delete behavior.
 RESET ROLE;
-DELETE FROM public.events WHERE id='test-finalize';
-DO $test$ BEGIN
-  IF EXISTS (SELECT 1 FROM public.matches WHERE event_id='test-finalize')
+INSERT INTO public.events(id,league_id,preset_type,status,rules) VALUES
+ ('test-unfinished','00000000-0000-0000-0000-000000000010','koshien',
+    'resultWait','{"resultFlow":{"status":"none"}}'),
+ ('test-other-sport','00000000-0000-0000-0000-000000000010','worldCup',
+    'finalized','{"resultFlow":{"status":"finalized"}}');
+SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
+SET ROLE authenticated;
+DO $member_delete$ DECLARE v_rows integer;
+BEGIN
+  DELETE FROM public.events WHERE id='test-unfinished';
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN RAISE EXCEPTION 'member deleted unfinished Koshien'; END IF;
+END $member_delete$;
+RESET ROLE;
+SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+SET ROLE authenticated;
+DO $admin_delete$ DECLARE v_rows integer;
+BEGIN
+  DELETE FROM public.events WHERE id IN ('test-unfinished','test-other-sport');
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 2 THEN
+    RAISE EXCEPTION 'existing unfinished/other-sport delete behavior changed';
+  END IF;
+END $admin_delete$;
+RESET ROLE;
+SELECT 'PASS: finalized/archived delete denied, unfinished/other sport preserved';
+
+-- A legitimate club-deletion security-definer must still be able to cascade.
+CREATE FUNCTION public.fixture_delete_club(p_league_id uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $club$
+BEGIN
+  IF NOT public.is_league_admin(p_league_id) THEN
+    RAISE EXCEPTION 'owner permission required' USING ERRCODE='42501';
+  END IF;
+  DELETE FROM public.leagues WHERE id=p_league_id;
+END
+$club$;
+GRANT EXECUTE ON FUNCTION public.fixture_delete_club(uuid) TO authenticated;
+SET ROLE authenticated;
+SELECT public.fixture_delete_club('00000000-0000-0000-0000-000000000010');
+RESET ROLE;
+DO $cascade$ BEGIN
+  IF EXISTS (SELECT 1 FROM public.events WHERE id='test-finalize')
+     OR EXISTS (SELECT 1 FROM public.matches WHERE event_id='test-finalize')
      OR EXISTS (SELECT 1 FROM public.scores WHERE event_id='test-finalize')
      OR EXISTS (SELECT 1 FROM public.results WHERE event_id='test-finalize')
      OR EXISTS (SELECT 1 FROM public.teams WHERE event_id='test-finalize')
      OR EXISTS (SELECT 1 FROM public.event_teams WHERE event_id='test-finalize')
-     OR EXISTS (SELECT 1 FROM public.koshien_result_reopens WHERE event_id='test-finalize') THEN
-    RAISE EXCEPTION 'finalized event cascade left child rows';
-  END IF;
-END $test$;
-SELECT 'PASS: deleting a finalized event cascades through all child tables';
+     OR EXISTS (SELECT 1 FROM public.koshien_result_reopens WHERE event_id='test-finalize')
+  THEN RAISE EXCEPTION 'authorized security-definer club cascade left child rows'; END IF;
+END $cascade$;
+SELECT 'PASS: owner-managed club deletion retains FK cascade after RLS hardening';
