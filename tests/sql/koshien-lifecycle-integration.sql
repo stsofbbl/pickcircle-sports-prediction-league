@@ -65,7 +65,7 @@ SELECT 'PASS: actual roster import -> confirm -> open -> member prediction with 
 -- Re-import and direct confirmation reset must both fail atomically after opening.
 SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
 SET ROLE authenticated;
-DO $ BEGIN
+DO $$ BEGIN
  BEGIN
    PERFORM public.replace_koshien_representatives('lifecycle-draft',public.fixture_roster(),2027);
    RAISE EXCEPTION 'open roster re-import succeeded';
@@ -75,10 +75,10 @@ DO $ BEGIN
    WHERE id='lifecycle-draft';
    RAISE EXCEPTION 'open confirmation reset succeeded';
  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
-END $;
+END $$;
 RESET ROLE;
-DO $ BEGIN
+DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft'
    AND status='open' AND rules->'config'->'startRoundsConfirmed'='true'::jsonb)
  THEN RAISE EXCEPTION 'open event confirmation changed'; END IF;
-END $;
+END $$;
