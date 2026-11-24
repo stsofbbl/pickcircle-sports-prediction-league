@@ -185,3 +185,82 @@ test("manager observer adds JHBF controls only to an editable Koshien event", ()
   while (timers.length) timers.shift()();
   assert.equal(inserted, 1);
 });
+
+function createOfficialFetchRaceHarness() {
+  const start=moduleSource.indexOf("  function currentImportScopeKey()");
+  const end=moduleSource.indexOf("  async function handleApplyStartRounds()",start);
+  const repStart=moduleSource.indexOf("  async function handleApplyRepresentatives()");
+  const repEnd=moduleSource.indexOf("  async function handleAlias(",repStart);
+  assert.ok(start>=0 && end>start && repStart>=0 && repEnd>repStart);
+  const requests=[], saves=[], renders=[];
+  const deferred=(kind,args)=>new Promise((resolve,reject)=>requests.push({kind,args,resolve,reject}));
+  const ctx=vm.createContext({
+    console:{warn(){}}, state:{event:{id:"A",config:{teams:["A"],externalResults:{year:2027}}}},
+    view:{eventId:"",scopeKey:"",generation:0}, onlineLeagueId:"club",
+    currentAuthUser:()=>({id:"admin"}), jstDateValue:()=>"2027-08-01",
+    sourceConfig:()=>({year:2027,fixedDraftSeason:true}), saveLocalStateOnly:()=>saves.push("local"),
+    renderActiveEventManager:()=>renders.push("render"), renderScoresOnly(){},
+    fetchResults:args=>deferred("results",args),
+    fetchRepresentatives:args=>deferred("representatives",args),
+    fetchStartRounds:args=>deferred("rounds",args),
+    loadContext:eventId=>deferred("context",{eventId}),
+    buildImportPreview:rows=>rows, buildRepresentativePreview:rows=>({valid:true,completeCount:rows.length,rows}),
+    buildStartRoundPreview:()=>({valid:true}), getTeams:()=>ctx.state.event.config.teams,
+    representativeTeamMeta:()=>({}), normalizeKoshienEvent(){},
+    window:{confirm:()=>true,YosoDataService:{koshien:{replaceRepresentatives:args=>deferred("save",args)}}},
+  });
+  vm.runInContext(moduleSource.slice(start,end)+moduleSource.slice(repStart,repEnd),ctx);
+  ctx.resetForEvent();
+  const root={querySelector:()=>null};
+  const switchEvent=id=>{ctx.state.event={id,config:{teams:[id],externalResults:{year:2027}}};ctx.resetForEvent();};
+  return {ctx,root,requests,saves,renders,switchEvent};
+}
+test("delayed representative results are discarded after A → B → A switch",async()=>{
+  const h=createOfficialFetchRaceHarness();
+  const pending=h.ctx.handleFetchRepresentatives(h.root);
+  assert.equal(h.requests[0].args.eventId,"A");
+  h.switchEvent("B");h.switchEvent("A");
+  const fresh=h.ctx.handleFetchRepresentatives(h.root);
+  h.requests[0].resolve({rows:[{schoolName:"old"}]});
+  await pending;
+  assert.equal(h.ctx.view.loading,true);
+  assert.equal(h.ctx.view.representativeRows.length,0);
+  h.requests[1].resolve({rows:[{schoolName:"new"}]});
+  await fresh;
+  assert.equal(h.ctx.view.representativeRows[0].schoolName,"new");
+  assert.equal(h.ctx.view.loading,false);
+});
+test("late official results/context and start-round responses cannot populate another event",async()=>{
+  const h=createOfficialFetchRaceHarness();
+  const result=h.ctx.handleFetch(h.root);
+  h.requests[0].resolve({rows:[{name:"A result"}]});
+  await Promise.resolve();
+  assert.equal(h.requests[1].kind,"context");
+  h.switchEvent("B");
+  h.requests[1].resolve({matches:[]});
+  await result;
+  assert.equal(h.ctx.view.rows.length,0);
+  assert.equal(h.ctx.view.context,null);
+  const rounds=h.ctx.handleFetchStartRounds(h.root);
+  assert.equal(h.requests[2].args.eventId,"B");
+  h.switchEvent("C");
+  h.requests[2].resolve({rows:[{name:"B round"}]});
+  h.requests[3].resolve({matches:[]});
+  await rounds;
+  assert.equal(h.ctx.view.startRoundRows.length,0);
+  assert.equal(h.ctx.view.context,null);
+});
+test("late representative save success or failure does not overwrite selected tournament",async()=>{
+  for(const fail of [false,true]){
+    const h=createOfficialFetchRaceHarness();
+    h.ctx.view.representativeRows=[{schoolName:"A school"}];
+    const pending=h.ctx.handleApplyRepresentatives();
+    assert.equal(h.requests[0].args.eventId,"A");
+    h.switchEvent("B");
+    if(fail) h.requests[0].reject(Error("offline")); else h.requests[0].resolve({count:49});
+    await pending;
+    assert.equal(h.ctx.state.event.config.teams[0],"B");
+    assert.equal(h.saves.length,0);
+    assert.equal(h.ctx.view.representativeMessage,"");
+  }
+});
