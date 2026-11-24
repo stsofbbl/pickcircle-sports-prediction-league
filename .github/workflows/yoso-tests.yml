@@ -52,6 +52,7 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-setup.sql
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/fixtures/koshien-production-reopen.sql
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124000000_admin_finalize_koshien_results.sql
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124040000_protect_finalized_koshien_event_delete.sql
           python3 scripts/verify-admin-finalize-concurrency.py yoso_admin_finalize_mvp_test
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-checks.sql
       - name: Run Koshien schedule and automation tests
