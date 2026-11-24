@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
+import { authorizeJhbfEventFetch } from "../_shared/jhbf-event-fetch-guard.mjs";
 import { attachStartsAt, parseJhbfScheduleHtml, parseJhbfTournamentScheduleSlots } from "../_shared/jhbf-schedule-parser.mjs";
 
 const CORS_HEADERS = Object.freeze({
@@ -102,8 +103,8 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { error: adminError } = await supabase.rpc("get_koshien_external_import_context", { p_event_id: eventId });
-  if (adminError) return jsonResponse({ error: "fetch_not_allowed", message: "公式日程の取得には管理者権限が必要です。" }, 403);
+  const guard = await authorizeJhbfEventFetch(supabase, { eventId, year, competitionType: "summer" });
+  if (!guard.ok) return jsonResponse({ error: guard.error, message: guard.message }, guard.status);
 
   const tournamentUrl = new URL(`https://www.jhbf.or.jp/sensyuken/${year}/tournament/`);
   const scheduleUrl = new URL(`https://www.jhbf.or.jp/sensyuken/${year}/schedule/`);

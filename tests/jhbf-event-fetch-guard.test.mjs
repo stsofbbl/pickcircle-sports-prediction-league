@@ -69,3 +69,13 @@ test("Edge handler invokes guard and returns early before all three fetch paths"
     assert.ok(source.indexOf(marker, start) > reject, marker);
   }
 });
+
+test("official schedule Edge handler checks persisted season and admin before any fetch", () => {
+  const source = readFileSync(new URL("../supabase/functions/jhbf-schedule/index.ts", import.meta.url), "utf8");
+  const start = source.indexOf("Deno.serve(");
+  const call = source.indexOf('const guard = await authorizeJhbfEventFetch(supabase, { eventId, year, competitionType: "summer" });', start);
+  const reject = source.indexOf("if (!guard.ok) return jsonResponse(", call);
+  assert.ok(start >= 0 && call > start && reject > call);
+  assert.ok(source.indexOf("fetchAllowedHtml(tournamentUrl, year)", start) > reject);
+  assert.ok(source.indexOf("fetchAllowedHtml(scheduleUrl, year)", start) > reject);
+});

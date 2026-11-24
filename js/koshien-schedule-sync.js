@@ -14,6 +14,11 @@
   }
 
   function eventYear(event) {
+    const season = String(event?.season ?? "").trim();
+    if (season) {
+      if (!/^(202[0-9]|203[0-5])$/.test(season)) throw new Error("保存済み大会の年度を確認してください。");
+      return Number(season);
+    }
     const configured = Number(event?.config?.externalResults?.year);
     if (Number.isInteger(configured)) return configured;
     const named = Number((String(event?.name || "").match(/20\d{2}/) || [])[0]);
@@ -57,15 +62,36 @@
     return normalized;
   }
 
+  function scheduleScope(event) {
+    return {
+      eventId: String(event?.id || ""),
+      userId: String(typeof currentAuthUser === "function" ? currentAuthUser()?.id || "" : ""),
+      leagueId: String(typeof onlineLeagueId !== "undefined" ? onlineLeagueId || "" : ""),
+    };
+  }
+
+  function requireScheduleScope(scope) {
+    const active = scheduleScope(currentEvent());
+    if (!scope.eventId || !scope.userId || !scope.leagueId || !canManage()
+      || active.eventId !== scope.eventId || active.userId !== scope.userId || active.leagueId !== scope.leagueId) {
+      throw new Error("対象大会・クラブ・ログイン状態が変わりました。大会一覧から確認してください。");
+    }
+  }
+
   async function syncOfficialSchedule({ event = currentEvent(), silent = false } = {}) {
     if (!event?.id || !isKoshienEvent(event)) throw new Error("甲子園大会を確認できませんでした。");
     if (!canManage()) throw new Error("公式日程の反映には管理者権限が必要です。");
+    const scope = scheduleScope(event);
+    requireScheduleScope(scope);
+    const year = eventYear(event);
     const supabase = await root.YosoSupabase?.client?.();
     if (!supabase) throw new Error("Supabaseへ接続できません。");
+    requireScheduleScope(scope);
 
     const { data: fetched, error: fetchError } = await supabase.functions.invoke("jhbf-schedule", {
-      body: { eventId: String(event.id), year: eventYear(event) },
+      body: { eventId: scope.eventId, year },
     });
+    requireScheduleScope(scope);
     if (fetchError) {
       let message = fetchError.message || "日本高野連公式の日程を取得できませんでした。";
       try {
@@ -82,8 +108,14 @@
     }
 
     const sourceUrl = String(fetched?.scheduleSourceUrl || fetched?.sourceUrls?.[1] || "");
+    const allowedUrls = ["https://www.jhbf.or.jp", "https://jhbf.or.jp"].flatMap(host =>
+      ["/", ""].map(suffix => host + "/sensyuken/" + year + "/schedule" + suffix));
+    if (!allowedUrls.includes(sourceUrl) || rows.some(row => !jstDateKey(row.starts_at).startsWith(year + "-"))) {
+      throw new Error("公式日程の年度または取得元が大会と一致しません。DBは変更しません。");
+    }
+    requireScheduleScope(scope);
     const { data: saved, error: saveError } = await supabase.rpc("sync_koshien_official_schedule", {
-      p_event_id: String(event.id),
+      p_event_id: scope.eventId,
       p_rows: rows,
       p_source_url: sourceUrl,
       p_fetched_at: String(fetched?.fetchedAt || new Date().toISOString()),
@@ -91,9 +123,12 @@
     if (saveError) throw new Error(saveError.message || "公式日程を保存できませんでした。");
     if (Number(saved?.count) !== 33) throw new Error("公式日程33試合の保存完了を確認できませんでした。");
 
-    if (typeof loadKoshienOnlineState === "function") {
-      const snapshot = await loadKoshienOnlineState({ force: true });
-      if (!snapshot?.ok) throw new Error("日程保存後のオンラインデータを再読込できませんでした。");
+    requireScheduleScope(scope);
+    if (typeof loadKoshienOnlineState !== "function") throw new Error("日程保存後のオンラインデータを再読込できませんでした。");
+    const snapshot = await loadKoshienOnlineState({ force: true, exactEventId: scope.eventId, expectedLeagueId: scope.leagueId });
+    requireScheduleScope(scope);
+    if (!snapshot?.ok || String(snapshot.event?.id || "") !== scope.eventId) {
+      throw new Error("日程保存後の対象大会を確認できませんでした。大会一覧から再読込してください。");
     }
     if (typeof renderDashboard === "function") renderDashboard();
     if (typeof renderActiveEventManager === "function") renderActiveEventManager();
