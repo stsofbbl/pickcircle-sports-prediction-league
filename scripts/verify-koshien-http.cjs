@@ -8,7 +8,19 @@ const { createHmac, randomUUID } = require("node:crypto");
 const base = process.env.YOSO_HTTP_URL;
 const secret = process.env.YOSO_HTTP_SECRET;
 if (base !== "http://127.0.0.1:39117" || !secret || !process.argv[2]) throw Error("Use disposable CI fixture only");
-const { createClient } = require(path.resolve(process.argv[2]));
+// The CDN UMD bundle exposes a browser global rather than CommonJS exports.
+const sdkSource = fs.readFileSync(path.resolve(process.argv[2]), "utf8");
+const sdkContext = vm.createContext({
+  console, URL, URLSearchParams, fetch, Headers, Request, Response, AbortController,
+  AbortSignal, TextEncoder, TextDecoder, setTimeout, clearTimeout, setInterval,
+  clearInterval, crypto: globalThis.crypto, WebSocket: globalThis.WebSocket,
+  atob, btoa, Blob, FormData, ArrayBuffer, Uint8Array,
+});
+sdkContext.self = sdkContext;
+sdkContext.window = sdkContext;
+vm.runInContext(sdkSource, sdkContext);
+const createClient = sdkContext.supabase?.createClient;
+assert.equal(typeof createClient, "function", "browser SDK global unavailable");
 const repoRoot = path.join(__dirname, "..");
 const leagueId = "00000000-0000-0000-0000-000000000010";
 const owner = "00000000-0000-0000-0000-000000000001";
@@ -46,6 +58,7 @@ function service(uid, options) {
   } };
   const context = vm.createContext({ window, console, localStorage: {} });
   vm.runInContext(fs.readFileSync(path.join(repoRoot, "js/koshien-results.js"), "utf8"), context);
+  window.YosoKoshienResults = context.YosoKoshienResults;
   vm.runInContext(fs.readFileSync(path.join(repoRoot, "js/data-service.js"), "utf8"), context);
   return { client, service: window.YosoDataService.koshien };
 }

@@ -27,7 +27,7 @@ docker run --detach --rm --name "$container" --network host \
   -e PGRST_DB_URI="postgres://yoso_http_authenticator:$password@127.0.0.1:5432/$db" \
   -e PGRST_DB_SCHEMAS=public -e PGRST_DB_ANON_ROLE=anon \
   -e PGRST_JWT_SECRET="$secret" -e PGRST_SERVER_HOST=127.0.0.1 \
-  -e PGRST_SERVER_PORT=39117 postgrest/postgrest:v12.2.3 >/dev/null
+  -e PGRST_SERVER_PORT=39117 postgrest/postgrest:v12.2.3@sha256:729bf65c733b73f5b52777f0e4b853f22ed73aa67a22d38269d289779b0a8401 >/dev/null
 # A 200/401/403 response proves PostgREST is listening with a usable schema.
 ready=false
 for attempt in $(seq 1 30); do
