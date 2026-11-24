@@ -56,6 +56,8 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124050000_reopen_archived_koshien_consistently.sql
           python3 scripts/verify-admin-finalize-concurrency.py yoso_admin_finalize_mvp_test
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-checks.sql
+      - name: Verify Koshien cron gate in disposable PostgreSQL
+        run: python3 scripts/verify-koshien-cron-gate.py
       - name: Run Koshien schedule and automation tests
         run: node --test tests/koshien-schedule-parser.test.js tests/koshien-schedule-sync.test.js tests/koshien-auto-sync.test.js
       - name: Check JavaScript syntax
