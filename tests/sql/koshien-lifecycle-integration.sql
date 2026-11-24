@@ -150,7 +150,7 @@ SELECT 'PASS: confirmed open start-round change rejected; roster/picks unchanged
 
 -- TEST-ONLY prototype: official import identity constraints. Do not apply to
 -- production. Reuses the actual manual-record and match-status sync RPC bodies
--- captured 2026-11-25; the auto-sync writer is represented by privileged DML.
+-- captured 2026-11-25; includes the real auto-sync writer and privileged DML.
 -- Explicit season required here; legacy null-season policy requires review.
 BEGIN;
 UPDATE public.events SET season='2026' WHERE id='test-finalize';
@@ -174,24 +174,7 @@ CREATE POLICY external_match_imports_admin_all ON public.external_match_imports 
  USING (EXISTS (SELECT 1 FROM public.events e WHERE e.id=external_match_imports.event_id AND public.is_league_admin(e.league_id)))
  WITH CHECK (confirmed_by=auth.uid() AND EXISTS (SELECT 1 FROM public.events e WHERE e.id=external_match_imports.event_id AND public.is_league_admin(e.league_id)));
 
--- Test-only candidate. Foreign keys cover both child DML and later parent
--- identity changes, without row-lock order or RLS-dependent trigger lookups.
-ALTER TABLE public.events ADD UNIQUE(id,season);
-ALTER TABLE public.matches ADD UNIQUE(id,event_id);
-ALTER TABLE public.external_match_imports
- ADD COLUMN import_year text GENERATED ALWAYS AS (split_part(external_key,':',3)) STORED NOT NULL,
- ADD CONSTRAINT fixture_import_event_year FOREIGN KEY(event_id,import_year) REFERENCES public.events(id,season),
- ADD CONSTRAINT fixture_import_match_event FOREIGN KEY(imported_match_id,event_id) REFERENCES public.matches(id,event_id),
- ADD CONSTRAINT fixture_import_identity CHECK (
-  split_part(external_key,':',2)='summer'
-  AND split_part(external_key,':',3)=left(split_part(external_key,':',4),4)
-  AND normalized_payload->>'source' IS NOT DISTINCT FROM source
-  AND normalized_payload->>'externalKey' IS NOT DISTINCT FROM external_key
-  AND source_url IN (
-   'https://www.jhbf.or.jp/sensyuken/'||import_year||'/schedule/schedule_'||replace(split_part(external_key,':',4),'-','')||'.html',
-   'https://jhbf.or.jp/sensyuken/'||import_year||'/schedule/schedule_'||replace(split_part(external_key,':',4),'-','')||'.html'
-  )
- );
+-- @include supabase/release-candidates/koshien-official-integrity/import-identity.sql
 
 CREATE OR REPLACE FUNCTION public.record_koshien_external_imports(p_event_id text, p_rows jsonb)
  RETURNS jsonb
@@ -726,12 +709,39 @@ DO $$ BEGIN
 END $$;
 SELECT 'PASS: real auto-apply RPC, mixed-year whole-batch rollback, correct batch and idempotent retry';
 
+-- A matching year alone must not allow history on a non-Koshien event.
+-- New or legacy null-season events can exist, but cannot record official imports.
+INSERT INTO public.events(id,league_id,preset_type,status,rules,name,season,created_by) VALUES
+ ('fixture-non-koshien','00000000-0000-0000-0000-000000000010','other','draft','{}','Other sport','2026','00000000-0000-0000-0000-000000000001'),
+ ('fixture-legacy-koshien','00000000-0000-0000-0000-000000000010','koshien','draft','{"approvalPolicy":"admin","resultFlow":{"status":"none"}}','Legacy no season',NULL,'00000000-0000-0000-0000-000000000001');
+INSERT INTO public.matches(event_id,round_key,match_no,status) VALUES
+ ('fixture-non-koshien','R1',1,'scheduled'),('fixture-legacy-koshien','R1',1,'scheduled');
+DO $$ DECLARE target text; BEGIN
+ FOREACH target IN ARRAY ARRAY['fixture-non-koshien','fixture-legacy-koshien'] LOOP
+  BEGIN
+   INSERT INTO public.external_match_imports(event_id,source,external_key,source_url,normalized_payload,imported_match_id,fetched_at,confirmed_by)
+   SELECT target,'jhbf','jhbf:summer:2026:2026-08-10:1',
+    'https://www.jhbf.or.jp/sensyuken/2026/schedule/schedule_20260810.html',
+    '{"source":"jhbf","externalKey":"jhbf:summer:2026:2026-08-10:1"}',id,now(),
+    '00000000-0000-0000-0000-000000000001'
+   FROM public.matches WHERE event_id=target;
+   RAISE EXCEPTION 'invalid event identity accepted: %',target;
+  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+ END LOOP;
+ BEGIN
+  UPDATE public.events SET preset_type='other' WHERE id='test-finalize';
+  RAISE EXCEPTION 'parent preset change accepted';
+ EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+END $$;
+SELECT 'PASS: non-Koshien and legacy missing-season imports rejected; parent preset protected';
+
+
 -- Compare event-deletion behavior with/without the proposed FKs. Both attempts
 -- are rolled back in subtransactions; an existing RESTRICT is not silently
 -- removed. Club-level deletion and finalized events still require review.
 DO $$ DECLARE baseline text; candidate text; BEGIN
  BEGIN
-  ALTER TABLE public.external_match_imports DROP CONSTRAINT fixture_import_event_year,DROP CONSTRAINT fixture_import_match_event;
+  ALTER TABLE public.external_match_imports DROP CONSTRAINT yoso_import_event_identity,DROP CONSTRAINT yoso_import_match_event;
   BEGIN
    DELETE FROM public.events WHERE id='test-finalize';
    baseline:='success';
@@ -749,6 +759,14 @@ DO $$ DECLARE baseline text; candidate text; BEGIN
  IF (SELECT count(*) FROM public.external_match_imports)<>3 OR NOT EXISTS(SELECT 1 FROM public.events WHERE id='test-finalize') THEN
   RAISE EXCEPTION 'deletion probe was not rolled back'; END IF;
  RAISE NOTICE 'event deletion baseline and candidate: %',candidate;
+END $$;
+-- Verify the exact rollback candidate removes new objects and retains all rows.
+-- @include supabase/release-candidates/koshien-official-integrity/rollback-import-identity.sql
+DO $$ BEGIN
+ IF (SELECT count(*) FROM public.external_match_imports)<>3
+ OR EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='external_match_imports' AND column_name IN ('import_year','import_preset'))
+ OR EXISTS(SELECT 1 FROM pg_constraint WHERE conname IN ('yoso_import_event_identity','yoso_import_match_event','yoso_import_identity','yoso_import_event_identity_unique','yoso_import_match_identity_unique'))
+ THEN RAISE EXCEPTION 'rollback failed or removed import history'; END IF;
 END $$;
 ROLLBACK;
 DO $$ BEGIN
