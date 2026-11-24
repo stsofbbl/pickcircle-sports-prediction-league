@@ -543,6 +543,7 @@
 
   function canConfirmStartRounds(event, now = Date.now()) {
     if (!["draft", "open"].includes(String(event?.status || ""))) return false;
+    if (event.status === "open" && event.config?.startRoundsConfirmed === true) return false;
     const deadline = String(event?.deadline || "").trim();
     return !deadline || (Number.isFinite(Date.parse(deadline)) && Number(now) < Date.parse(deadline));
   }
@@ -865,7 +866,7 @@
             <span class="status-label ${startRoundPreview.valid ? "open" : "pending"}">${startRoundPreview.firstRoundTeams.length}/34・${startRoundPreview.secondRoundTeams.length}/15</span>
           </div>
           ${view.startRoundMessage ? `<p class="auth-message is-${escapeHtml(view.startRoundMessageKind || "pending")}" role="status">${escapeHtml(view.startRoundMessage)}</p>` : ""}
-          ${!startRoundConditionReady ? `<p class="auth-message is-error" role="status">大会状態または予想締切の条件により、開始ラウンドを正式反映できません。</p>` : ""}
+          ${!startRoundConditionReady ? `<p class="auth-message is-error" role="status">大会状態・予想締切・受付開始後の確定済みラウンド保護により、開始ラウンドを正式反映できません。</p>` : ""}
           <div class="result-flow-actions">
             <button class="ghost-button" type="button" data-jhbf-fetch-start-rounds ${representativesDisabled}>組み合わせから候補取得</button>
             <button class="primary-button" type="button" data-jhbf-apply-start-rounds ${applyStartRoundsDisabled}>正式反映</button>

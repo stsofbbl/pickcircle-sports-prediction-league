@@ -3556,8 +3556,19 @@ function koshienRepresentativeKey(team) {
   return district && school ? `${district}:${school}` : "";
 }
 
+function isOnlineKoshienStartRoundLocked(event = state.event) {
+  return isSupabaseAuthEnabled() && baseTemplateId(event?.templateId) === "koshien"
+    && event?.status === "open" && event.config?.startRoundsConfirmed === true;
+}
+
 async function saveKoshienStartRounds() {
   if (koshienStartRoundsSaving) return;
+  if (isOnlineKoshienStartRoundLocked()) {
+    koshienStartRoundsMessage = "受付開始後は確定済みの開始ラウンドを変更できません。";
+    koshienStartRoundsMessageKind = "error";
+    renderActiveEventManager();
+    return;
+  }
   const teams = getTeams();
   const rounds = ensureKoshienStartRoundDraft(teams);
   const counts = koshienStartRoundCounts(teams, rounds);
@@ -3710,6 +3721,7 @@ function koshienTeamMetaEditor(teams, canEditSettings) {
   const multipliers = ensureKoshienGameMultiplierDraft(teams);
   const counts = koshienStartRoundCounts(teams, rounds);
   const confirmed = state.event.config.startRoundsConfirmed === true;
+  const startRoundsLocked = isOnlineKoshienStartRoundLocked();
   const distributionReady = teams.length === 49 && counts[1] === 34 && counts[2] === 15;
   return `
     <div class="entry-block koshien-results">
@@ -3722,7 +3734,7 @@ function koshienTeamMetaEditor(teams, canEditSettings) {
       </div>
       <div class="active-manager-note ${distributionReady ? "" : "is-disabled"}">
         <strong>1回戦 ${counts[1]}校 / 2回戦 ${counts[2]}校</strong>
-        <span>${confirmed ? "この正式データを予想候補と最大3校の制限判定に使用しています。" : "現在の割り当ては仮データです。組み合わせ抽選後に更新してください。"}</span>
+        <span>${startRoundsLocked ? "受付開始後の確定済み開始ラウンドは変更できません。倍率・外部オッズは編集できます。" : confirmed ? "この正式データを予想候補と最大3校の制限判定に使用しています。" : "現在の割り当ては仮データです。組み合わせ抽選後に更新してください。"}</span>
       </div>
       <div class="koshien-result-list">
         ${teams.map((team) => {
@@ -3730,7 +3742,7 @@ function koshienTeamMetaEditor(teams, canEditSettings) {
           return `
             <div class="draft-row koshien-result-row">
               <span class="pill">${escapeHtml(team)}</span>
-              <select data-koshien-team-start="${escapeAttr(team)}" ${canEditSettings && !koshienStartRoundsSaving ? "" : "disabled"}>
+              <select data-koshien-team-start="${escapeAttr(team)}" ${canEditSettings && !startRoundsLocked && !koshienStartRoundsSaving ? "" : "disabled"}>
                 ${optionList(["1", "2"], String(rounds[team] || 1))}
               </select>
               <input data-koshien-game-multiplier="${escapeAttr(team)}" type="number" min="0.0001" max="50" step="0.0001"
@@ -3744,7 +3756,7 @@ function koshienTeamMetaEditor(teams, canEditSettings) {
       </div>
       <div class="create-submit-row">
         <button class="primary-button" type="button" data-koshien-start-rounds-save
-          ${canEditSettings && distributionReady && !koshienStartRoundsSaving ? "" : "disabled"}>
+          ${canEditSettings && !startRoundsLocked && distributionReady && !koshienStartRoundsSaving ? "" : "disabled"}>
           ${koshienStartRoundsSaving ? "保存中…" : "49校の開始ラウンドを一括確定"}
         </button>
         <button class="primary-button" type="button" data-koshien-game-multipliers-save

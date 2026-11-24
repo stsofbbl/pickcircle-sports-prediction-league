@@ -82,3 +82,68 @@ DO $$ BEGIN
    AND status='open' AND rules->'config'->'startRoundsConfirmed'='true'::jsonb)
  THEN RAISE EXCEPTION 'open event confirmation changed'; END IF;
 END $$;
+
+-- The existing confirm RPC can otherwise move four of the member's eight
+-- first-round picks into round two while keeping the total distribution 34/15.
+-- Protect both actual representations, and prove statement rollback preserves
+-- every roster and pick row rather than merely retaining the confirmation flag.
+CREATE TEMP TABLE lifecycle_round_baseline AS
+SELECT
+ (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY t.id)::text) FROM public.teams t WHERE t.event_id='lifecycle-draft') AS teams,
+ (SELECT md5(jsonb_agg(to_jsonb(et) ORDER BY et.id)::text) FROM public.event_teams et WHERE et.event_id='lifecycle-draft') AS event_teams,
+ (SELECT md5(jsonb_agg(to_jsonb(p) ORDER BY p.id)::text) FROM public.phase1_picks p WHERE p.event_id='lifecycle-draft') AS picks;
+SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
+SET ROLE authenticated;
+DO $$ DECLARE v_rows jsonb; BEGIN
+ SELECT jsonb_agg(jsonb_build_object('representative_key',metadata->>'representative_key','start_round',
+  CASE WHEN seed BETWEEN 1 AND 4 THEN 1 WHEN seed BETWEEN 16 AND 19 THEN 2 ELSE start_round END) ORDER BY seed)
+ INTO v_rows FROM public.teams WHERE event_id='lifecycle-draft';
+ BEGIN
+   PERFORM public.confirm_koshien_start_rounds('lifecycle-draft',v_rows);
+   RAISE EXCEPTION 'changed confirmed round assignment accepted';
+ EXCEPTION WHEN invalid_parameter_value THEN
+   IF SQLERRM <> 'confirmed Koshien start rounds cannot be changed while open' THEN RAISE; END IF;
+ END;
+ BEGIN
+   UPDATE public.teams SET start_round=3-start_round WHERE event_id='lifecycle-draft' AND seed=16;
+   RAISE EXCEPTION 'direct team start round changed';
+ EXCEPTION WHEN invalid_parameter_value THEN
+   IF SQLERRM <> 'confirmed Koshien start rounds cannot be changed while open' THEN RAISE; END IF;
+ END;
+ -- event_teams direct writes are allowed for the real admin. Fixture grant and
+ -- policy are added below so this checks the trigger rather than an RLS denial.
+END $$;
+RESET ROLE;
+CREATE POLICY lifecycle_event_teams_admin ON public.event_teams FOR UPDATE TO authenticated
+ USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=event_teams.event_id AND public.is_league_admin(e.league_id)))
+ WITH CHECK(EXISTS(SELECT 1 FROM public.events e WHERE e.id=event_teams.event_id AND public.is_league_admin(e.league_id)));
+SET ROLE authenticated;
+DO $$ BEGIN
+ BEGIN
+   UPDATE public.event_teams SET metadata=jsonb_set(metadata,'{startRound}','2') WHERE event_id='lifecycle-draft' AND name='Fixture school 16';
+   RAISE EXCEPTION 'direct event team start round changed';
+ EXCEPTION WHEN invalid_parameter_value THEN
+   IF SQLERRM <> 'confirmed Koshien start rounds cannot be changed while open' THEN RAISE; END IF;
+ END;
+END $$;
+RESET ROLE;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM lifecycle_round_baseline b WHERE
+   b.teams IS DISTINCT FROM (SELECT md5(jsonb_agg(to_jsonb(t) ORDER BY t.id)::text) FROM public.teams t WHERE t.event_id='lifecycle-draft')
+   OR b.event_teams IS DISTINCT FROM (SELECT md5(jsonb_agg(to_jsonb(et) ORDER BY et.id)::text) FROM public.event_teams et WHERE et.event_id='lifecycle-draft')
+   OR b.picks IS DISTINCT FROM (SELECT md5(jsonb_agg(to_jsonb(p) ORDER BY p.id)::text) FROM public.phase1_picks p WHERE p.event_id='lifecycle-draft')) THEN
+ RAISE EXCEPTION 'denied round change mutated roster or picks'; END IF;
+END $$;
+-- Same-value changes and unrelated odds update are not prohibited.
+BEGIN;
+SET LOCAL ROLE authenticated;
+SELECT public.confirm_koshien_start_rounds('lifecycle-draft',(
+ SELECT jsonb_agg(jsonb_build_object('representative_key',metadata->>'representative_key','start_round',start_round) ORDER BY seed)
+ FROM public.teams WHERE event_id='lifecycle-draft'));
+UPDATE public.teams SET odds=2 WHERE event_id='lifecycle-draft' AND seed=16;
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.teams WHERE event_id='lifecycle-draft' AND seed=16 AND odds=2 AND start_round=1) THEN
+ RAISE EXCEPTION 'unrelated odds update blocked'; END IF;
+END $$;
+ROLLBACK;
+SELECT 'PASS: confirmed open start-round change rejected; roster/picks unchanged; same assignment and odds preserved';
