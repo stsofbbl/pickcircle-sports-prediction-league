@@ -99,3 +99,11 @@ INSERT INTO public.players VALUES(
  '00000000-0000-0000-0000-000000000001');
 INSERT INTO public.scores VALUES(
  'test-finalize','00000000-0000-0000-0000-000000000011',30);
+-- Match the production event archive column and member/admin RLS contract.
+ALTER TABLE public.events ADD COLUMN archived_at timestamptz;
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY events_select_members ON public.events FOR SELECT TO authenticated
+  USING (public.is_league_member(league_id));
+CREATE POLICY events_update_admin ON public.events FOR UPDATE TO authenticated
+  USING (public.is_league_admin(league_id))
+  WITH CHECK (public.is_league_admin(league_id));

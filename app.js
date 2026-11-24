@@ -2995,7 +2995,11 @@ function renderActiveEventManager() {
   const finalized = isResultFinalized(event);
   const canEditSettings = isAdmin && !finalized;
   const canEditResults = isAdmin && !finalized;
-  const statusActions = ["open", "resultWait", "archive"].map((status) => `
+  const onlineKoshien = isSupabaseAuthEnabled() && base === "koshien";
+  const availableStatuses = onlineKoshien
+    ? (event.status === "finalized" && finalized ? ["archive"] : [])
+    : ["open", "resultWait", "archive"];
+  const statusActions = availableStatuses.map((status) => `
     <button type="button" class="${event.status === status ? "is-active" : ""}" data-event-status="${escapeAttr(status)}" data-event-id="${escapeAttr(event.id)}" ${isAdmin ? "" : "disabled"}>${escapeHtml(statusLabel(status))}</button>
   `).join("");
 
@@ -4436,9 +4440,13 @@ function renderTournamentManageList() {
           <div class="tournament-manage-actions">
             <button type="button" data-event-manage="select" data-event-id="${escapeAttr(event.id)}">選択</button>
             ${canManage ? `
-              <button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
-              <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
-              <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>
+              ${isSupabaseAuthEnabled() && baseTemplateId(event.templateId) === "koshien"
+                ? (isActive && event.status === "finalized" && isResultFinalized(event)
+                  ? `<button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>`
+                  : "")
+                : `<button type="button" data-event-status="open" data-event-id="${escapeAttr(event.id)}">受付</button>
+                  <button type="button" data-event-status="resultWait" data-event-id="${escapeAttr(event.id)}">結果待ち</button>
+                  <button type="button" data-event-status="archive" data-event-id="${escapeAttr(event.id)}">アーカイブ</button>`}
               <button type="button" class="danger-action" data-event-delete data-event-id="${escapeAttr(event.id)}">削除</button>
             ` : ""}
           </div>
@@ -7729,6 +7737,39 @@ els.navLinks.forEach((link) => {
   });
 });
 
+let onlineKoshienArchiveBusy = false;
+
+async function archiveOnlineKoshienEvent(item, requestedStatus) {
+  if (onlineKoshienArchiveBusy) return;
+  if (requestedStatus !== "archive" || item.status !== "finalized" || !isResultFinalized(item)) {
+    alert("オンライン大会の状態変更は、この操作からはできません。");
+    return;
+  }
+  if (!isClubAdmin() || String(item.id) !== String(loadedKoshienOnlineEventId)
+      || String(item.id) !== String(state.activeEventId)) {
+    alert("大会を選択して最新のオンライン状態を読み込んでください。");
+    return;
+  }
+  const archive = window.YosoDataService?.koshien?.archiveEvent;
+  if (typeof archive !== "function") {
+    alert("アーカイブ機能を読み込めませんでした。再読み込みしてください。");
+    return;
+  }
+  if (!confirm(`「${item.name}」をアーカイブしますか？`)) return;
+  onlineKoshienArchiveBusy = true;
+  try {
+    await archive({ eventId: item.id });
+    const snapshot = await loadKoshienOnlineState({ force: true });
+    if (!snapshot?.ok || snapshot.event?.id !== item.id || snapshot.event?.status !== "archive") {
+      throw new Error("保存後の状態を確認できませんでした。再読み込みして確認してください。");
+    }
+  } catch (error) {
+    alert(error?.message || "オンライン大会をアーカイブできませんでした。");
+  } finally {
+    onlineKoshienArchiveBusy = false;
+  }
+}
+
 document.addEventListener("click", async (event) => {
   const clubButton = event.target.closest("[data-club-action]");
   if (clubButton) {
@@ -7767,6 +7808,10 @@ document.addEventListener("click", async (event) => {
     if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
     const item = (state.events || []).find((candidate) => candidate.id === statusButton.dataset.eventId);
     if (!item) return;
+    if (isSupabaseAuthEnabled() && baseTemplateId(item.templateId) === "koshien") {
+      await archiveOnlineKoshienEvent(item, statusButton.dataset.eventStatus);
+      return;
+    }
     item.status = statusButton.dataset.eventStatus;
     if (state.event?.id === item.id) state.event = item;
     render();

@@ -1170,6 +1170,28 @@
     };
   }
 
+  async function archiveKoshienEvent({ eventId } = {}) {
+    const normalizedEventId = String(eventId || "").trim();
+    if (!normalizedEventId) throw new Error("アーカイブする大会を指定してください。");
+    const supabase = await supabaseClient();
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || !user?.id) throw new Error("オンラインログインが必要です。");
+    const { data, error } = await supabase
+      .from("events")
+      .update({ status: "archive", archived_at: new Date().toISOString() })
+      .eq("id", normalizedEventId)
+      .eq("preset_type", "koshien")
+      .eq("status", "finalized")
+      .is("archived_at", null)
+      .select("id, status, archived_at")
+      .maybeSingle();
+    if (error) throw koshienSaveError("event_archive", error, "大会をアーカイブできませんでした。");
+    if (data?.id !== normalizedEventId || data.status !== "archive" || !data.archived_at) {
+      throw new Error("大会の状態が変更されたか、アーカイブ権限がありません。再読み込みして確認してください。");
+    }
+    return data;
+  }
+
   function isPredictionPublic(event) {
     const status = event?.status || "open";
     if (status === "resultWait" || status === "finalized" || status === "archive") return true;
@@ -1396,6 +1418,7 @@
       updateOdds: updateKoshienOdds,
       updateGameMultipliers: updateKoshienGameMultipliers,
       deleteEvent: deleteKoshienEvent,
+      archiveEvent: archiveKoshienEvent,
       loadPhase2DraftState,
       savePhase2DraftPick,
       loadLaterPhaseState,
