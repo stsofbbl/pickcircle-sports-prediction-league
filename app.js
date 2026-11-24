@@ -4424,7 +4424,78 @@ function createTournamentFromSettings({ fallbackName } = {}) {
 
 // Explicit online draft creation is intentionally separate from ordinary saves.
 let onlineKoshienDraftCreating = false;
-let pendingOnlineKoshienDraftRequest = null;
+
+// Keep one unresolved create request per authenticated user/club in this tab.
+// Persist before any network write, so an ambiguous response or page reload
+// cannot turn the same request into a second INSERT with a different ID.
+function pendingKoshienDraftKey(userId, leagueId) {
+  return "yoso-koshien-create-pending-v1:" + JSON.stringify([userId, leagueId]);
+}
+
+function readPendingKoshienDraft(userId, leagueId) {
+  const raw = sessionStorage.getItem(pendingKoshienDraftKey(userId, leagueId));
+  if (!raw) return null;
+  const record = JSON.parse(raw);
+  const fields = JSON.parse(record.signature);
+  if (!Array.isArray(fields) || fields.length !== 5 || fields[0] !== userId || fields[1] !== leagueId
+    || typeof fields[2] !== "string" || !fields[2].trim()
+    || !Number.isInteger(fields[3]) || fields[3] < 2020 || fields[3] > 2035
+    || typeof fields[4] !== "string" || !Number.isFinite(Date.parse(fields[4]))
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.eventId || "")) {
+    throw new Error("前回の大会作成記録を確認できません。大会一覧を確認してください。");
+  }
+  return { signature: record.signature, eventId: record.eventId, name: fields[2], season: fields[3], deadline: fields[4] };
+}
+
+function rememberPendingKoshienDraft(userId, leagueId, signature, eventId) {
+  sessionStorage.setItem(pendingKoshienDraftKey(userId, leagueId), JSON.stringify({ signature, eventId }));
+  const saved = readPendingKoshienDraft(userId, leagueId);
+  if (!saved || saved.eventId !== eventId || saved.signature !== signature) {
+    throw new Error("再試行用の大会IDを保存できません。作成は実行していません。");
+  }
+}
+
+function clearPendingKoshienDraft(userId, leagueId, eventId) {
+  try {
+    const record = readPendingKoshienDraft(userId, leagueId);
+    if (record?.eventId === eventId) sessionStorage.removeItem(pendingKoshienDraftKey(userId, leagueId));
+  } catch (error) {
+    console.warn("Koshien draft recovery record cleanup failed", error);
+  }
+}
+
+function restorePendingKoshienDraft() {
+  if (!isClubAdmin() || onlineKoshienDraftCreating || pendingKoshienLoadPromise) return;
+  const userId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  if (!userId || !leagueId) return;
+  try {
+    const record = readPendingKoshienDraft(userId, leagueId);
+    if (!record) return;
+    if (els.newTournamentTemplate) els.newTournamentTemplate.value = "koshien";
+    if (els.newTournamentSport) els.newTournamentSport.value = "baseball";
+    if (els.newTournamentName) els.newTournamentName.value = record.name;
+    if (els.newTournamentSeason) els.newTournamentSeason.value = String(record.season);
+    if (els.newTournamentDeadline) els.newTournamentDeadline.value = record.deadline;
+    setConnectionMessage("前回の作成内容を復元しました。大会一覧に該当大会があれば選択し、なければ同じ内容で作成を再試行してください。");
+  } catch (error) {
+    window.alert(error?.message || "前回の作成内容を確認できませんでした。");
+  }
+}
+
+function discardPendingKoshienDraftRecord() {
+  if (!isClubAdmin() || onlineKoshienDraftCreating || pendingKoshienLoadPromise) return;
+  const userId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  if (!userId || !leagueId) return;
+  if (!window.confirm("大会一覧で前回の大会が存在しないことを確認しましたか？ このタブの再試行記録だけを解除します。サーバー上の大会は削除されず、再作成すると重複する可能性があります。")) return;
+  try {
+    sessionStorage.removeItem(pendingKoshienDraftKey(userId, leagueId));
+    renderOnlineKoshienCatalog();
+  } catch (error) {
+    window.alert(error?.message || "再試行記録を解除できませんでした。");
+  }
+}
 
 async function createTournamentFromSettingsAction(options = {}) {
   if (isSupabaseAuthEnabled() && currentAuthUser() && !isClubAdmin()) return;
@@ -4454,11 +4525,23 @@ async function createTournamentFromSettingsAction(options = {}) {
     window.alert("大会の読込が完了してから作成してください。");
     return;
   }
-  if (!window.confirm(`${season}年の甲子園大会「${name}」を準備中として作成します。結果確定は管理者承認のみです。`)) return;
   const signature = JSON.stringify([userId, leagueId, name, season, deadline]);
-  const eventId = pendingOnlineKoshienDraftRequest?.signature === signature
-    ? pendingOnlineKoshienDraftRequest.eventId : String(event.id);
-  pendingOnlineKoshienDraftRequest = { signature, eventId };
+  let eventId;
+  try {
+    const pending = readPendingKoshienDraft(userId, leagueId);
+    if (pending && pending.signature !== signature) {
+      window.alert("前回の大会作成結果が未確認です。大会一覧の確認または前回の作成内容の復元を先に行ってください。");
+      return;
+    }
+    eventId = pending?.eventId || String(event.id);
+    if (!window.confirm(pending
+      ? `「${name}」の前回の作成を同じ大会IDで再確認しますか？`
+      : `${season}年の甲子園大会「${name}」を準備中として作成します。結果確定は管理者承認のみです。`)) return;
+    rememberPendingKoshienDraft(userId, leagueId, signature, eventId);
+  } catch (error) {
+    window.alert("安全に再試行できる作成記録を保存できません。大会作成は実行していません。");
+    return;
+  }
   onlineKoshienDraftCreating = true;
   let inserted = false;
   try {
@@ -4481,7 +4564,7 @@ async function createTournamentFromSettingsAction(options = {}) {
       || snapshot.event.status !== "draft" || String(state.event?.id || "") !== eventId) {
       throw new Error("大会は保存されましたが、再取得を確認できませんでした。再読込してください。");
     }
-    pendingOnlineKoshienDraftRequest = null;
+    clearPendingKoshienDraft(userId, leagueId, eventId);
     await refreshOnlineKoshienCatalog();
     if (els.newTournamentName) els.newTournamentName.value = "";
     setConnectionMessage("新しい甲子園大会を準備中として保存しました。");
@@ -4494,6 +4577,7 @@ async function createTournamentFromSettingsAction(options = {}) {
       : "大会を作成できませんでした。"));
   } finally {
     onlineKoshienDraftCreating = false;
+    renderOnlineKoshienCatalog();
   }
 }
 
@@ -4553,9 +4637,24 @@ function renderOnlineKoshienCatalog() {
   if (!scope) { host.innerHTML = ""; return; }
   const view = onlineKoshienCatalog.scope === scope ? onlineKoshienCatalog : { rows: [], busy: false, error: "", truncated: false };
   const label = view.busy ? "読込中…" : "オンライン大会を更新";
+  let recoveryMarkup = "";
+  if (isClubAdmin()) {
+    const [userId, leagueId] = JSON.parse(scope);
+    try {
+      const pending = readPendingKoshienDraft(userId, leagueId);
+      if (pending) {
+        recoveryMarkup = `<p class="field-note">作成結果が未確認：${escapeHtml(pending.name)}（${pending.season}年）。大会一覧を更新して確認してください。</p>
+          <button type="button" class="ghost-button small-button" data-koshien-restore-pending>前回の作成内容を復元</button>
+          <button type="button" class="ghost-button small-button" data-koshien-discard-pending>記録のみ解除</button>`;
+      }
+    } catch (error) {
+      recoveryMarkup = '<p class="field-note">作成記録を確認できません。大会一覧を確認してください。</p><button type="button" class="ghost-button small-button" data-koshien-discard-pending>記録のみ解除</button>';
+    }
+  }
   host.innerHTML = `
     <button class="ghost-button small-button" type="button" data-online-koshien-list-refresh ${view.busy ? "disabled" : ""}>${label}</button>
     ${view.error ? `<p class="auth-message is-error" role="status">${escapeHtml(view.error)}</p>` : ""}
+    ${recoveryMarkup}
     ${view.truncated ? '<p class="field-note">最新100件を表示しています。</p>' : ""}
     ${view.rows.map(row => `
       <article class="tournament-manage-row">
@@ -4614,12 +4713,15 @@ async function selectTournamentFromUi(eventId) {
     window.alert("オンラインクラブまたは読込状況を確認してください。");
     return;
   }
-  const [, leagueId] = JSON.parse(scope);
+  const [userId, leagueId] = JSON.parse(scope);
   const snapshot = await loadKoshienOnlineState({ force: true, exactEventId: id, expectedLeagueId: leagueId });
   if (!snapshot?.ok || String(snapshot.event?.id || "") !== id || String(state.event?.id || "") !== id) {
     window.alert("選択した大会を読み込めませんでした。大会一覧を更新してください。");
     return;
   }
+  // Explicit selection and exact read of the pending ID resolves the ambiguity,
+  // even if another administrator has since prepared or opened the event.
+  if (onlineKoshienCatalogScope() === scope) clearPendingKoshienDraft(userId, leagueId, id);
   await refreshOnlineKoshienCatalog();
 }
 
@@ -5053,7 +5155,7 @@ function renderKoshienForm() {
   const showPublic = koshienPhase1PredictionsPublic(state.event);
   els.eventForm.innerHTML = `
     <div class="worldcup-phase-panel koshien-preset-panel">
-      <span class="match-kicker">甲子園2026 / 8校指名</span>
+      <span class="match-kicker">甲子園${/^[0-9]{4}$/.test(String(state.event.season || "")) ? escapeHtml(String(state.event.season)) : ""} / 8校指名</span>
       <h3>夏の甲子園 8校ピック</h3>
       <p>49代表から8校を選び、キャプテン校は1.2倍で加点します。準々決勝以降の再抽選に左右されない、甲子園向けのYOSOプリセットです。</p>
       <div class="koshien-score-strip">
@@ -8065,6 +8167,14 @@ document.addEventListener("click", async (event) => {
     item.status = statusButton.dataset.eventStatus;
     if (state.event?.id === item.id) state.event = item;
     render();
+    return;
+  }
+  if (event.target.closest("[data-koshien-restore-pending]")) {
+    restorePendingKoshienDraft();
+    return;
+  }
+  if (event.target.closest("[data-koshien-discard-pending]")) {
+    discardPendingKoshienDraftRecord();
     return;
   }
   const refreshCatalog = event.target.closest("[data-online-koshien-list-refresh]");

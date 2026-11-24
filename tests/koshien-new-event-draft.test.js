@@ -212,3 +212,92 @@ test("draft open UI uses loaded ID and exact reload; official draft year is fixe
   assert.match(source,/fixedDraftSeason: true/);
   assert.equal((source.match(/config\.fixedDraftSeason \? config\.year : Number/g)||[]).length,3);
 });
+
+function draftRecoveryUiHarness(storage, options = {}) {
+  const calls = [], alerts = [], messages = [];
+  const start = app.indexOf("// Explicit online draft creation is intentionally separate from ordinary saves.");
+  const end = app.indexOf("function tournamentStatusFromDeadline", start);
+  let nextId = options.nextId || eventId;
+  const user = options.user || "admin", club = options.club || leagueId;
+  const ctx = vm.createContext({
+    console, sessionStorage: storage, onlineLeagueId: club,
+    currentAuthUser: () => ({id:user}), isSupabaseAuthEnabled: () => true,
+    isClubAdmin: () => true, baseTemplateId: x => x,
+    pendingKoshienLoadPromise: null,
+    state: {event:{id:"previous"},activeEventId:"previous"},
+    els: {newTournamentName:{value:"大会"},newTournamentSeason:{value:"2027"},
+      newTournamentTemplate:{value:"koshien"},newTournamentSport:{value:"baseball"},
+      newTournamentDeadline:{value:"2035-08-01T00:00"}},
+    createTournamentFromSettings: () => ({id:nextId,templateId:"koshien",deadline:ctx.els.newTournamentDeadline.value}),
+    addAndSelectEvent: () => {throw Error("unexpected local create");},
+    render(){}, renderOnlineKoshienCatalog(){}, refreshOnlineKoshienCatalog:async()=>{},
+    setConnectionMessage: message => messages.push(message),
+    loadKoshienOnlineState: async opts => {
+      if(options.reloadFails) return null;
+      ctx.state.event={id:opts.exactEventId,status:"draft"};
+      ctx.state.activeEventId=opts.exactEventId;
+      return {ok:true,event:ctx.state.event};
+    },
+    window:{alert:message=>alerts.push(message),confirm:()=>options.confirm!==false,
+      YosoDataService:{shouldAutoSaveKoshien:()=>true,koshien:{createDraft:async payload=>{
+        calls.push(payload);
+        if(options.createFails) throw Error("connection interrupted");
+        return {ok:true,eventId:payload.eventId,status:"draft"};
+      }}}},
+  });
+  vm.runInContext(app.slice(start,end),ctx);
+  return {ctx,calls,alerts,messages};
+}
+function memorySessionStorage() {
+  const records = new Map();
+  return {getItem:key=>records.get(key)??null,setItem:(key,value)=>records.set(key,value),removeItem:key=>records.delete(key),records};
+}
+test("ambiguous insert survives a new page instance and reuses exact ID",async()=>{
+  const storage=memorySessionStorage();
+  const first=draftRecoveryUiHarness(storage,{createFails:true});
+  await first.ctx.createTournamentFromSettingsAction();
+  assert.equal(first.calls[0].eventId,eventId);
+  assert.equal(storage.records.size,1);
+  const second=draftRecoveryUiHarness(storage,{nextId:"33333333-3333-4333-8333-333333333333"});
+  second.ctx.els.newTournamentName.value="違う大会";
+  await second.ctx.createTournamentFromSettingsAction();
+  assert.equal(second.calls.length,0);
+  second.ctx.restorePendingKoshienDraft();
+  assert.equal(second.ctx.els.newTournamentName.value,"大会");
+  await second.ctx.createTournamentFromSettingsAction();
+  assert.equal(second.calls[0].eventId,eventId);
+  assert.equal(storage.records.size,0);
+});
+test("failed exact read preserves ID; other user and club do not reuse it",async()=>{
+  const storage=memorySessionStorage();
+  const first=draftRecoveryUiHarness(storage,{reloadFails:true});
+  await first.ctx.createTournamentFromSettingsAction();
+  assert.equal(storage.records.size,1);
+  for(const opts of [{user:"other"},{club:"other"}]){
+    const other=draftRecoveryUiHarness(storage,{...opts,nextId:"33333333-3333-4333-8333-333333333333"});
+    await other.ctx.createTournamentFromSettingsAction();
+    assert.equal(other.calls[0].eventId,"33333333-3333-4333-8333-333333333333");
+    assert.equal(storage.records.size,1);
+  }
+});
+test("storage failure blocks INSERT, and cancel does not persist a request",async()=>{
+  const storage=memorySessionStorage();
+  const denied=draftRecoveryUiHarness({...storage,setItem:()=>{throw Error("quota");}});
+  await denied.ctx.createTournamentFromSettingsAction();
+  assert.equal(denied.calls.length,0);
+  assert.equal(denied.alerts.length,1);
+  const cancelled=draftRecoveryUiHarness(storage,{confirm:false});
+  await cancelled.ctx.createTournamentFromSettingsAction();
+  assert.equal(cancelled.calls.length,0);
+  assert.equal(storage.records.size,0);
+});
+test("explicit record cleanup only affects matching user, club and event",async()=>{
+  const storage=memorySessionStorage();
+  const first=draftRecoveryUiHarness(storage,{createFails:true});
+  await first.ctx.createTournamentFromSettingsAction();
+  first.ctx.clearPendingKoshienDraft("admin",leagueId,"other");
+  first.ctx.clearPendingKoshienDraft("other",leagueId,eventId);
+  assert.equal(storage.records.size,1);
+  first.ctx.clearPendingKoshienDraft("admin",leagueId,eventId);
+  assert.equal(storage.records.size,0);
+});
