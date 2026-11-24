@@ -221,6 +221,7 @@ function draftRecoveryUiHarness(storage, options = {}) {
   const user = options.user || "admin", club = options.club || leagueId;
   const ctx = vm.createContext({
     console, sessionStorage: storage, onlineLeagueId: club,
+    crypto: options.crypto === null ? undefined : require("node:crypto").webcrypto, TextEncoder,
     currentAuthUser: () => ({id:user}), isSupabaseAuthEnabled: () => true,
     isClubAdmin: () => true, baseTemplateId: x => x,
     pendingKoshienLoadPromise: null,
@@ -256,7 +257,8 @@ test("ambiguous insert survives a new page instance and reuses exact ID",async()
   const storage=memorySessionStorage();
   const first=draftRecoveryUiHarness(storage,{createFails:true});
   await first.ctx.createTournamentFromSettingsAction();
-  assert.equal(first.calls[0].eventId,eventId);
+  const stableId = first.calls[0].eventId;
+  assert.match(stableId,/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(storage.records.size,1);
   const second=draftRecoveryUiHarness(storage,{nextId:"33333333-3333-4333-8333-333333333333"});
   second.ctx.els.newTournamentName.value="違う大会";
@@ -265,7 +267,7 @@ test("ambiguous insert survives a new page instance and reuses exact ID",async()
   second.ctx.restorePendingKoshienDraft();
   assert.equal(second.ctx.els.newTournamentName.value,"大会");
   await second.ctx.createTournamentFromSettingsAction();
-  assert.equal(second.calls[0].eventId,eventId);
+  assert.equal(second.calls[0].eventId,stableId);
   assert.equal(storage.records.size,0);
 });
 test("failed exact read preserves ID; other user and club do not reuse it",async()=>{
@@ -276,7 +278,7 @@ test("failed exact read preserves ID; other user and club do not reuse it",async
   for(const opts of [{user:"other"},{club:"other"}]){
     const other=draftRecoveryUiHarness(storage,{...opts,nextId:"33333333-3333-4333-8333-333333333333"});
     await other.ctx.createTournamentFromSettingsAction();
-    assert.equal(other.calls[0].eventId,"33333333-3333-4333-8333-333333333333");
+    assert.notEqual(other.calls[0].eventId,first.calls[0].eventId);
     assert.equal(storage.records.size,1);
   }
 });
@@ -296,8 +298,40 @@ test("explicit record cleanup only affects matching user, club and event",async(
   const first=draftRecoveryUiHarness(storage,{createFails:true});
   await first.ctx.createTournamentFromSettingsAction();
   first.ctx.clearPendingKoshienDraft("admin",leagueId,"other");
-  first.ctx.clearPendingKoshienDraft("other",leagueId,eventId);
+  first.ctx.clearPendingKoshienDraft("other",leagueId,first.calls[0].eventId);
   assert.equal(storage.records.size,1);
-  first.ctx.clearPendingKoshienDraft("admin",leagueId,eventId);
+  first.ctx.clearPendingKoshienDraft("admin",leagueId,first.calls[0].eventId);
   assert.equal(storage.records.size,0);
+});
+
+test("independent browser sessions on separate devices use the same ID for exact creator and inputs", async () => {
+  const a=draftRecoveryUiHarness(memorySessionStorage(),{createFails:true});
+  const b=draftRecoveryUiHarness(memorySessionStorage(),{nextId:"33333333-3333-4333-8333-333333333333"});
+  await Promise.all([a.ctx.createTournamentFromSettingsAction(),b.ctx.createTournamentFromSettingsAction()]);
+  assert.equal(a.calls[0].eventId,b.calls[0].eventId);
+  for(const field of ["newTournamentName","newTournamentSeason","newTournamentDeadline"]) {
+    const c=draftRecoveryUiHarness(memorySessionStorage());
+    c.ctx.els[field].value=({newTournamentName:"別大会",newTournamentSeason:"2028",newTournamentDeadline:"2035-08-02T00:00"})[field];
+    await c.ctx.createTournamentFromSettingsAction();
+    assert.notEqual(c.calls[0].eventId,a.calls[0].eventId);
+  }
+});
+test("same-tab concurrent clicks while deriving ID cannot issue two writes", async () => {
+  const f=draftRecoveryUiHarness(memorySessionStorage());
+  await Promise.all([f.ctx.createTournamentFromSettingsAction(),f.ctx.createTournamentFromSettingsAction()]);
+  assert.equal(f.calls.length,1);
+});
+test("missing secure crypto blocks new online creation without random ID fallback", async () => {
+  const storage=memorySessionStorage(), f=draftRecoveryUiHarness(storage,{crypto:null});
+  await f.ctx.createTournamentFromSettingsAction();
+  assert.equal(f.calls.length,0);
+  assert.equal(storage.records.size,0);
+  assert.match(f.alerts[0],/安全な大会作成ID/);
+});
+test("pre-existing pending IDs are preserved across the new deterministic algorithm", async () => {
+  const storage=memorySessionStorage(), f=draftRecoveryUiHarness(storage);
+  const signature=JSON.stringify(["admin",leagueId,"大会",2027,"2035-08-01T00:00"]);
+  f.ctx.rememberPendingKoshienDraft("admin",leagueId,signature,eventId);
+  await f.ctx.createTournamentFromSettingsAction();
+  assert.equal(f.calls[0].eventId,eventId);
 });

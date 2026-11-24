@@ -4440,6 +4440,22 @@ let onlineKoshienDraftCreating = false;
 // Keep one unresolved create request per authenticated user/club in this tab.
 // Persist before any network write, so an ambiguous response or page reload
 // cannot turn the same request into a second INSERT with a different ID.
+// Stable per creator and exact creation inputs across tabs/devices. Existing
+// pending records keep their original IDs for compatibility. Never use upsert.
+async function stableKoshienDraftId(userId, leagueId, name, season, deadline) {
+  if (!globalThis.crypto?.subtle || typeof TextEncoder !== "function") {
+    throw new Error("安全な大会作成IDを生成できません。HTTPS接続を確認してください。");
+  }
+  const canonical = JSON.stringify(["yoso-koshien-create-v1", userId, leagueId, name, season, new Date(deadline).toISOString()]);
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)));
+  const bytes = digest.slice(0, 16);
+  // RFC 9562 UUIDv8 layout: custom deterministic data with standard variant.
+  bytes[6] = (bytes[6] & 15) | 128;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+  return [hex.slice(0,8), hex.slice(8,12), hex.slice(12,16), hex.slice(16,20), hex.slice(20)].join("-");
+}
+
 function pendingKoshienDraftKey(userId, leagueId) {
   return "yoso-koshien-create-pending-v1:" + JSON.stringify([userId, leagueId]);
 }
@@ -4539,24 +4555,25 @@ async function createTournamentFromSettingsAction(options = {}) {
   }
   const signature = JSON.stringify([userId, leagueId, name, season, deadline]);
   let eventId;
+  onlineKoshienDraftCreating = true;
+  let inserted = false;
   try {
     const pending = readPendingKoshienDraft(userId, leagueId);
     if (pending && pending.signature !== signature) {
       window.alert("前回の大会作成結果が未確認です。大会一覧の確認または前回の作成内容の復元を先に行ってください。");
       return;
     }
-    eventId = pending?.eventId || String(event.id);
     if (!window.confirm(pending
       ? `「${name}」の前回の作成を同じ大会IDで再確認しますか？`
-      : `${season}年の甲子園大会「${name}」を準備中として作成します。結果確定は管理者承認のみです。`)) return;
+      : `${season}年の甲子園大会「${name}」を準備中として作成します。結果確定は管理者承認のみです。同じ管理者・クラブ・大会名・年度・締切での作成は同じ大会として扱います。`)) return;
+    eventId = pending?.eventId || await stableKoshienDraftId(userId, leagueId, name, season, deadline);
+    if (!isClubAdmin() || String(currentAuthUser()?.id || "") !== userId
+      || String(onlineLeagueId || "") !== leagueId
+      || String(state.activeEventId || state.event?.id || "") !== originalEventId
+      || pendingKoshienLoadPromise) {
+      throw new Error("作成対象のクラブ・大会またはログイン状態が変わりました。大会作成は実行していません。");
+    }
     rememberPendingKoshienDraft(userId, leagueId, signature, eventId);
-  } catch (error) {
-    window.alert("安全に再試行できる作成記録を保存できません。大会作成は実行していません。");
-    return;
-  }
-  onlineKoshienDraftCreating = true;
-  let inserted = false;
-  try {
     const response = await window.YosoDataService.koshien.createDraft({
       eventId, leagueId, name, season, deadline,
     });
@@ -4578,8 +4595,10 @@ async function createTournamentFromSettingsAction(options = {}) {
     }
     clearPendingKoshienDraft(userId, leagueId, eventId);
     await refreshOnlineKoshienCatalog();
+    if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId
+      || String(state.activeEventId || state.event?.id || "") !== eventId) return;
     if (els.newTournamentName) els.newTournamentName.value = "";
-    setConnectionMessage("新しい甲子園大会を準備中として保存しました。");
+    setConnectionMessage(response.recovered ? "前回作成した準備中の甲子園大会を確認しました。" : "新しい甲子園大会を準備中として保存しました。");
     render();
   } catch (error) {
     // Keep the request ID on an ambiguous failure; retry cannot insert a
