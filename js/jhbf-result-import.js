@@ -578,9 +578,11 @@
   }
 
   function sourceConfig() {
-    const draftYear = Number(state.event?.season);
-    if (state.event?.status === "draft" && Number.isInteger(draftYear) && draftYear >= 2020 && draftYear <= 2035) {
-      return { competitionType: "summer", year: draftYear, fixedDraftSeason: true };
+    // A persisted season remains authoritative after opening, including result
+    // entry. Legacy events without a season retain their existing selector.
+    const season = Number(state.event?.season);
+    if (Number.isInteger(season) && season >= 2020 && season <= 2035) {
+      return { competitionType: "summer", year: season, fixedSeason: true };
     }
     const config = state.event?.config?.externalResults || {};
     const eventYear = Number((String(state.event?.name || "").match(/20\d{2}/) || [])[0]);
@@ -830,11 +832,11 @@
           <span class="status-label pending">半自動</span>
         </div>
         <div class="form-grid">
-          <label class="field"><span>大会</span><select data-jhbf-competition ${config.fixedDraftSeason ? "disabled" : disabled}>
+          <label class="field"><span>大会</span><select data-jhbf-competition ${config.fixedSeason ? "disabled" : disabled}>
             <option value="summer" ${config.competitionType === "summer" ? "selected" : ""}>夏の選手権</option>
             <option value="senbatsu" ${config.competitionType === "senbatsu" ? "selected" : ""}>春の選抜</option>
           </select></label>
-          <label class="field"><span>年度</span><input data-jhbf-year type="number" min="2020" max="2035" value="${config.year}" ${config.fixedDraftSeason ? "disabled" : disabled}></label>
+          <label class="field"><span>年度</span><input data-jhbf-year type="number" min="2020" max="2035" value="${config.year}" ${config.fixedSeason ? "disabled" : disabled}></label>
           <label class="field"><span>取得基準日</span><input data-jhbf-base-date type="date" value="${escapeHtml(view.baseDate)}" ${disabled}></label>
         </div>
         <div class="result-flow-actions">
@@ -931,6 +933,16 @@
     view.pendingImports = {};
   }
 
+  async function reloadImportScope(scope) {
+    if (!isImportScopeCurrent(scope) || typeof loadKoshienOnlineState !== "function") return null;
+    const leagueId = JSON.parse(scope.key)[2];
+    const snapshot = leagueId
+      ? await loadKoshienOnlineState({ force: true, exactEventId: scope.eventId, expectedLeagueId: leagueId })
+      : await loadKoshienOnlineState({ force: true });
+    return isImportScopeCurrent(scope) && snapshot?.ok && String(snapshot.event?.id || "") === scope.eventId
+      ? snapshot : null;
+  }
+
   async function refreshPreview(scope = captureImportScope()) {
     if (!isImportScopeCurrent(scope)) return false;
     const context = await loadContext(scope.eventId);
@@ -944,9 +956,16 @@
     const scope = captureImportScope();
     if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
     const config = sourceConfig();
-    const competitionType = config.fixedDraftSeason ? "summer" : (root.querySelector("[data-jhbf-competition]")?.value === "senbatsu" ? "senbatsu" : "summer");
-    const year = config.fixedDraftSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    const competitionType = config.fixedSeason ? "summer" : (root.querySelector("[data-jhbf-competition]")?.value === "senbatsu" ? "senbatsu" : "summer");
+    const year = config.fixedSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
     const baseDate = root.querySelector("[data-jhbf-base-date]")?.value || jstDateValue();
+    if (!Number.isInteger(year) || year < 2020 || year > 2035
+      || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate) || Number(baseDate.slice(0,4)) !== year) {
+      view.message = "取得基準日は大会年度と同じ年の日付を指定してください。";
+      view.messageKind = "error";
+      renderActiveEventManager();
+      return;
+    }
     state.event.config.externalResults = { competitionType, year };
     saveLocalStateOnly();
     view.baseDate = baseDate;
@@ -983,7 +1002,7 @@
     const scope = captureImportScope();
     if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
     const config = sourceConfig();
-    const year = config.fixedDraftSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    const year = config.fixedSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
     state.event.config.externalResults = { competitionType: "summer", year };
     saveLocalStateOnly();
     view.loading = true;
@@ -1022,7 +1041,7 @@
     const scope = captureImportScope();
     if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
     const config = sourceConfig();
-    const year = config.fixedDraftSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
+    const year = config.fixedSeason ? config.year : Number(root.querySelector("[data-jhbf-year]")?.value || config.year);
     view.loading = true;
     view.startRoundMessage = "日本高野連公式の組み合わせ表を取得しています…";
     view.startRoundMessageKind = "pending";
@@ -1134,7 +1153,9 @@
   }
 
   async function handleApplyOfficialFirstRoundMatches() {
-    const eventId = String(state.event?.id || "");
+    const scope = captureImportScope();
+    if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
+    const eventId = scope.eventId;
     const preview = buildOfficialFirstRoundPreview(
       view.startRoundMatches,
       view.context || {},
@@ -1165,28 +1186,35 @@
         sourceUrl: view.startRoundSourceUrl,
         fetchedAt: view.startRoundFetchedAt,
       });
+      if (!isImportScopeCurrent(scope)) return;
       if (Number(saved?.count) !== 17) throw new Error("17試合を登録できませんでした。");
-      const snapshot = typeof loadKoshienOnlineState === "function"
-        ? await loadKoshienOnlineState({ force: true })
-        : null;
+      const snapshot = await reloadImportScope(scope);
+      if (!isImportScopeCurrent(scope)) return;
       if (!snapshot?.ok) throw new Error("登録後のオンラインデータを再読込できませんでした。");
-      view.context = await loadContext(eventId);
+      const context = await loadContext(eventId);
+      if (!isImportScopeCurrent(scope)) return;
+      view.context = context;
       view.startRoundMessage = saved?.idempotent
         ? "同じ公式組み合わせを登録済みです。試合カードの内容を維持しました。"
         : "公式組み合わせ17試合を試合カードへ反映しました。";
       view.startRoundMessageKind = "success";
     } catch (error) {
+      if (!isImportScopeCurrent(scope)) return;
       view.startRoundMessage = error?.message || "公式組み合わせを試合カードへ反映できませんでした。";
       view.startRoundMessageKind = "error";
     } finally {
-      view.applying = false;
-      renderActiveEventManager();
-      renderScoresOnly();
+      if (isImportScopeCurrent(scope)) {
+        view.applying = false;
+        renderActiveEventManager();
+        renderScoresOnly();
+      }
     }
   }
 
   async function handleApplyOfficialSecondRoundSlots() {
-    const eventId = String(state.event?.id || "");
+    const scope = captureImportScope();
+    if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
+    const eventId = scope.eventId;
     const preview = buildOfficialSecondRoundPreview(
       view.secondRoundMatches,
       view.context || {},
@@ -1217,23 +1245,28 @@
         sourceUrl: view.startRoundSourceUrl,
         fetchedAt: view.startRoundFetchedAt,
       });
+      if (!isImportScopeCurrent(scope)) return;
       if (Number(saved?.count) !== 16) throw new Error("16試合を登録できませんでした。");
-      const snapshot = typeof loadKoshienOnlineState === "function"
-        ? await loadKoshienOnlineState({ force: true })
-        : null;
+      const snapshot = await reloadImportScope(scope);
+      if (!isImportScopeCurrent(scope)) return;
       if (!snapshot?.ok) throw new Error("登録後のオンラインデータを再読込できませんでした。");
-      view.context = await loadContext(eventId);
+      const context = await loadContext(eventId);
+      if (!isImportScopeCurrent(scope)) return;
+      view.context = context;
       view.startRoundMessage = saved?.idempotent
         ? "同じ公式2回戦配置を登録済みです。試合カードの内容を維持しました。"
         : "公式2回戦配置16試合を反映しました。完了済みR1の勝者も所定位置へ反映しました。";
       view.startRoundMessageKind = "success";
     } catch (error) {
+      if (!isImportScopeCurrent(scope)) return;
       view.startRoundMessage = error?.message || "公式2回戦配置を反映できませんでした。";
       view.startRoundMessageKind = "error";
     } finally {
-      view.applying = false;
-      renderActiveEventManager();
-      renderScoresOnly();
+      if (isImportScopeCurrent(scope)) {
+        view.applying = false;
+        renderActiveEventManager();
+        renderScoresOnly();
+      }
     }
   }
 
@@ -1336,6 +1369,8 @@
   }
 
   async function handleAlias(button) {
+    const scope = captureImportScope();
+    if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
     const control = button.closest("[data-jhbf-alias-control]");
     const teamId = control?.querySelector("[data-jhbf-alias-team]")?.value || "";
     const externalName = button.dataset.jhbfSaveAlias || "";
@@ -1345,19 +1380,25 @@
       renderActiveEventManager();
       return;
     }
+    view.applying = true;
     view.message = "別名を保存しています…";
     view.messageKind = "pending";
     renderActiveEventManager();
     try {
-      await saveAlias({ eventId: view.eventId, externalName, teamId });
-      await refreshPreview();
+      await saveAlias({ eventId: scope.eventId, externalName, teamId });
+      if (!isImportScopeCurrent(scope) || !await refreshPreview(scope)) return;
       view.message = `${externalName}の対応を保存しました。`;
       view.messageKind = "success";
     } catch (error) {
+      if (!isImportScopeCurrent(scope)) return;
       view.message = error?.message || "別名を保存できませんでした。";
       view.messageKind = "error";
+    } finally {
+      if (isImportScopeCurrent(scope)) {
+        view.applying = false;
+        renderActiveEventManager();
+      }
     }
-    renderActiveEventManager();
   }
 
   function localMatchFor(row) {
@@ -1382,6 +1423,7 @@
   }
 
   function handlePrefill(button) {
+    if (!isImportScopeCurrent(captureImportScope()) || view.loading || view.applying) return;
     const row = view.rows.find((candidate) => candidate.status === "ready" && candidate.externalKey === button.dataset.jhbfPrefill);
     const localMatch = row ? localMatchFor(row) : null;
     if (!row || !localMatch) {
@@ -1400,10 +1442,12 @@
     renderActiveEventManager();
   }
 
-  async function recordPendingImportForMatch(matchId) {
+  async function recordPendingImportForMatch(matchId, scope = captureImportScope()) {
+    if (!isImportScopeCurrent(scope)) return { skipped: true, reason: "event_scope_changed" };
     const row = view.pendingImports[String(matchId || "")];
     if (!row) return null;
-    const context = await loadContext(view.eventId);
+    const context = await loadContext(scope.eventId);
+    if (!isImportScopeCurrent(scope)) return { skipped: true, reason: "event_scope_changed" };
     const savedMatch = (context.matches || []).find((match) => (
       match.roundKey === row.canonicalPayload.roundKey
       && Number(match.matchNo) === Number(row.match.matchNo)
@@ -1421,7 +1465,7 @@
       view.rows = buildImportPreview(view.sourceRows, context);
       return { skipped: true, reason: "official_prefill_was_edited" };
     }
-    await recordImports(view.eventId, [{
+    await recordImports(scope.eventId, [{
       source: "jhbf",
       externalKey: row.externalKey,
       sourceUrl: row.sourceUrl,
@@ -1430,13 +1474,15 @@
       normalizedPayload: row.canonicalPayload,
       rawPayload: row.rawPayload || {},
     }]);
+    if (!isImportScopeCurrent(scope)) return { recorded: true, scopeChanged: true };
     delete view.pendingImports[String(matchId || "")];
-    view.context = await loadContext(view.eventId);
-    view.rows = buildImportPreview(view.sourceRows, view.context);
+    await refreshPreview(scope);
     return { recorded: true };
   }
 
   async function handleApply(root) {
+    const scope = captureImportScope();
+    if (!isImportScopeCurrent(scope) || view.loading || view.applying) return;
     const selectedKeys = new Set([...root.querySelectorAll("[data-jhbf-select]:checked")].map((input) => input.dataset.jhbfSelect));
     const selectedRows = view.rows.filter((row) => row.status === "ready" && selectedKeys.has(row.externalKey));
     if (!selectedRows.length) {
@@ -1463,7 +1509,9 @@
       const saveResult = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
       if (saveResult?.skipped || saveResult?.partial) throw new Error("Supabaseへの結果保存が完了しませんでした。");
       onlineSaved = true;
-      const savedContext = await loadContext(view.eventId);
+      if (!isImportScopeCurrent(scope)) return;
+      const savedContext = await loadContext(scope.eventId);
+      if (!isImportScopeCurrent(scope)) return;
       const savedMatches = Array.isArray(savedContext.matches) ? savedContext.matches : [];
       const auditRows = selectedRows.map((row) => {
         const savedMatch = savedMatches.find((match) => match.matchId
@@ -1483,22 +1531,26 @@
           rawPayload: row.rawPayload || {},
         };
       });
-      await recordImports(view.eventId, auditRows);
+      await recordImports(scope.eventId, auditRows);
+      if (!isImportScopeCurrent(scope)) return;
       if (typeof refreshKoshienPhase2DraftState === "function") await refreshKoshienPhase2DraftState({ renderAfter: false });
+      if (!isImportScopeCurrent(scope)) return;
       if (typeof refreshKoshienLaterPhaseState === "function") await refreshKoshienLaterPhaseState({ renderAfter: false });
-      await refreshPreview();
+      if (!isImportScopeCurrent(scope) || !await refreshPreview(scope)) return;
       view.message = `${selectedRows.length}試合を反映し、ポイントとランキングを再計算しました。`;
       view.messageKind = "success";
       setKoshienMatchMessage(view.message, "success");
     } catch (error) {
       console.warn("JHBF result apply failed", error);
+      if (!isImportScopeCurrent(scope)) return;
       if (!onlineSaved) {
         snapshots.forEach(({ match, before }) => Object.assign(match, before));
         applyKoshienMatchFinishes();
         saveLocalStateOnly();
         renderScoresOnly();
       } else {
-        try { await refreshPreview(); } catch {}
+        try { await refreshPreview(scope); } catch {}
+        if (!isImportScopeCurrent(scope)) return;
       }
       view.message = onlineSaved
         ? "試合結果は保存されましたが、取得履歴の記録に失敗しました。再取得して状態を確認してください。"
@@ -1506,9 +1558,11 @@
       view.messageKind = "error";
       setKoshienMatchMessage(view.message, "error");
     } finally {
-      view.applying = false;
-      renderActiveEventManager();
-      renderScoresOnly();
+      if (isImportScopeCurrent(scope)) {
+        view.applying = false;
+        renderActiveEventManager();
+        renderScoresOnly();
+      }
     }
   }
 
@@ -1622,6 +1676,8 @@
     confirmStartRoundsOnline,
     representativeKeyFor,
     prefillOfficialResult,
+    captureImportScope,
+    isImportScopeCurrent,
     recordPendingImportForMatch,
     sameCompletedMatch,
     installBrowser,

@@ -5310,6 +5310,14 @@ function validateKoshienMatchResult(match) {
 }
 
 async function saveKoshienMatchResult(matchId) {
+  const importApi = window.YosoJhbfResults;
+  const importScope = importApi?.captureImportScope?.();
+  const eventId = String(state.event?.id || "");
+  const userId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  const scopeIsCurrent = () => String(state.event?.id || "") === eventId
+    && String(currentAuthUser()?.id || "") === userId && String(onlineLeagueId || "") === leagueId
+    && (!importScope?.eventId || importApi.isImportScopeCurrent(importScope));
   const match = koshienMatchById(matchId);
   if (!match) return false;
   match.winner_id = window.YosoKoshienResults.inferMatchWinner(match);
@@ -5344,15 +5352,24 @@ async function saveKoshienMatchResult(matchId) {
   renderActiveEventManager();
   try {
     const result = await saveKoshienOnlineNow({ participantName: currentKoshienParticipantName(), updateConnection: false });
+    if (!scopeIsCurrent()) return false;
+    if (result?.skipped || result?.partial) {
+      setKoshienMatchMessage(koshienSaveOutcomeMessage(result, ""), "error");
+      renderScoresOnly();
+      return false;
+    }
     await Promise.all([
       refreshKoshienPhase2DraftState({ renderAfter: false }),
       refreshKoshienLaterPhaseState({ renderAfter: false }),
     ]);
-    if (window.YosoJhbfResults?.recordPendingImportForMatch) {
+    if (!scopeIsCurrent()) return false;
+    if (importApi?.recordPendingImportForMatch) {
       try {
-        await window.YosoJhbfResults.recordPendingImportForMatch(matchId);
+        await importApi.recordPendingImportForMatch(matchId, importScope);
+        if (!scopeIsCurrent()) return false;
       } catch (auditError) {
         console.warn("JHBF import audit failed", auditError);
+        if (!scopeIsCurrent()) return false;
         setKoshienMatchMessage("試合結果は保存されましたが、公式取得履歴を記録できませんでした。再取得して状態を確認してください。", "error");
         renderScoresOnly();
         return false;
@@ -5362,6 +5379,7 @@ async function saveKoshienMatchResult(matchId) {
     renderScoresOnly();
     return !(result?.skipped || result?.partial);
   } catch (error) {
+    if (!scopeIsCurrent()) return false;
     setKoshienMatchMessage(koshienStructuredSaveErrorMessage(error), "error");
     renderScoresOnly();
     return false;

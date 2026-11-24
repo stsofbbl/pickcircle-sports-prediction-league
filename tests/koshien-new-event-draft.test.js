@@ -209,8 +209,8 @@ test("draft open UI uses loaded ID and exact reload; official draft year is fixe
   assert.match(app,/openDraft\(\{ eventId: id, expectedRevision: loadedKoshienResultRevision \}\)/);
   assert.match(app,/exactEventId: id, expectedLeagueId: leagueId/);
   const source=fs.readFileSync(path.join(__dirname,"../js/jhbf-result-import.js"),"utf8");
-  assert.match(source,/fixedDraftSeason: true/);
-  assert.equal((source.match(/config\.fixedDraftSeason \? config\.year : Number/g)||[]).length,3);
+  assert.match(source,/fixedSeason: true/);
+  assert.equal((source.match(/config\.fixedSeason \? config\.year : Number/g)||[]).length,3);
 });
 
 function draftRecoveryUiHarness(storage, options = {}) {
