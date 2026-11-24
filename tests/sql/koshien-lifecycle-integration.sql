@@ -149,8 +149,8 @@ ROLLBACK;
 SELECT 'PASS: confirmed open start-round change rejected; roster/picks unchanged; same assignment and odds preserved';
 
 -- TEST-ONLY prototype: official import identity constraints. Do not apply to
--- production. Reuses actual manual-record, auto-apply and match-status sync
--- RPC bodies captured 2026-11-25, plus a privileged direct DML probe.
+-- production. Reuses the actual manual-record and match-status sync RPC bodies
+-- captured 2026-11-25; the auto-sync writer is represented by privileged DML.
 -- Explicit season required here; legacy null-season policy requires review.
 BEGIN;
 UPDATE public.events SET season='2026' WHERE id='test-finalize';
@@ -413,7 +413,6 @@ DO $$ BEGIN
  EXCEPTION WHEN check_violation THEN NULL; END;
  IF (SELECT count(*) FROM public.external_match_imports WHERE status='confirmed')<>1 THEN RAISE EXCEPTION 'history changed'; END IF;
 END $$;
-
 -- Extend the disposable fixture for the real production auto-apply RPC.
 -- No service key, HTTP call or real event data is used.
 ALTER TABLE public.matches ADD COLUMN metadata jsonb DEFAULT '{}'::jsonb;
@@ -519,20 +518,10 @@ begin
        or (v_team2_score > v_team1_score and (v_winner_id <> v_team2_id or v_loser_id <> v_team1_id)) then
       raise exception 'invalid automatic result payload';
     end if;
-    if coalesce(v_external_key, '') !~ '^jhbf:(summer|senbatsu):[0-9]{4}:[0-9]{4}-[0-9]{2}-[0-9]{2}:[1-9][0-9]* OR
- EXISTS(SELECT 1 FROM public.events WHERE id='test-finalize' AND season IS NOT NULL) THEN
-  RAISE EXCEPTION 'test prototype leaked schema or data'; END IF;
-END $$;
-SELECT 'PASS: import identity prototype, manual retry, cancellation/reconfirmation, RLS, privileged invalid write, rollback';
- then
+    if coalesce(v_external_key, '') !~ '^jhbf:(summer|senbatsu):[0-9]{4}:[0-9]{4}-[0-9]{2}-[0-9]{2}:[1-9][0-9]*$' then
       raise exception 'invalid external match key';
     end if;
-    if coalesce(v_source_url, '') !~ '^https://(www\.)?jhbf\.or\.jp/(sensyuken|senbatsu)/[0-9]{4}/schedule/schedule_[0-9]{8}\.html OR
- EXISTS(SELECT 1 FROM public.events WHERE id='test-finalize' AND season IS NOT NULL) THEN
-  RAISE EXCEPTION 'test prototype leaked schema or data'; END IF;
-END $$;
-SELECT 'PASS: import identity prototype, manual retry, cancellation/reconfirmation, RLS, privileged invalid write, rollback';
- then
+    if coalesce(v_source_url, '') !~ '^https://(www\.)?jhbf\.or\.jp/(sensyuken|senbatsu)/[0-9]{4}/schedule/schedule_[0-9]{8}\.html$' then
       raise exception 'source URL is outside the JHBF allowlist';
     end if;
     if jsonb_typeof(coalesce(v_normalized, 'null'::jsonb)) <> 'object'
@@ -705,42 +694,42 @@ CREATE TEMP TABLE fixture_auto_baseline AS SELECT
  (SELECT jsonb_agg(to_jsonb(s) ORDER BY player_id) FROM public.scores s WHERE event_id='test-finalize') AS scores,
  (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM public.external_match_imports i) AS imports;
 SET ROLE fixture_import_service;
-DO $ BEGIN
+DO $$ BEGIN
  BEGIN
   PERFORM public.auto_apply_koshien_official_results('test-finalize',(SELECT wrong_year FROM fixture_auto_inputs));
   RAISE EXCEPTION 'mixed-year automatic batch accepted';
  EXCEPTION WHEN foreign_key_violation THEN NULL; END;
-END $;
+END $$;
 RESET ROLE;
-DO $ BEGIN
+DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM fixture_auto_baseline b WHERE
   b.matches IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(m) ORDER BY m.id) FROM public.matches m WHERE event_id='test-finalize')
   OR b.results IS DISTINCT FROM (SELECT to_jsonb(r) FROM public.results r WHERE event_id='test-finalize')
   OR b.scores IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(s) ORDER BY player_id) FROM public.scores s WHERE event_id='test-finalize')
   OR b.imports IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM public.external_match_imports i))
  THEN RAISE EXCEPTION 'wrong-year batch mutated results, matches, scores or import history'; END IF;
-END $;
+END $$;
 SET ROLE fixture_import_service;
-DO $ DECLARE v jsonb; BEGIN
+DO $$ DECLARE v jsonb; BEGIN
  v:=public.auto_apply_koshien_official_results('test-finalize',(SELECT correct FROM fixture_auto_inputs));
  IF v->>'changed' IS DISTINCT FROM '2' THEN RAISE EXCEPTION 'valid automatic batch failed: %',v; END IF;
  v:=public.auto_apply_koshien_official_results('test-finalize',(SELECT correct FROM fixture_auto_inputs));
  IF v->>'changed' IS DISTINCT FROM '0' OR v->>'skipped' IS DISTINCT FROM '2' THEN RAISE EXCEPTION 'automatic retry failed: %',v; END IF;
-END $;
+END $$;
 RESET ROLE;
-DO $ BEGIN
+DO $$ BEGIN
  IF (SELECT count(*) FROM public.external_match_imports WHERE event_id='test-finalize' AND status='confirmed')<>3
  OR (SELECT count(*) FROM public.matches WHERE event_id='test-finalize' AND round_key='R1' AND match_no IN(2,3) AND status='completed')<>2
  OR (SELECT count(*) FROM public.results r CROSS JOIN LATERAL jsonb_array_elements(r.payload->'matches') j WHERE r.event_id='test-finalize' AND j->>'status'='completed')<>2
  OR NOT EXISTS(SELECT 1 FROM public.scores WHERE event_id='test-finalize' AND player_id='00000000-0000-0000-0000-000000000011' AND total_score=30)
  THEN RAISE EXCEPTION 'valid automatic batch did not preserve expected result and score state'; END IF;
-END $;
+END $$;
 SELECT 'PASS: real auto-apply RPC, mixed-year whole-batch rollback, correct batch and idempotent retry';
 
 -- Compare event-deletion behavior with/without the proposed FKs. Both attempts
 -- are rolled back in subtransactions; an existing RESTRICT is not silently
 -- removed. Club-level deletion and finalized events still require review.
-DO $ DECLARE baseline text; candidate text; BEGIN
+DO $$ DECLARE baseline text; candidate text; BEGIN
  BEGIN
   ALTER TABLE public.external_match_imports DROP CONSTRAINT fixture_import_event_year,DROP CONSTRAINT fixture_import_match_event;
   BEGIN
@@ -760,9 +749,9 @@ DO $ DECLARE baseline text; candidate text; BEGIN
  IF (SELECT count(*) FROM public.external_match_imports)<>3 OR NOT EXISTS(SELECT 1 FROM public.events WHERE id='test-finalize') THEN
   RAISE EXCEPTION 'deletion probe was not rolled back'; END IF;
  RAISE NOTICE 'event deletion baseline and candidate: %',candidate;
-END $;
+END $$;
 ROLLBACK;
-DO $ BEGIN
+DO $$ BEGIN
  IF to_regclass('public.external_match_imports') IS NOT NULL OR
  EXISTS(SELECT 1 FROM public.events WHERE id='test-finalize' AND season IS NOT NULL) THEN
   RAISE EXCEPTION 'test prototype leaked schema or data'; END IF;
