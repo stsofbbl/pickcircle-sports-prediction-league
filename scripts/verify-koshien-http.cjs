@@ -108,6 +108,9 @@ async function main() {
   assert.equal(snapshot.teams.length,49);
   const rev=snapshot.resultRevision;
   await assert.rejects(m.service.openDraft({eventId,expectedRevision:rev}));
+  // Actual HTTP route must not bypass the reviewed RPC, even as league owner.
+  denied(await a.client.from("events").update({status:"open"}).eq("id",eventId));
+  assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"draft");
   await a.service.openDraft({eventId,expectedRevision:rev});
   const opened=await m.service.loadSnapshot({eventId,strictEventId:true});
   assert.equal(opened.event.status,"open");

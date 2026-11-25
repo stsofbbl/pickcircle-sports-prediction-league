@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 
 ALLOWED = {
+    "supabase/release-candidates/koshien-official-integrity/draft-open-permit.sql",
     "supabase/release-candidates/koshien-official-integrity/import-identity.sql",
     "supabase/release-candidates/koshien-official-integrity/schedule-year.sql",
     "supabase/release-candidates/koshien-official-integrity/rollback-import-identity.sql",
