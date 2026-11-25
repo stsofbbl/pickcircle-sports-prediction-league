@@ -45,7 +45,7 @@ DO $f$ BEGIN
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
   UPDATE public.predictions SET event_id='legacy' WHERE event_id='new'; RAISE EXCEPTION 'prediction moved';
- EXCEPTION WHEN insufficient_privilege OR unique_violation THEN NULL; END;
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
   DELETE FROM public.events WHERE id='new'; RAISE EXCEPTION 'prototype deletion accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
