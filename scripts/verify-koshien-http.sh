@@ -58,7 +58,7 @@ docker run --detach --rm --name "$auth_container" --network host \
   -e GOTRUE_JWT_EXP=3600 -e GOTRUE_DISABLE_SIGNUP=false \
   -e GOTRUE_EXTERNAL_EMAIL_ENABLED=true -e GOTRUE_MAILER_AUTOCONFIRM=true \
   -e GOTRUE_EXTERNAL_PHONE_ENABLED=false -e GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=false \
-  supabase/gotrue:v2.189.0 >/dev/null
+  supabase/gotrue:v2.189.0@sha256:385184459f57569c54c25209f51f3b2be99ddd7c4ce9e3555b5d3eea8447b7cf >/dev/null
 auth_ready=false
 for attempt in $(seq 1 40); do
   if curl --silent --fail --max-time 2 "$YOSO_AUTH_URL/health" >/dev/null; then auth_ready=true; break; fi

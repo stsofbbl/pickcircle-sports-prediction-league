@@ -25,10 +25,13 @@ $f$;
 ALTER TABLE public.leagues ENABLE ROW LEVEL SECURITY;
 CREATE POLICY http_league_select ON public.leagues FOR SELECT TO authenticated USING(public.is_league_member(id));
 ALTER TABLE public.league_members ENABLE ROW LEVEL SECURITY;
-CREATE POLICY http_member_select ON public.league_members FOR SELECT TO authenticated USING(public.is_league_member(league_id));
+-- Match effective production member visibility and role/status constraints.
+ALTER TABLE public.league_members ADD CHECK(membership_status IN ('active','removed')), ADD CHECK(role IN ('owner','co_owner','member'));
+CREATE POLICY http_member_select ON public.league_members FOR SELECT TO authenticated USING(membership_status='active' AND public.is_league_member(league_id));
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY http_profile_select ON public.profiles FOR SELECT TO authenticated USING(id=auth.uid() OR EXISTS(
- SELECT 1 FROM public.league_members m WHERE m.user_id=profiles.id AND public.is_league_member(m.league_id)));
+ SELECT 1 FROM public.league_members mine JOIN public.players historical ON historical.league_id=mine.league_id AND historical.profile_id=profiles.id
+ WHERE mine.user_id=auth.uid() AND mine.membership_status='active'));
 ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
 CREATE POLICY http_match_select ON public.matches FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=matches.event_id AND public.is_league_member(e.league_id)));
 ALTER TABLE public.results ENABLE ROW LEVEL SECURITY;

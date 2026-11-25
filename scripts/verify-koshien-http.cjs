@@ -101,14 +101,25 @@ function realService(client) {
     return error?null:data.user;
   });
 }
-function seedAuthUser(id,role) {
+function fixtureSql(sql) {
+  execFileSync("sudo",["-u","postgres","psql","-X","-q","-v","ON_ERROR_STOP=1","-d","yoso_koshien_lifecycle_test","-c",sql],
+    {stdio:"pipe",timeout:10000});
+}
+function assertUuid(id) {
   assert.match(id,/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
+}
+function setFixtureMembership(id,role,status) {
+  assertUuid(id);
+  assert.ok(["owner","member"].includes(role));
+  assert.ok(["active","removed"].includes(status));
+  fixtureSql("UPDATE public.league_members SET role='"+role+"',membership_status='"+status+"' WHERE league_id='"+leagueId+"' AND user_id='"+id+"'");
+}
+function seedAuthUser(id,role) {
+  assertUuid(id);
   assert.ok(["owner","member"].includes(role));
   // Synthetic membership belongs only to the disposable YOSO DB. GoTrue owns
   // its own users; the fixture maps the real issued user IDs to app profiles.
-  execFileSync("sudo",["-u","postgres","psql","-X","-q","-v","ON_ERROR_STOP=1","-d","yoso_koshien_lifecycle_test","-c",
-    "BEGIN; INSERT INTO public.profiles(id,display_name) VALUES ('"+id+"','Auth fixture'); INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES ('"+leagueId+"','"+id+"','"+role+"','active'); COMMIT;"],
-    {stdio:"pipe",timeout:10000});
+  fixtureSql("BEGIN; INSERT INTO public.profiles(id,display_name) VALUES ('"+id+"','Auth fixture'); INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES ('"+leagueId+"','"+id+"','"+role+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name) VALUES ('"+randomUUID()+"','"+leagueId+"','"+id+"','Auth fixture'); COMMIT;");
 }
 async function actualAuth() {
   const password="Yoso-fixture-"+randomUUID();
@@ -145,6 +156,25 @@ async function actualAuth() {
   await assert.rejects(m.service.createDraft({...args,eventId:randomUUID()}));
   denied(await memberClient.from("events").insert({id:randomUUID(),league_id:leagueId,preset_type:"koshien",status:"draft",created_by:ordinary.id}));
   assert.equal((await m.service.listEvents({leagueId})).events.filter(e=>e.id===eventId).length,1);
+  // Authorization must follow live membership changes without refreshing JWT.
+  const activeToken=ok(await resumedClient.auth.getSession()).session.access_token;
+  setFixtureMembership(admin.id,"member","active");
+  assert.equal((await resumed.auth.currentUser()).role,"member");
+  await assert.rejects(resumed.service.createDraft({...args,eventId:randomUUID()}));
+  denied(await resumedClient.from("events").insert({id:randomUUID(),league_id:leagueId,preset_type:"koshien",status:"draft",created_by:admin.id}));
+  setFixtureMembership(admin.id,"owner","removed");
+  assert.equal((await resumed.auth.currentUser()).role,"member");
+  assert.equal(ok(await resumedClient.from("league_members").select("role").eq("user_id",admin.id)).length,0);
+  assert.equal(ok(await resumedClient.from("events").select("id").eq("id",eventId)).length,0);
+  denied(await resumedClient.rpc("koshien_admin_result_revision",{p_event_id:eventId}));
+  await assert.rejects(resumed.service.listEvents({leagueId}));
+  assert.equal(ok(await resumedClient.auth.getSession()).session.access_token,activeToken);
+  setFixtureMembership(admin.id,"owner","active");
+  assert.equal((await resumed.auth.currentUser()).role,"admin");
+  assert.equal(ok(await resumedClient.auth.getSession()).session.access_token,activeToken);
+  console.log("PASS: existing GoTrue session immediately loses app access on live downgrade/removal, restored only by active membership");
+  // Run the full lifecycle with genuinely issued Auth JWTs, not synthetic ones.
+  await exerciseRosterAndPrediction(resumed,m,eventId);
   const beforeLogout=ok(await resumedClient.auth.getSession()).session.refresh_token;
   await resumed.auth.signOut();
   assert.equal(ok(await resumedClient.auth.getSession()).session,null);
@@ -156,6 +186,41 @@ async function actualAuth() {
   assert.ok(revoked.error,"logged-out refresh token must be revoked");
   await m.auth.signOut();
   console.log("PASS: GoTrue signup, actual password login, wrong password denial, refreshed/persisted session, metadata cannot grant admin, signed-session DB access, logout and refresh revocation");
+}
+
+async function exerciseRosterAndPrediction(a,m,eventId) {
+  const districts = ["北北海道","南北海道","青森","岩手","宮城","秋田","山形","福島","茨城","栃木","群馬","埼玉","千葉","東東京","西東京","神奈川","新潟","富山","石川","福井","山梨","長野","岐阜","静岡","愛知","三重","滋賀","京都","大阪","兵庫","奈良","和歌山","鳥取","島根","岡山","広島","山口","徳島","香川","愛媛","高知","福岡","佐賀","長崎","熊本","大分","宮崎","鹿児島","沖縄"];
+  const roster=districts.map((districtName,i)=>({districtName,schoolName:"HTTP school "+(i+1)}));
+  await a.service.replaceRepresentatives({eventId,rows:roster,year:2027});
+  const teams=ok(await a.client.from("teams").select("id,seed,metadata").eq("event_id",eventId).order("seed"));
+  assert.equal(teams.length,49);
+  const rounds=teams.map(t=>({representativeKey:t.metadata.representative_key,startRound:t.seed<=15?2:1}));
+  await a.service.updateStartRounds({eventId,rows:rounds});
+  const picks=teams.filter(t=>t.seed>15).slice(0,8).map(t=>t.id);
+  const prediction={p_event_id:eventId,p_team_ids:picks,p_captain_team_id:picks[0],p_payload:{fixture:true}};
+  denied(await m.client.rpc("save_koshien_phase1_prediction",prediction));
+  const snapshot=await a.service.loadSnapshot({eventId,strictEventId:true});
+  assert.equal(snapshot.teams.length,49);
+  const rev=snapshot.resultRevision;
+  await assert.rejects(m.service.openDraft({eventId,expectedRevision:rev}));
+  // Actual HTTP route must not bypass the reviewed RPC, even as league owner.
+  denied(await a.client.from("events").update({status:"open"}).eq("id",eventId));
+  assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"draft");
+  await a.service.openDraft({eventId,expectedRevision:rev});
+  const opened=await m.service.loadSnapshot({eventId,strictEventId:true});
+  assert.equal(opened.event.status,"open");
+  const saved=ok(await m.client.rpc("save_koshien_phase1_prediction",prediction));
+  assert.equal(saved.pickCount,8);
+  const mine=await m.service.loadSnapshot({eventId,strictEventId:true});
+  const admin=await a.service.loadSnapshot({eventId,strictEventId:true});
+  assert.equal(mine.predictions.length,1);
+  assert.equal(admin.predictions.length,0);
+  assert.equal(ok(await m.client.from("phase1_picks").select("id,captain").eq("event_id",eventId)).length,8);
+  assert.equal(ok(await a.client.from("predictions").select("user_id").eq("event_id",eventId)).length,0);
+  assert.equal(ok(await a.client.from("phase1_picks").select("id").eq("event_id",eventId)).length,0);
+  await assert.rejects(a.service.replaceRepresentatives({eventId,rows:roster,year:2027}));
+  assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"open");
+  console.log("PASS: HTTP roster 49, confirmed start rounds, admin open, member prediction, pre-deadline privacy and open roster guard");
 }
 
 async function main() {
@@ -182,38 +247,7 @@ async function main() {
     assert.equal(response.status,401,"invalid JWT should be rejected by HTTP server");
   }
   console.log("PASS: actual HTTP concurrent INSERT/recovery, strict snapshot, outsider/member denial, signed JWT rejection");
-  const districts = ["北北海道","南北海道","青森","岩手","宮城","秋田","山形","福島","茨城","栃木","群馬","埼玉","千葉","東東京","西東京","神奈川","新潟","富山","石川","福井","山梨","長野","岐阜","静岡","愛知","三重","滋賀","京都","大阪","兵庫","奈良","和歌山","鳥取","島根","岡山","広島","山口","徳島","香川","愛媛","高知","福岡","佐賀","長崎","熊本","大分","宮崎","鹿児島","沖縄"];
-  const roster=districts.map((districtName,i)=>({districtName,schoolName:"HTTP school "+(i+1)}));
-  await a.service.replaceRepresentatives({eventId,rows:roster,year:2027});
-  const teams=ok(await a.client.from("teams").select("id,seed,metadata").eq("event_id",eventId).order("seed"));
-  assert.equal(teams.length,49);
-  const rounds=teams.map(t=>({representativeKey:t.metadata.representative_key,startRound:t.seed<=15?2:1}));
-  await a.service.updateStartRounds({eventId,rows:rounds});
-  const picks=teams.filter(t=>t.seed>15).slice(0,8).map(t=>t.id);
-  const prediction={p_event_id:eventId,p_team_ids:picks,p_captain_team_id:picks[0],p_payload:{fixture:true}};
-  denied(await m.client.rpc("save_koshien_phase1_prediction",prediction));
-  snapshot=await a.service.loadSnapshot({eventId,strictEventId:true});
-  assert.equal(snapshot.teams.length,49);
-  const rev=snapshot.resultRevision;
-  await assert.rejects(m.service.openDraft({eventId,expectedRevision:rev}));
-  // Actual HTTP route must not bypass the reviewed RPC, even as league owner.
-  denied(await a.client.from("events").update({status:"open"}).eq("id",eventId));
-  assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"draft");
-  await a.service.openDraft({eventId,expectedRevision:rev});
-  const opened=await m.service.loadSnapshot({eventId,strictEventId:true});
-  assert.equal(opened.event.status,"open");
-  const saved=ok(await m.client.rpc("save_koshien_phase1_prediction",prediction));
-  assert.equal(saved.pickCount,8);
-  const mine=await m.service.loadSnapshot({eventId,strictEventId:true});
-  const admin=await a.service.loadSnapshot({eventId,strictEventId:true});
-  assert.equal(mine.predictions.length,1);
-  assert.equal(admin.predictions.length,0);
-  assert.equal(ok(await m.client.from("phase1_picks").select("id,captain").eq("event_id",eventId)).length,8);
-  assert.equal(ok(await a.client.from("predictions").select("user_id").eq("event_id",eventId)).length,0);
-  assert.equal(ok(await a.client.from("phase1_picks").select("id").eq("event_id",eventId)).length,0);
-  await assert.rejects(a.service.replaceRepresentatives({eventId,rows:roster,year:2027}));
-  assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"open");
-  console.log("PASS: HTTP roster 49, confirmed start rounds, admin open, member prediction, pre-deadline privacy and open roster guard");
+  await exerciseRosterAndPrediction(a,m,eventId);
   await actualAuth();
   console.log("Verified " + wire.length + " local SDK HTTP requests (synthetic and GoTrue sessions)");
 }
