@@ -11,8 +11,14 @@ password="$(openssl rand -hex 24)"
 secret="$(openssl rand -hex 32)"
 export YOSO_HTTP_SECRET="$secret"
 export YOSO_HTTP_URL=http://127.0.0.1:39117
+export YOSO_AUTH_URL=http://127.0.0.1:39118
+auth_container="yoso-auth-fixture"
+auth_db="yoso_auth_fixture_test"
+auth_password="$(openssl rand -hex 24)"
 cleanup() {
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  docker rm -f "$container" "$auth_container" >/dev/null 2>&1 || true
+  sudo -u postgres dropdb --if-exists "$auth_db" >/dev/null 2>&1 || true
+  sudo -u postgres psql -X -q -d postgres -c "DROP ROLE IF EXISTS yoso_auth_fixture_admin" >/dev/null 2>&1 || true
   sudo -u postgres psql -X -q -d postgres -c "ALTER ROLE yoso_http_authenticator NOLOGIN" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -36,6 +42,29 @@ for attempt in $(seq 1 30); do
   sleep 1
 done
 if [[ "$ready" != true ]]; then docker logs "$container"; exit 1; fi
+# The Auth service has its own empty database; never run its migrations
+# against the YOSO lifecycle database or any external project.
+sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d postgres -c "CREATE ROLE yoso_auth_fixture_admin LOGIN PASSWORD '$auth_password'"
+sudo -u postgres createdb -O yoso_auth_fixture_admin "$auth_db"
+sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d "$auth_db" -c "CREATE SCHEMA auth AUTHORIZATION yoso_auth_fixture_admin; CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
+docker run --detach --rm --name "$auth_container" --network host \
+  -e GOTRUE_API_HOST=127.0.0.1 -e GOTRUE_API_PORT=39118 \
+  -e API_EXTERNAL_URL="$YOSO_AUTH_URL" -e GOTRUE_SITE_URL="$YOSO_AUTH_URL" \
+  -e GOTRUE_DB_DRIVER=postgres \
+  -e GOTRUE_DB_DATABASE_URL="postgres://yoso_auth_fixture_admin:$auth_password@127.0.0.1:5432/$auth_db?search_path=auth" \
+  -e GOTRUE_DB_NAMESPACE=auth -e DB_NAMESPACE=auth \
+  -e GOTRUE_JWT_SECRET="$secret" -e GOTRUE_JWT_AUD=authenticated \
+  -e GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated -e GOTRUE_JWT_ADMIN_ROLES=service_role \
+  -e GOTRUE_JWT_EXP=3600 -e GOTRUE_DISABLE_SIGNUP=false \
+  -e GOTRUE_EXTERNAL_EMAIL_ENABLED=true -e GOTRUE_MAILER_AUTOCONFIRM=true \
+  -e GOTRUE_EXTERNAL_PHONE_ENABLED=false -e GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=false \
+  supabase/gotrue:v2.189.0 >/dev/null
+auth_ready=false
+for attempt in $(seq 1 40); do
+  if curl --silent --fail --max-time 2 "$YOSO_AUTH_URL/health" >/dev/null; then auth_ready=true; break; fi
+  sleep 1
+done
+if [[ "$auth_ready" != true ]]; then docker logs "$auth_container"; exit 1; fi
 node "scripts/verify-koshien-http.cjs" "$sdk"
 test "$before" = "$(fingerprint)"
 echo "PASS: previous tournament event, matches and scores byte-for-byte unchanged"
