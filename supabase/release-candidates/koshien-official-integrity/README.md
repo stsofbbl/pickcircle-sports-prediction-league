@@ -35,3 +35,6 @@ The disposable GitHub Actions HTTP fixture additionally starts a version-pinned 
 
 ## Production FK graph compatibility
 The dedicated disposable graph fixture captures the live catalog's 70 public foreign keys and participating primary/unique keys, column types/nullability, club deletion/owner RPCs and five existing finalized child guards. Two synthetic clubs exercise the exact import identity candidate against the same baseline graph. This is not a complete schema clone: non-key columns, additional constraints/indexes and non-delete triggers are omitted. Any pre-existing deletion rejection is recorded, never repaired by silently weakening history protection.
+
+## Read-only preflight
+Run `preflight.sql` immediately before any explicitly approved release. All seven rows must be true: exact FK graph fingerprint, three schedule RPC bodies and effective ACLs, import identity, JST schedule year, explicit saved seasons, candidate-object collision check and private schema privileges. This SQL was executed against production in a read-only transaction on 2026-11-25 JST. It reports aggregates only; it is not a migration, does not repair data/history and does not authorize release. If any check changes, stop and review the reason. It is intentionally valid only before the #58 DB changes, not after them.
