@@ -4415,9 +4415,12 @@ function formatDateTime(value) {
 function renderTournamentCreateOptions() {
   if (!els.newTournamentTemplate) return;
   const currentValue = els.newTournamentTemplate.value || state.activeTemplate;
-  els.newTournamentTemplate.innerHTML = Object.values(templates).map((template) => (
-    `<option value="${escapeAttr(template.id)}" ${template.id === currentValue ? "selected" : ""}>${escapeHtml(template.name)}</option>`
-  )).join("");
+  const onlineKoshienAvailable = Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
+  els.newTournamentTemplate.innerHTML = Object.values(templates).map((template) => {
+    const onlineSupported = baseTemplateId(template.id) === "koshien" && onlineKoshienAvailable;
+    const label = onlineSupported ? "オンライン対応" : "端末内のみ";
+    return `<option value="${escapeAttr(template.id)}" ${template.id === currentValue ? "selected" : ""}>${escapeHtml(template.name)}（${label}）</option>`;
+  }).join("");
 }
 
 function createTournamentFromSettings({ fallbackName } = {}) {
@@ -8071,7 +8074,8 @@ async function confirmSave() {
     }, 900);
     return;
   }
-  els.saveButton.textContent = UI_TEXT.save.confirmed;
+  // This path persists only on this device; never imply shared confirmation.
+  els.saveButton.textContent = UI_TEXT.save.local;
   setTimeout(() => {
     els.saveButton.textContent = UI_TEXT.save.confirm;
   }, 900);
