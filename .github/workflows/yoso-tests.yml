@@ -25,6 +25,15 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Verify ranking v1 prototype save and visibility in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql.service
+          sudo -u postgres createdb yoso_ranking_v1_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_ranking_v1_test' EXIT
+          cat tests/sql/ranking-v1-save-visibility-fixture.sql prototypes/ranking-v1/save-visibility.sql tests/sql/ranking-v1-save-visibility-checks.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_ranking_v1_test
+          test "$(sudo -u postgres psql -X -At -d yoso_ranking_v1_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash
         run: |

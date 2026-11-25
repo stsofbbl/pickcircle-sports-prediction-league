@@ -21,3 +21,7 @@
 - 実DB変更とデプロイはバックアップ確認・明示承認後のみ。新しい有料サービスなし。
 
 検証: `node --test tests/ranking-v1-contract.test.js`。試作は `prototypes/ranking-v1/contract.cjs` に隔離。
+
+## 保存・公開制御の隔離試作（未承認）
+`prototypes/ranking-v1/save-visibility.sql` は migration ではない。新しい識別子 ranking_v1 のみ対象とし、既存 rankingOdds ローカル型や甲子園を切り替えない。draft→open→締切後resultWait の最小範囲。直接INSERT/UPDATEでも締切・候補・倍率・本人・所属を検査し、受付開始後はルール・締切を固定する。既存公開RLSにrestrictive SELECTを重ねる。結果・得点の書込および大会削除は暫定的に拒否し、未実装の確定・再開・退会を許可した扱いにしない。
+実際の本番RLS条件を反映した合成fixtureで検証。完全な本番schema、並行トランザクション・ロック競合・退会やクラブ削除、実HTTP、確定処理は未検証。draft→open時のレビューrevisionや安定IDによる冪等作成も次段階。新規受付制御の時計はDBのclock_timestampを使用するが、既存RLSのnow()により長時間トランザクションでは公開が遅れる可能性がある。実DBに適用しない。
