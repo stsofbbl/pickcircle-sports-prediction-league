@@ -142,6 +142,26 @@ DO $$ BEGIN
  OR EXISTS(SELECT 1 FROM fixture_schedule_baseline b WHERE b.scores IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(s) ORDER BY event_id,player_id) FROM public.scores s))
  THEN RAISE EXCEPTION 'normal schedule path changed wrong rows or scores'; END IF;
 END $$;
+-- Prove exact rollback restores original definitions/ACL.
+CREATE TEMP TABLE schedule_candidate_acl AS
+ SELECT oid,proowner,proacl,prosecdef,proconfig FROM pg_proc WHERE oid IN
+ ('public.sync_koshien_official_schedule(text,jsonb,text,timestamptz)'::regprocedure,
+ 'public.auto_sync_koshien_official_schedule(text,jsonb,text,timestamptz)'::regprocedure,
+ 'public.auto_sync_koshien_late_schedule(text,jsonb,text,timestamptz)'::regprocedure);
+-- @include supabase/release-candidates/koshien-official-integrity/rollback-schedule-year.sql
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM schedule_candidate_acl x JOIN pg_proc p USING(oid)
+ WHERE p.proowner IS DISTINCT FROM x.proowner OR p.proacl IS DISTINCT FROM x.proacl
+ OR p.prosecdef IS DISTINCT FROM x.prosecdef OR p.proconfig IS DISTINCT FROM x.proconfig)
+ THEN RAISE EXCEPTION 'schedule rollback changed privileges or security configuration'; END IF;
+END $$;
+DO $$ BEGIN
+ IF (SELECT md5(prosrc) FROM pg_proc WHERE oid='public.sync_koshien_official_schedule(text,jsonb,text,timestamptz)'::regprocedure) IS DISTINCT FROM 'f4d88cf0af5dc2ad05dbe9a4112e5c7a'
+ OR (SELECT md5(prosrc) FROM pg_proc WHERE oid='public.auto_sync_koshien_official_schedule(text,jsonb,text,timestamptz)'::regprocedure) IS DISTINCT FROM '83e20d3234af222b63d747cf34230346'
+ OR (SELECT md5(prosrc) FROM pg_proc WHERE oid='public.auto_sync_koshien_late_schedule(text,jsonb,text,timestamptz)'::regprocedure) IS DISTINCT FROM '068de18f22a1195cdca346daf5bbf4f5'
+ THEN RAISE EXCEPTION 'original RPC bodies not restored'; END IF;
+END $$;
+SELECT 'PASS: exact schedule rollback restores original bodies and preserves ACL/security';
 ROLLBACK;
 -- The captured functions are installed by the workflow before this transaction.
 -- Candidate body changes, roles, columns and data are rolled back.
