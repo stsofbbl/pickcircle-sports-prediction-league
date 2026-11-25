@@ -32,3 +32,6 @@ The auto-sync deployment wrapper on the draft branch pins the reviewed worker at
 
 ## Local Auth integration
 The disposable GitHub Actions HTTP fixture additionally starts a version-pinned GoTrue container and a separate empty Auth database on loopback, sharing only a freshly generated JWT secret with local PostgREST. The app uses the existing SDK and data service. Synthetic users are mapped to fixture memberships; no real email, cloud service, user data or production secrets. This checks actual password login, refresh, persisted sessions, authorization and logout, not production Auth configuration, OAuth, email verification or a full production schema. Stop and report any failed test; never substitute production writes.
+
+## Production FK graph compatibility
+The dedicated disposable graph fixture captures the live catalog's 70 public foreign keys and participating primary/unique keys, column types/nullability, club deletion/owner RPCs and five existing finalized child guards. Two synthetic clubs exercise the exact import identity candidate against the same baseline graph. This is not a complete schema clone: non-key columns, additional constraints/indexes and non-delete triggers are omitted. Any pre-existing deletion rejection is recorded, never repaired by silently weakening history protection.

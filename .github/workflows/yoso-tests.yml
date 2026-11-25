@@ -75,6 +75,14 @@ jobs:
           python3 scripts/verify-koshien-draft-open-concurrency.py yoso_koshien_lifecycle_test
           curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
           bash scripts/verify-koshien-http.sh yoso_koshien_lifecycle_test
+      - name: Verify production FK graph club-deletion compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_koshien_delete_graph_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_koshien_delete_graph_test' EXIT
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_delete_graph_test < tests/sql/fixtures/koshien-production-delete-graph.sql
+          python3 scripts/assemble-koshien-integrity-test.py tests/sql/koshien-delete-graph-integration.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_delete_graph_test
       - name: Verify Koshien cron gate in disposable PostgreSQL
         run: python3 scripts/verify-koshien-cron-gate.py
       - name: Run Koshien schedule and automation tests
