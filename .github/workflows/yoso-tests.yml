@@ -25,6 +25,8 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Verify immutable Koshien release manifest
+        run: python3 scripts/verify-koshien-release-manifest.py
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash
         run: |
