@@ -80,6 +80,57 @@ DO $$ BEGIN
   IF SQLERRM <> 'use reviewed Koshien draft opening RPC' THEN RAISE; END IF;
  END;
 END $$;
+-- Failure after a permit is minted must roll back the entire statement,
+-- including the temporary permit. Roll back the deliberate readiness change.
+DO $$ BEGIN
+ BEGIN
+  UPDATE public.events SET rules=jsonb_set(rules,'{config,startRoundsConfirmed}','false') WHERE id='lifecycle-draft';
+  PERFORM public.open_koshien_draft('lifecycle-draft',public.koshien_admin_result_revision('lifecycle-draft'));
+  RAISE EXCEPTION 'unready draft opened';
+ EXCEPTION WHEN invalid_parameter_value THEN
+  IF SQLERRM <> 'confirm the official roster and start rounds for this season' THEN RAISE; END IF;
+ END;
+END $$;
+RESET ROLE;
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM yoso_admin_finalize_private.draft_open_permits)
+ OR NOT EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft' AND status='draft'
+   AND rules->'config'->'startRoundsConfirmed'='true'::jsonb) THEN
+  RAISE EXCEPTION 'failed readiness check leaked permit or changed draft';
+ END IF;
+ IF has_function_privilege('anon','public.open_koshien_draft(text,text)','EXECUTE')
+ OR NOT has_function_privilege('authenticated','public.open_koshien_draft(text,text)','EXECUTE')
+ OR has_table_privilege('authenticated','yoso_admin_finalize_private.draft_open_permits','INSERT') THEN
+  RAISE EXCEPTION 'opening permit privilege boundary is incorrect';
+ END IF;
+END $$;
+-- Exercise the exact rollback candidate, preserving the pre-existing readiness
+-- guard. Roll back this probe so later HTTP/concurrency tests still use permit.
+BEGIN;
+-- @include supabase/release-candidates/koshien-official-integrity/rollback-draft-open-permit.sql
+DO $$ BEGIN
+ IF to_regclass('yoso_admin_finalize_private.draft_open_permits') IS NOT NULL
+ OR EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='yoso_require_koshien_draft_open_permit')
+ OR NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='yoso_guard_koshien_draft_open')
+ OR EXISTS(SELECT 1 FROM pg_proc WHERE oid='public.open_koshien_draft(text,text)'::regprocedure AND prosecdef)
+ THEN RAISE EXCEPTION 'rollback candidate did not restore original guard/RPC'; END IF;
+END $$;
+SET LOCAL ROLE authenticated;
+UPDATE public.events SET status='open' WHERE id='lifecycle-draft';
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft' AND status='open') THEN
+  RAISE EXCEPTION 'rollback candidate did not restore prior behavior';
+ END IF;
+END $$;
+ROLLBACK;
+DO $$ BEGIN
+ IF to_regclass('yoso_admin_finalize_private.draft_open_permits') IS NULL
+ OR NOT EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft' AND status='draft') THEN
+  RAISE EXCEPTION 'rollback probe leaked changes';
+ END IF;
+END $$;
+SELECT 'PASS: failed readiness permit rollback, privilege boundary, rollback candidate and restoration';
+SET ROLE authenticated;
 SELECT public.open_koshien_draft('lifecycle-draft',public.koshien_admin_result_revision('lifecycle-draft'));
 RESET ROLE;
 DO $$ BEGIN
