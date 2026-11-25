@@ -2,8 +2,8 @@
 -- Mirror API-visible columns and minimal relationship/RLS contracts; not a production schema.
 ALTER TABLE public.leagues ADD COLUMN name text, ADD COLUMN invite_code text UNIQUE;
 UPDATE public.leagues SET name='HTTP fixture',invite_code='fixture-http' WHERE id='00000000-0000-0000-0000-000000000010';
-CREATE TABLE public.profiles(id uuid PRIMARY KEY,display_name text);
-INSERT INTO public.profiles VALUES
+CREATE TABLE public.profiles(id uuid PRIMARY KEY,display_name text NOT NULL DEFAULT '',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),auth_user_id uuid,deleted_at timestamptz);
+INSERT INTO public.profiles(id,display_name) VALUES
  ('00000000-0000-0000-0000-000000000001','Fixture admin'),
  ('00000000-0000-0000-0000-000000000002','Fixture member'),
  ('00000000-0000-0000-0000-000000000003','Fixture outsider');
@@ -13,7 +13,7 @@ ALTER TABLE public.events ADD COLUMN sport_type text DEFAULT 'baseball', ADD COL
 ALTER TABLE public.teams ADD COLUMN game_multiplier numeric;
 ALTER TABLE public.matches ADD COLUMN metadata jsonb DEFAULT '{}'::jsonb;
 ALTER TABLE public.results ADD COLUMN updated_at timestamptz DEFAULT now();
-ALTER TABLE public.players ADD COLUMN display_name text;
+ALTER TABLE public.players ADD COLUMN display_name text, ADD COLUMN is_admin boolean DEFAULT false, ADD COLUMN updated_at timestamptz DEFAULT now();
 ALTER TABLE public.scores ADD COLUMN phase1_score numeric DEFAULT 0, ADD COLUMN phase2_score numeric DEFAULT 0,
  ADD COLUMN phase3_score numeric DEFAULT 0, ADD COLUMN revenge_score numeric DEFAULT 0,
  ADD COLUMN zombie_score numeric DEFAULT 0, ADD COLUMN breakdown jsonb DEFAULT '{}'::jsonb;
@@ -38,6 +38,9 @@ ALTER TABLE public.results ENABLE ROW LEVEL SECURITY;
 CREATE POLICY http_result_select ON public.results FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=results.event_id AND public.is_league_member(e.league_id)));
 ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
 CREATE POLICY http_score_select ON public.scores FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=scores.event_id AND public.is_league_member(e.league_id)));
+CREATE POLICY http_profile_update ON public.profiles FOR UPDATE TO authenticated USING(id=auth.uid()) WITH CHECK(id=auth.uid());
+CREATE POLICY http_players_update ON public.players FOR UPDATE TO authenticated USING(profile_id=auth.uid() OR public.is_league_admin(league_id)) WITH CHECK(profile_id=auth.uid() OR public.is_league_admin(league_id));
+GRANT UPDATE ON public.profiles,public.players TO authenticated;
 GRANT SELECT ON public.leagues,public.league_members,public.profiles TO authenticated;
 GRANT USAGE ON SCHEMA public TO anon;
 -- The authenticator cannot bypass RLS and cannot assume postgres/service_role.

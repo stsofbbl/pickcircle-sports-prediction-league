@@ -58,7 +58,7 @@ function service(uid, options) {
 }
 function serviceForClient(client, sessionUser) {
   const window = { YosoSupabase: {
-    hasConfig: () => true, config: () => ({ inviteCode: "fixture-http", activeLeagueId: leagueId, sync: { autoSaveKoshien: true } }),
+    hasConfig: () => true, config: () => ({ inviteCode: "fixture-http", activeLeagueId: leagueId, emailRedirectTo: authBase, sync: { autoSaveKoshien: true } }),
     client: () => client, sessionUser,
   } };
   const context = vm.createContext({ window, console, localStorage: {} });
@@ -117,9 +117,8 @@ function setFixtureMembership(id,role,status) {
 function seedAuthUser(id,role) {
   assertUuid(id);
   assert.ok(["owner","member"].includes(role));
-  // Synthetic membership belongs only to the disposable YOSO DB. GoTrue owns
-  // its own users; the fixture maps the real issued user IDs to app profiles.
-  fixtureSql("BEGIN; INSERT INTO public.profiles(id,display_name) VALUES ('"+id+"','Auth fixture'); INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES ('"+leagueId+"','"+id+"','"+role+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name) VALUES ('"+randomUUID()+"','"+leagueId+"','"+id+"','Auth fixture'); COMMIT;");
+  // Membership alone is seeded. The profile must exist from the real Auth trigger.
+  fixtureSql("BEGIN; INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES ('"+leagueId+"','"+id+"','"+role+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name,is_admin) VALUES ('"+randomUUID()+"','"+leagueId+"','"+id+"','Auth fixture',"+(role==="owner") +"); COMMIT;");
 }
 async function actualAuth() {
   const password="Yoso-fixture-"+randomUUID();
@@ -128,10 +127,14 @@ async function actualAuth() {
   const storage=new Map();
   const ownerClient=realSdk(storage), memberClient=realSdk();
   const a=realService(ownerClient), m=realService(memberClient);
-  const ownerSignup=ok(await ownerClient.auth.signUp({email:ownerEmail,password}));
-  const memberSignup=ok(await memberClient.auth.signUp({email:memberEmail,password,options:{data:{role:"owner"}}}));
-  assert.ok(ownerSignup.user?.id&&ownerSignup.session?.access_token,"local email autoconfirm required");
+  const ownerSignup=await a.auth.signUp({email:ownerEmail,password,displayName:"Auth owner display"});
+  const memberSignup=ok(await memberClient.auth.signUp({email:memberEmail,password,options:{data:{role:"owner",display_name:"Auth member display"}}}));
+  assert.ok(ownerSignup.user?.id&&ok(await ownerClient.auth.getSession()).session?.access_token,"local email autoconfirm required");
   assert.ok(memberSignup.user?.id&&memberSignup.session?.access_token);
+  assert.equal(ok(await ownerClient.from("profiles").select("display_name").eq("id",ownerSignup.user.id).single()).display_name,"Auth owner display");
+  assert.equal(ok(await memberClient.from("profiles").select("display_name").eq("id",memberSignup.user.id).single()).display_name,"Auth member display");
+  assert.equal(ok(await memberClient.from("profiles").select("id").eq("id",ownerSignup.user.id)).length,0);
+  console.log("PASS: genuine signup triggers create own profiles; pre-membership profile isolation");
   seedAuthUser(ownerSignup.user.id,"owner");
   seedAuthUser(memberSignup.user.id,"member");
   await a.auth.signOut(); await m.auth.signOut();
@@ -141,6 +144,11 @@ async function actualAuth() {
   assert.equal(admin.id,ownerSignup.user.id); assert.equal(admin.role,"admin");
   assert.equal(ordinary.id,memberSignup.user.id); assert.equal(ordinary.role,"member");
   assert.equal(ordinary.clubRole,"member","user metadata must not grant admin");
+  assert.equal(admin.displayName,"Auth owner display");
+  assert.equal(ordinary.displayName,"Auth member display");
+  await m.auth.updateProfile({displayName:"Auth renamed member"});
+  assert.equal((await m.auth.currentUser()).displayName,"Auth renamed member");
+  assert.equal(ok(await memberClient.from("players").select("display_name").eq("profile_id",ordinary.id).single()).display_name,"Auth renamed member");
   const session=ok(await ownerClient.auth.getSession()).session;
   assert.ok(session?.refresh_token);
   const refreshed=ok(await ownerClient.auth.refreshSession()).session;
@@ -185,6 +193,12 @@ async function actualAuth() {
   const revoked=await realSdk().auth.refreshSession({refresh_token:beforeLogout});
   assert.ok(revoked.error,"logged-out refresh token must be revoked");
   await m.auth.signOut();
+  // Actual production delete triggers, invoked only against synthetic auth.users.
+  // Use SQL rather than the production account-deletion Edge endpoint.
+  assertUuid(admin.id); assertUuid(ordinary.id); assertUuid(eventId);
+  fixtureSql("DO $f$ BEGIN BEGIN DELETE FROM auth.users WHERE id='"+admin.id+"'; RAISE EXCEPTION 'owner deletion accepted'; EXCEPTION WHEN foreign_key_violation THEN IF SQLERRM NOT LIKE 'club owner must delete or transfer%' THEN RAISE; END IF; END; IF NOT EXISTS(SELECT 1 FROM auth.users WHERE id='"+admin.id+"') THEN RAISE EXCEPTION 'owner lost'; END IF; END $f$;");
+  fixtureSql("DO $f$ DECLARE before_picks jsonb; before_predictions jsonb; BEGIN SELECT jsonb_agg(to_jsonb(p) ORDER BY id) INTO before_picks FROM public.phase1_picks p WHERE event_id='"+eventId+"'; SELECT jsonb_agg(to_jsonb(p) ORDER BY id) INTO before_predictions FROM public.predictions p WHERE event_id='"+eventId+"'; DELETE FROM auth.users WHERE id='"+ordinary.id+"'; IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM public.profiles WHERE id='"+ordinary.id+"' AND deleted_at IS NOT NULL AND auth_user_id IS NULL AND display_name='退会済みメンバー-"+ordinary.id.slice(0,8)+"') OR NOT EXISTS(SELECT 1 FROM public.league_members WHERE user_id='"+ordinary.id+"' AND membership_status='removed' AND role='member') OR NOT EXISTS(SELECT 1 FROM public.players WHERE profile_id='"+ordinary.id+"' AND is_admin=false AND display_name='退会済みメンバー-"+ordinary.id.slice(0,8)+"') THEN RAISE EXCEPTION 'archive trigger failed'; END IF; IF before_picks IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM public.phase1_picks p WHERE event_id='"+eventId+"') OR before_predictions IS DISTINCT FROM (SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM public.predictions p WHERE event_id='"+eventId+"') THEN RAISE EXCEPTION 'historical predictions changed'; END IF; END $f$;");
+  console.log("PASS: owner deletion rejected; ordinary account archived with historical predictions preserved");
   console.log("PASS: GoTrue signup, actual password login, wrong password denial, refreshed/persisted session, metadata cannot grant admin, signed-session DB access, logout and refresh revocation");
 }
 
