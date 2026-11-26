@@ -37,3 +37,6 @@ CIで同じ合成fixtureを専用DBにのみコミットし、独立したpsql�
 
 ## 所属変更・履歴保護（隔離試作）
 `membership-integrity.sql` は予想の保存時に現在の有効所属行をロックし、historical playerの複合FKをprivate bindingに保存する案。表示名変更や退会時の匿名化を許容しながら、予想を保持したplayerのID・所属・profile付け替えや削除を拒否する。既存のクラブ削除は未承認につきランキング大会がある場合は引き続き拒否し、部分削除は許さない。本番から取得した5関数（退会匿名化、owner退会拒否、会員削除、owner確認、クラブ削除）を合成fixtureに再現。直接SQLによる架空auth.users削除と所属解除の並行試験で確認する。実Auth endpoint、完全schema、全既存FK/triggerとの互換性、監査付き削除/再開は未検証。実DBに適用しない。
+
+## 接続API試作（未承認・本体未接続）
+`api.sql` は同一クラブ・大会・期待actor IDをサーバーで照合し、一覧（上限100、超過通知）、本人予想保存、単一statementの表示snapshot、管理者review/finalizeを提供する。既存RLS・トリガーは維持。snapshotは締切前に他者予想を返さず、結果確定後のランキングはDB保存値を使用。公開予想はhistorical player ID/表示名で返し、他者auth UIDを追加返却しない。同点は競技順位方式（1,1,3）を暫定採用、公開snapshot上限200人は暫定で超過時拒否。`api-client.cjs` は既存契約検証を再利用し、選択世代・actor・club・event IDを前後照合。通信失敗時にローカル保存や自動再試行へ切り替えない。実際のRPCは未公開。新規大会作成・受付開始・締切処理の専用API、実Auth/HTTP、画面接続、監査付き再開/削除は今後。既存の直接DML保護は試作の範囲に限る。
