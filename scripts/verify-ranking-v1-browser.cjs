@@ -7,7 +7,7 @@ const {promisify}=require("node:util");
 const run=promisify(execFile),chrome=process.env.CHROME_BIN;
 assert.ok(chrome);
 const dir=path.join(__dirname,"../prototypes/ranking-v1");
-const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","panel.cjs"];
+const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs"];
 // Fixed allowlist of CommonJS modules wrapped in ordinary script functions.
 // No eval, dynamic loading or production bundle creation.
 const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs')};})();";
@@ -27,6 +27,11 @@ const controller=RankingFixture.createRankingController({client:{rpc:async(name,
   snapshot={...snapshot,ownPrediction:args.p_prediction};
   return {data:{...scope,prediction:args.p_prediction}};
  }
+ if(name.endsWith("_draft_review"))return {data:{...snapshot,revision:rev,recovered:false}};
+ if(name.endsWith("_edit_draft")){
+  snapshot={...snapshot,name:args.p_name,sportType:args.p_sport,deadline:args.p_deadline,config:args.p_config};
+  return {data:{...snapshot,revision:"b".repeat(32),recovered:false}};
+ }
  if(name.endsWith("_review"))return {data:{...scope,revision:rev}};
  if(name.endsWith("_finalize")){
   snapshot={...snapshot,status:"finalized",result:args.p_result,ranking:[{playerId,name:"player",rank:1,score:25,breakdown:{version:1,scoreTenths:250,breakdown:[10,7,5,3].map((basePoints,i)=>({candidateId:pick.candidateIds[i],predictedRank:i+1,actualRank:i+1,basePoints,multiplierTenths:10,scoreTenths:basePoints*10}))}}]};
@@ -45,6 +50,25 @@ function fill(kind){
  }
 }
 (async()=>{
+ snapshot={...snapshot,status:"draft",canManage:true,canSubmit:false};
+ controller.select(scope);await panel.refresh();
+ check(action("review-draft"),"draft review missing");
+ action("review-draft").click();await idle();
+ check(action("edit-draft")&&action("open"),"review controls missing");
+ const oldOpen=action("open");
+ action("edit-draft").click();await idle();
+ check(!action("open"),"open exposed while editing");
+ oldOpen.click();
+ check(!calls.some(c=>c.name.endsWith("_open")),"detached open invoked");
+ const draftName=root.querySelector('[data-draft-field="name"]');
+ draftName.value="Updated Cup";draftName.dispatchEvent(new Event("input",{bubbles:true}));
+ const candidate=root.querySelector('[data-draft-field="candidate-label"]');
+ candidate.value="Renamed";candidate.dispatchEvent(new Event("input",{bubbles:true}));
+ action("save-draft").click();await idle();
+ const edited=calls.find(c=>c.name.endsWith("_edit_draft"));
+ check(edited.args.p_revision===rev&&edited.args.p_config.candidates[0].id==="a"&&edited.args.p_config.candidates[0].label==="Renamed","draft edit ID or revision lost");
+ check(!action("open")&&action("review-draft"),"edit left old review usable");
+ snapshot={...snapshot,name:"<script>bad</script>",config,status:"open",canManage:false,canSubmit:true};
  controller.select(scope);await panel.refresh();
  check(root.textContent.includes("他の会員の予想は締切まで非公開"),"privacy text absent");
  check(!action("finalize")&&!action("review-result")&&!action("open"),"member got management controls");

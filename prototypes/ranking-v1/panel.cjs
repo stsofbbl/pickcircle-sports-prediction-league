@@ -1,5 +1,6 @@
 // REVIEW PROTOTYPE ONLY. A small DOM panel, deliberately not wired to app.js.
 "use strict";
+const {mountDraftForm}=require("./draft-form.cjs");
 const messages={
   conflict_reload_required:"他の操作で情報が変更されました。再取得して確認してください。",
   denied_reload_required:"操作できません。所属・権限を確認して再取得してください。",
@@ -7,15 +8,16 @@ const messages={
   unconfirmed_reload_required:"保存結果を確認できません。再送せず再取得してください。",
   load_failed:"データを取得できませんでした。再取得してください。"
 };
-function mountRankingPanel(root,controller){
+function mountRankingPanel(root,controller,{newId=()=>globalThis.crypto.randomUUID()}={}){
   const doc=root.ownerDocument;
-  let disposed=false;
+  let disposed=false,renderEpoch=0,editReview=null;
   const element=(tag,value)=>{const e=doc.createElement(tag);if(value!==undefined)e.textContent=String(value);return e;};
   const add=(parent,tag,value)=>{const e=element(tag,value);parent.append(e);return e;};
   function button(parent,label,action,callback,disabled=false){
     const b=add(parent,"button",label);
     b.type="button";b.dataset.action=action;b.disabled=disabled;
-    b.addEventListener("click",()=>{void invoke(callback);});
+    const epoch=renderEpoch;
+    b.addEventListener("click",()=>{if(epoch===renderEpoch&&root.contains(b)&&!b.disabled)void invoke(callback);});
     return b;
   }
   async function invoke(operation){
@@ -56,8 +58,10 @@ function mountRankingPanel(root,controller){
       b.disabled=busy||values.some(v=>!v)||new Set(values).size!==4;
     }
     selects.forEach(s=>s.addEventListener("change",update));update();
+    const epoch=renderEpoch;
     form.addEventListener("submit",event=>{
       event.preventDefault();
+      if(epoch!==renderEpoch||!root.contains(form))return;
       update();if(b.disabled)return;
       void invoke(()=>submit({version:1,candidateIds:chosen()}));
     });
@@ -65,6 +69,8 @@ function mountRankingPanel(root,controller){
   function render(){
     if(disposed)return;
     const state=controller.getState(),busy=!!state.busy,v=state.view;
+    const epoch=++renderEpoch;
+    if(!v||state.review?.kind!=="draft"||editReview?.revision!==state.review.revision||editReview?.eventId!==v.eventId)editReview=null;
     root.replaceChildren();
     const status=add(root,"p",state.error?messages[state.error]||"再取得してください。":busy?"通信中…":state.notice==="server_acknowledged_and_reloaded"?"保存応答・再取得を確認しました。":"");
     status.setAttribute("role","status");
@@ -92,7 +98,14 @@ function mountRankingPanel(root,controller){
         const review=add(root,"section");add(review,"h3","受付開始前の確認");
         add(review,"p",state.review.name+" / "+state.review.sportType+" / "+state.review.deadline);
         const ol=add(review,"ol");state.review.config.candidates.forEach(c=>add(ol,"li",c.label+" ×"+c.multiplierTenths/10));
-        button(review,"確認した設定で受付開始","open",()=>controller.open(),busy);
+        if(editReview&&!busy){
+          mountDraftForm(review,{initial:state.review,newId,active:()=>epoch===renderEpoch&&!disposed,
+            submit:input=>{editReview=null;void invoke(()=>controller.editDraft(input));},
+            cancel:()=>{editReview=null;render();}});
+        }else{
+          button(review,"設定を編集","edit-draft",()=>{editReview={eventId:v.eventId,revision:state.review.revision};},busy);
+          button(review,"確認した設定で受付開始","open",()=>controller.open(),busy);
+        }
       }else button(root,"大会設定を確認","review-draft",()=>controller.reviewDraft(),busy);
     }
     if(v.actions.close)button(root,"結果待ちに移行","close",()=>controller.close(),busy);
