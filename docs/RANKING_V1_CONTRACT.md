@@ -48,3 +48,5 @@ CIで同じ合成fixtureを専用DBにのみコミットし、独立したpsql�
 
 ## 実HTTP統合試作
 GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0、PostgREST v12.2.3、GoTrue v2.189.0を再利用。GoTrueは別の使い捨てDBとし、実signup/login発行のUIDをランキングfixtureのauth.users/profiles/membership/playerに合成登録する。10 RPCを実SDKから通し、2人の予想、締切、確定、ランキング、同一ID/revision再試行、別クラブ、署名不正・期限切れJWT、匿名、除名後のアクセス、セッションrefresh/再取得を確認する。既存甲子園fixtureの指紋比較も行う。Auth triggerや実本番のメール/OAuth/完全schema、ブラウザUIはこの試験の対象外。外部ネットワークはSDK/固定Dockerイメージの取得のみ。本番接続なし。
+
+初回HTTP CIで以前のPostgREST digestがregistry not found。v12.2.3タグを取得後、実際のRepoDigestをログに記録して同一実行内で固定する方式に変更。取得できない場合は停止する。恒久的なdigest固定は実際の取得結果を確認後に行う。

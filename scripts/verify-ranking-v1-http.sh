@@ -52,11 +52,17 @@ docker run --detach --rm --name "$auth_container" --network host \
   -e GOTRUE_EXTERNAL_EMAIL_ENABLED=true -e GOTRUE_MAILER_AUTOCONFIRM=true \
   -e GOTRUE_EXTERNAL_PHONE_ENABLED=false -e GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED=false \
   supabase/gotrue:v2.189.0@sha256:385184459f57569c54c25209f51f3b2be99ddd7c4ce9e3555b5d3eea8447b7cf >/dev/null
+# Resolve the exact version to a registry digest before executing it.
+# The previously recorded digest returned registry 404.
+docker pull postgrest/postgrest:v12.2.3
+postgrest_image="$(docker image inspect --format '{{index .RepoDigests 0}}' postgrest/postgrest:v12.2.3)"
+[[ "$postgrest_image" =~ ^postgrest/postgrest@sha256:[a-f0-9]{64}$ ]]
+echo "PostgREST resolved image: $postgrest_image"
 docker run --detach --rm --name "$container" --network host \
   -e PGRST_DB_URI="postgres://yoso_ranking_authenticator:$password@127.0.0.1:5432/$db" \
   -e PGRST_DB_SCHEMAS=public -e PGRST_DB_ANON_ROLE=anon \
   -e PGRST_JWT_SECRET="$secret" -e PGRST_SERVER_HOST=127.0.0.1 \
-  -e PGRST_SERVER_PORT=39117 postgrest/postgrest:v12.2.3@sha256:729bf65c733b73f5b52777f0e4b853f22ed73ae67a22d38269d289779b0a8401 >/dev/null
+  -e PGRST_SERVER_PORT=39117 "$postgrest_image" >/dev/null
 auth_ready=false
 for attempt in $(seq 1 40); do
   if curl --silent --fail --max-time 2 "$YOSO_RANKING_AUTH_URL/health" >/dev/null; then auth_ready=true; break; fi
