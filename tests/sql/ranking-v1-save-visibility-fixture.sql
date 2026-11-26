@@ -20,7 +20,8 @@ CREATE TABLE public.events(id text PRIMARY KEY,league_id uuid NOT NULL,name text
 CREATE TABLE public.predictions(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,event_id text REFERENCES public.events(id) ON DELETE CASCADE,
  user_id uuid NOT NULL,payload jsonb NOT NULL,submitted_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),UNIQUE(event_id,user_id));
 CREATE TABLE public.results(event_id text PRIMARY KEY REFERENCES public.events(id),payload jsonb,updated_by uuid);
-CREATE TABLE public.scores(event_id text REFERENCES public.events(id),player_id uuid,total_score numeric,PRIMARY KEY(event_id,player_id));
+CREATE TABLE public.players(id uuid PRIMARY KEY,league_id uuid NOT NULL,profile_id uuid,UNIQUE(league_id,profile_id));
+CREATE TABLE public.scores(event_id text REFERENCES public.events(id),player_id uuid REFERENCES public.players(id),total_score numeric,breakdown jsonb NOT NULL DEFAULT '{}'::jsonb,PRIMARY KEY(event_id,player_id));
 CREATE FUNCTION public.is_prediction_open(p_event_id text) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='public' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.events e WHERE e.id=p_event_id AND e.status='open'
   AND (e.prediction_deadline IS NULL OR now()<e.prediction_deadline) AND public.is_league_member(e.league_id))
@@ -63,7 +64,20 @@ INSERT INTO public.predictions(event_id,user_id,payload) VALUES
  ('expired','00000000-0000-0000-0000-000000000001',(SELECT pick FROM inputs)),
  ('expired-draft','00000000-0000-0000-0000-000000000001',(SELECT pick FROM inputs));
 INSERT INTO public.results VALUES('legacy','{"legacy":true}','00000000-0000-0000-0000-000000000001');
-INSERT INTO public.scores VALUES('legacy','00000000-0000-0000-0000-000000000001',25);
+INSERT INTO public.players VALUES
+ ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001'),
+ ('00000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000002'),
+ ('00000000-0000-0000-0000-000000000013','00000000-0000-0000-0000-000000000020','00000000-0000-0000-0000-000000000003');
+INSERT INTO public.scores(event_id,player_id,total_score) VALUES('legacy','00000000-0000-0000-0000-000000000001',25);
+INSERT INTO public.events
+ SELECT x.id,'00000000-0000-0000-0000-000000000010','Finalize fixture','ranking_v1','resultWait',now()-interval '1 day',
+ (SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball'
+ FROM (VALUES('finalize-case'),('missing-player'),('invalid-saved'),('empty-submissions')) x(id);
+INSERT INTO public.predictions(event_id,user_id,payload) VALUES
+ ('finalize-case','00000000-0000-0000-0000-000000000001',(SELECT pick FROM inputs)),
+ ('finalize-case','00000000-0000-0000-0000-000000000002','{"version":1,"candidateIds":["b","a","d","c"]}'),
+ ('missing-player','00000000-0000-0000-0000-000000000003',(SELECT pick FROM inputs)),
+ ('invalid-saved','00000000-0000-0000-0000-000000000001','{"version":1,"candidateIds":["a","a","b","c"]}');
 CREATE TEMP TABLE legacy_snapshot AS SELECT jsonb_build_array(
  (SELECT to_jsonb(e) FROM public.events e WHERE id='legacy'),
  (SELECT to_jsonb(p) FROM public.predictions p WHERE event_id='legacy'),

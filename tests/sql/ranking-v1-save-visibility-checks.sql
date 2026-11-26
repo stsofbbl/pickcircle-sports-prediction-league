@@ -102,5 +102,4 @@ DO $f$ BEGIN
  (SELECT to_jsonb(r) FROM public.results r WHERE event_id='legacy'),
  (SELECT to_jsonb(s) FROM public.scores s WHERE event_id='legacy')) THEN RAISE EXCEPTION 'legacy data changed'; END IF;
 END $f$;
-ROLLBACK;
 SELECT 'PASS: draft/open, two own saves, predeadline and cross-club privacy, immutable config/deadline, blocked direct result/score, legacy unchanged';
