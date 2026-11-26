@@ -7,7 +7,7 @@ const {promisify}=require("node:util");
 const run=promisify(execFile),chrome=process.env.CHROME_BIN;
 assert.ok(chrome);
 const dir=path.join(__dirname,"../prototypes/ranking-v1");
-const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs","workspace.cjs"];
+const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs","creation-journal.cjs","workspace.cjs"];
 // Fixed allowlist of CommonJS modules wrapped in ordinary script functions.
 // No eval, dynamic loading or production bundle creation.
 const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs'),...require('./workspace.cjs')};})();";
@@ -96,7 +96,7 @@ function fill(kind){
  panel.dispose();
  let created=null,attempt=0,firstArgs=null;
  const wsCalls=[];
- const ws=RankingFixture.mountRankingWorkspace(root,{client:{rpc:async(name,args)=>{
+ const wsOptions={client:{rpc:async(name,args)=>{
   wsCalls.push({name,args});
   if(name.endsWith("_list"))return {data:{actorId,leagueId,events:created?[{id:created.eventId,name:created.name,sport_type:created.sportType,status:created.status,prediction_deadline:created.deadline}]:[],truncated:false}};
   if(name.endsWith("_create_draft")){
@@ -109,7 +109,8 @@ function fill(kind){
   }
   if(name.endsWith("_snapshot"))return created?{data:created}:{error:{code:"42501"}};
   throw Error("unexpected workspace RPC "+name);
- }}});
+ }}};
+ let ws=RankingFixture.mountRankingWorkspace(root,wsOptions);
  await ws.setContext({actorId,leagueId,canManage:false});
  check(!action("new-draft"),"member creation UI exposed");
  await ws.setContext({actorId,leagueId,canManage:true});
@@ -123,10 +124,20 @@ function fill(kind){
  async function until(fn){for(let i=0;i<100;i++){await Promise.resolve();if(fn())return;}throw Error("workspace operation incomplete");}
  await until(()=>!!action("verify-creation"));
  check(!action("new-draft")&&!action("retry-creation"),"ambiguous create allowed immediate retry or new ID");
+ const savedId=JSON.parse(firstArgs).p_event_id;
+ ws.dispose();ws=RankingFixture.mountRankingWorkspace(root,wsOptions);
+ await ws.setContext({actorId,leagueId,canManage:true});
+ check(action("verify-creation")&&root.textContent.includes(savedId),"reload did not restore exact ID");
+ check(!action("retry-creation"),"restored pending allowed retry before read");
+ await ws.setContext({actorId:"00000000-0000-0000-0000-000000000099",leagueId,canManage:false});
+ check(!root.textContent.includes(savedId),"other actor saw pending draft");
+ await ws.setContext({actorId,leagueId,canManage:true});
+ check(action("verify-creation"),"pending lost after context change");
  action("verify-creation").click();await until(()=>!!action("retry-creation"));
  action("retry-creation").click();await until(()=>!!action("back-catalog"));
  check(root.textContent.includes("New Cup"),"created draft not displayed");
  check(attempt===2,"unexpected creation attempts");
+ check(!sessionStorage.getItem("yoso:ranking-v1:pending:"+actorId+":"+leagueId),"completed creation retained journal");
  action("back-catalog").click();await until(()=>!!action("select-event"));
  action("select-event").click();await until(()=>!!action("back-catalog"));
  check(root.textContent.includes("New Cup"),"selected draft not displayed");

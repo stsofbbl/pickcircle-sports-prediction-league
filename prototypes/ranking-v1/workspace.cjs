@@ -3,9 +3,12 @@
 const {createRankingController}=require("./controller.cjs");
 const {mountRankingPanel}=require("./panel.cjs");
 const {mountDraftForm}=require("./draft-form.cjs");
-function mountRankingWorkspace(root,{client,newId=()=>globalThis.crypto.randomUUID()}){
+const {createCreationJournal}=require("./creation-journal.cjs");
+function mountRankingWorkspace(root,{client,newId=()=>globalThis.crypto.randomUUID(),storage}){
+  if(storage===undefined){try{storage=root.ownerDocument.defaultView.sessionStorage;}catch(_){storage=null;}}
+  const journal=createCreationJournal(storage);
   const controller=createRankingController({client}),doc=root.ownerDocument;
-  let context=null,epoch=0,busy=false,mode="catalog",pending=null,message="",panel=null;
+  let context=null,epoch=0,busy=false,mode="catalog",pending=null,message="",panel=null,creationBlocked=false;
   function add(parent,tag,value){const e=doc.createElement(tag);if(value!==undefined)e.textContent=value;parent.append(e);return e;}
   function button(parent,label,action,fn){
     const e=add(parent,"button",label),version=epoch;
@@ -39,12 +42,15 @@ function mountRankingWorkspace(root,{client,newId=()=>globalThis.crypto.randomUU
   }
   function create(input){
     if(!context?.canManage||pending||busy)return;
-    const id=newId(),request={id,input:JSON.parse(JSON.stringify(input)),checked:false};
-    pending=request;controller.select(scope(id));mode="pending";
+    if(creationBlocked)return;
+    let request;
+    try{request={...journal.save(context,{version:1,id:newId(),input}),checked:false};}
+    catch(_){creationBlocked=true;message="作成情報を安全に保持できません。大会作成を停止しました。";mode="catalog";render();return;}
+    pending=request;controller.select(scope(request.id));mode="pending";
     void perform(async version=>{
       await controller.createDraft(request.input);
       if(!current(version))return;
-      pending=null;mode="event";
+      journal.complete(context,request);pending=null;mode="event";
     });
   }
   function verifyPending(){
@@ -55,6 +61,7 @@ function mountRankingWorkspace(root,{client,newId=()=>globalThis.crypto.randomUU
         const v=await controller.refresh();
         if(!current(version))return;
         if(!sameDraft(v,request)){message="同じIDの大会内容が異なります。新規作成は停止しています。";return;}
+        try{journal.complete(context,request);}catch(_){message="作成済み大会を確認しましたが、復旧情報を消去できません。再取得してください。";return;}
         pending=null;mode="event";
       }catch(_){
         if(!current(version))return;
@@ -71,7 +78,7 @@ function mountRankingWorkspace(root,{client,newId=()=>globalThis.crypto.randomUU
     void perform(async version=>{
       await controller.createDraft(request.input);
       if(!current(version))return;
-      pending=null;mode="event";
+      journal.complete(context,request);pending=null;mode="event";
     });
   }
   function render(){
@@ -103,13 +110,18 @@ function mountRankingWorkspace(root,{client,newId=()=>globalThis.crypto.randomUU
     if(!list){add(root,"p","大会一覧を取得してください。");return;}
     if(list.truncated)add(root,"p","大会一覧の一部のみ表示しています。");
     for(const e of list.items)button(root,e.name+" / "+e.statusLabel,"select-event",()=>selectEvent(e.eventId));
-    if(context.canManage)button(root,"新規大会作成","new-draft",()=>{mode="create";render();});
+    if(context.canManage&&!creationBlocked)button(root,"新規大会作成","new-draft",()=>{mode="create";render();});
+    if(context.canManage&&creationBlocked)add(root,"p","作成情報の保存領域を確認できないため、新規作成を停止しています。");
   }
   return Object.freeze({
     setContext(next){
-      epoch++;busy=false;pending=null;message="";mode="catalog";
+      epoch++;busy=false;pending=null;message="";mode="catalog";creationBlocked=false;
       controller.select(null);context=next?{actorId:next.actorId,leagueId:next.leagueId,canManage:next.canManage===true}:null;
-      render();if(context)return catalog();
+      if(context?.canManage){
+        try{const record=journal.load(context);if(record){pending={...record,checked:false};mode="pending";controller.select(scope(record.id));}}
+        catch(_){creationBlocked=true;}
+      }
+      render();if(context&&!pending)return catalog();
     },
     getState:()=>controller.getState(),
     dispose(){epoch++;context=null;pending=null;busy=false;controller.select(null);clear();}
