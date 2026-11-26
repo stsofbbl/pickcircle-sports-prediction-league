@@ -71,3 +71,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### 既存アプリとの接続境界
 `host-bridge.cjs` は実ソースで確認した `YosoSupabase.client()/sessionUser()` と `YosoDataService.league.listMyClubs()` を再利用し、明示されたオンラインactor/clubに対して前後で実sessionと所属を照合する接続アダプタ。管理UIのrole hintは選択クラブのmembership_roleだけから判定し、他クラブ役割・user_metadata・ローカルログインを使わない。非同期の古いscopeは世代チェックで棄却。ホスト側は `applyOnlineAuthUser` のID変更、`handleSupabaseAuthEvent` のSIGNED_OUT/PASSWORD_RECOVERY、`saveActiveClub` のclub変更、クラブ削除/除名/所属再取得、画面離脱時に同期的invalidateを先に呼び、明示的な画面起動時にopenを呼ぶ契約。既存の認証イベント内から追加認証通信を開始しない。ホストへの実際のhook登録とbundle/画面配置は未実装（現行app.js/index.html/CSSの変更なし）。本番認証/DB変更なし。6件の接続単体試験を追加。
+
+### 既存大会編集ページへの無効状態の接続
+`js/ranking-v1.generated.js` は固定module allowlistの決定的生成物（CIで再生成一致を確認）。`index.html` にhiddenの独立sectionを置き、`host-entry.cjs` の定数 RELEASE_ENABLED=false により入口を無効化する。URL、localStorage、環境設定から有効化できない。既存app.jsは有効時のみrenderPageでscopeを同期、ログアウト・パスワード回復・club変更・所属再取得・削除/権限変更の手前でinvalidateする。明示クリックなしにRPCを開始しない。現段階は試験branchのみで本番未反映。実Chrome mock試験で無効時にmountしないこと、有効テスト時の画面離脱/club変更で破棄することを検証。実ブラウザと実DBの一体E2E、外部端末による除名の即時通知、全auth経路、正式UI/仕様は未検証。フラグは認可の代替ではない。リリース時までfalseを維持する。

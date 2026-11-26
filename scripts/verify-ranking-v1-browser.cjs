@@ -7,10 +7,10 @@ const {promisify}=require("node:util");
 const run=promisify(execFile),chrome=process.env.CHROME_BIN;
 assert.ok(chrome);
 const dir=path.join(__dirname,"../prototypes/ranking-v1");
-const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs","creation-journal.cjs","workspace.cjs"];
+const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs","creation-journal.cjs","workspace.cjs","host-bridge.cjs","host-entry.cjs"];
 // Fixed allowlist of CommonJS modules wrapped in ordinary script functions.
 // No eval, dynamic loading or production bundle creation.
-const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs'),...require('./workspace.cjs')};})();";
+const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs'),...require('./workspace.cjs'),...require('./host-entry.cjs')};})();";
 const checks=`
 const root=document.getElementById("root");
 const actorId="00000000-0000-0000-0000-000000000001",leagueId="00000000-0000-0000-0000-000000000010",eventId="demo";
@@ -144,6 +144,28 @@ function fill(kind){
  await ws.setContext(null);
  check(!root.textContent.includes("New Cup"),"workspace logout retained draft");
  ws.dispose();
+ // Verify the release flag, explicit opening and synchronous scope cleanup.
+ const section=document.createElement("section"),entryButton=document.createElement("button"),entryRoot=document.createElement("div");
+ section.append(entryButton,entryRoot);root.append(section);
+ let mounts=0,disposed=0;
+ const hostContext={...scope,provider:"supabase",page:"active",authRecoveryMode:false};
+ const options={section,button:entryButton,root:entryRoot,getHostContext:()=>hostContext,
+  makeBridge:()=>{mounts++;return {open:async()=>{entryRoot.textContent="private tournament";return true;},dispose:()=>{disposed++;entryRoot.replaceChildren();}};}};
+ check(RankingFixture.RELEASE_ENABLED===false,"release enabled unexpectedly");
+ const disabled=RankingFixture.createRankingEntry(options);
+ disabled.sync(hostContext);entryButton.click();
+ check(section.hidden&&mounts===0,"disabled entry mounted");
+ disabled.dispose();
+ const enabled=RankingFixture.createRankingEntry({...options,enabled:true});
+ enabled.sync(hostContext);
+ check(!section.hidden&&mounts===0,"entry did not require explicit action");
+ await enabled.open();check(entryRoot.textContent==="private tournament","entry failed");
+ enabled.sync({...hostContext,page:"home"});
+ check(section.hidden&&entryRoot.textContent===""&&disposed===1,"page exit retained data");
+ enabled.sync(hostContext);await enabled.open();
+ enabled.sync({...hostContext,leagueId:"00000000-0000-0000-0000-000000000020"});
+ check(entryRoot.textContent===""&&disposed===2,"club switch retained data");
+ enabled.dispose();
  document.documentElement.dataset.result="pass";document.getElementById("result").textContent="PASS: member save, duplicate rejection, manager explicit review/finalize, safe rendering, logout";
 })().catch(error=>{document.documentElement.dataset.result="fail";document.getElementById("result").textContent=String(error.stack||error);});
 `;

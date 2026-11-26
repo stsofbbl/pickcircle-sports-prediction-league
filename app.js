@@ -466,6 +466,7 @@ function isSupabaseAuthEnabled() {
 function applyOnlineAuthUser(user) {
   const previousUserId = String(onlineAuthUser?.id || "");
   const nextUserId = String(user?.id || "");
+  if (previousUserId !== nextUserId) globalThis.YosoRankingV1?.invalidate();
   onlineAuthUser = user || null;
   if (previousUserId !== nextUserId) {
     loadedKoshienOnlineEventId = "";
@@ -490,6 +491,7 @@ async function bootstrapSupabaseAuth() {
 
 async function handleSupabaseAuthEvent(event) {
   if (event === "PASSWORD_RECOVERY") {
+    globalThis.YosoRankingV1?.invalidate();
     authRecoveryMode = true;
     applyOnlineAuthUser(null);
     renderAuthState();
@@ -1327,6 +1329,7 @@ async function handleAuthReset() {
 }
 
 async function logoutAuthUser() {
+  globalThis.YosoRankingV1?.invalidate();
   if (isSupabaseAuthEnabled()) {
     try {
       await window.YosoDataService.auth.signOut();
@@ -1452,6 +1455,7 @@ async function handleAccountDelete() {
   if (els.accountDeleteButton) els.accountDeleteButton.disabled = true;
   setAccountMessage("アカウントを削除しています…");
   try {
+    globalThis.YosoRankingV1?.invalidate();
     await window.YosoDataService.auth.deleteAccount({ password });
     try {
       await window.YosoDataService.auth.signOut();
@@ -2079,6 +2083,7 @@ function resolveKoshienOnlineGameMultiplier(metadata, current) {
 function applyKoshienOnlineSnapshot(snapshot) {
   const eventRow = snapshot.event;
   const currentName = snapshot.currentUser?.displayName || currentParticipantName();
+  if (String(onlineLeagueId) !== String(snapshot.league?.id || "")) globalThis.YosoRankingV1?.invalidate();
   onlineLeagueId = String(snapshot.league?.id || "");
   onlineKoshienEventId = String(eventRow?.id || "");
   loadedKoshienResultRevision = String(snapshot.resultRevision || "");
@@ -2244,8 +2249,20 @@ function currentPageId() {
   return PAGE_IDS.has(id) ? id : "home";
 }
 
+// Ranking v1 is disabled by its generated release flag. No online reads
+// are started by the existing auth callback or render path.
+function rankingV1HostContext() {
+  const user = currentAuthUser();
+  const selected = String(window.YosoSupabase?.config?.().activeLeagueId || "");
+  const leagueId = onlineLeagueId && selected && onlineLeagueId !== selected ? "" : (selected || onlineLeagueId);
+  return { actorId: user?.id, provider: user?.provider, leagueId, page: currentPageId(), authRecoveryMode };
+}
 function renderPage() {
   const pageId = currentPageId();
+  if (globalThis.YosoRankingV1?.enabled === true) {
+    globalThis.YosoRankingHostContext = rankingV1HostContext;
+    globalThis.YosoRankingV1.sync(rankingV1HostContext());
+  }
   els.pages.forEach((page) => page.classList.toggle("is-active", page.dataset.page === pageId));
   els.navLinks.forEach((link) => {
     const isActive = link.dataset.navPage === pageId;
@@ -2738,6 +2755,7 @@ function saveActiveClub(club) {
   const leagueId = String(club?.league_id || "");
   if (!leagueId) return;
   const leagueChanged = String(onlineLeagueId) !== leagueId;
+  if (leagueChanged) globalThis.YosoRankingV1?.invalidate();
   state.leagueName = club.league_name || state.leagueName;
   clubPathwayState.renameLeagueId = leagueId;
   clubPathwayState.renameName = club.league_name || null;
@@ -2760,6 +2778,7 @@ function saveActiveClub(club) {
 }
 
 async function refreshClubPathwayData({ renderAfter = true } = {}) {
+  globalThis.YosoRankingV1?.invalidate();
   if (!isSupabaseAuthEnabled() || !currentAuthUser()) {
     clubPathwayState.myClubs = [];
     clubPathwayState.myRequests = [];
@@ -2868,6 +2887,7 @@ async function handleClubPathwayAction(button) {
       const activeClub = activeClubRecord();
       const confirmationName = window.prompt("削除するクラブ名を入力してください。大会・予想を含むクラブデータも削除されます。", activeClub?.league_name || "");
       if (confirmationName === null) return;
+      globalThis.YosoRankingV1?.invalidate();
       await league?.deleteClub?.({ leagueId: activeClub?.league_id, confirmationName });
       onlineLeagueId = "";
       onlineKoshienEventId = "";
@@ -4555,6 +4575,7 @@ async function changeLeagueAdminRole(button) {
   onlineLeagueAdminMessage = `${actionLabel}しています…`;
   renderLeagueAdminManager();
   try {
+    globalThis.YosoRankingV1?.invalidate();
     await window.YosoDataService?.league?.manageAdmin?.({ leagueId: onlineLeagueId, userId, makeAdmin });
     applyOnlineAuthUser(await window.YosoDataService.auth.currentUser());
     onlineLeagueAdminMessage = `${member.displayName}さんの権限を更新しました。`;
@@ -4582,6 +4603,7 @@ async function removeLeagueMember(button) {
   onlineLeagueAdminMessage = "メンバーを削除しています…";
   renderLeagueAdminManager();
   try {
+    globalThis.YosoRankingV1?.invalidate();
     await window.YosoDataService?.league?.removeMember?.({ leagueId: onlineLeagueId, userId });
     onlineLeagueAdminMessage = `${member.displayName}さんを削除しました。`;
     lastKoshienOnlineLoadUserId = "";
