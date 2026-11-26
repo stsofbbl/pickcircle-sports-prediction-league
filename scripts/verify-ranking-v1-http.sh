@@ -56,8 +56,13 @@ docker run --detach --rm --name "$auth_container" --network host \
 # The previously recorded digest returned registry 404.
 docker pull postgrest/postgrest:v12.2.3
 postgrest_image="$(docker image inspect --format '{{index .RepoDigests 0}}' postgrest/postgrest:v12.2.3)"
-test "$postgrest_image" = "postgrest/postgrest@sha256:729bf65c733b73f5b52777f0e4b853f22ed73ae67a22d38269d289779b0a8401"
 echo "PostgREST resolved image: $postgrest_image"
+# Run the exact locally resolved digest. The CI logs reported two different
+# digests for this version; do not silently accept another version.
+case "${postgrest_image#docker.io/}" in
+  postgrest/postgrest@sha256:729bf65c733b73f5b52777f0e4b853f22ed73ae67a22d38269d289779b0a8401|postgrest/postgrest@sha256:729bf65c733b73f5b52777f0e4b853f22ed73aa67a22d38269d289779b0a8401) ;;
+  *) echo "Unreviewed PostgREST digest" >&2; exit 1 ;;
+esac
 docker run --detach --rm --name "$container" --network host \
   -e PGRST_DB_URI="postgres://yoso_ranking_authenticator:$password@127.0.0.1:5432/$db" \
   -e PGRST_DB_SCHEMAS=public -e PGRST_DB_ANON_ROLE=anon \
