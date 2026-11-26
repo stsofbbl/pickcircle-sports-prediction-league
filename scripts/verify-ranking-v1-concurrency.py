@@ -118,6 +118,30 @@ try:
     assert sql(auth(OWNER)+"SELECT count(*) FROM public.predictions WHERE event_id='race-close';")=="1"
     assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-close' AND user_id='"+OWNER+"';")=="0"
     print("PASS: stale-transaction late save rejected, close waits for accepted save, post-deadline publication correct")
+
+    # Two independent admin requests with the same reviewed inputs must
+    # serialize on the event and return one creation plus one recovery.
+    revision=sql(auth(OWNER)+"SELECT public.ranking_v1_review_revision('finalize-case');")
+    assert len(revision)==32
+    finalize=f"SELECT public.ranking_v1_finalize('finalize-case','{revision}',{PICK})->>'recovered';"
+    a=start()
+    send(a,"SELECT pg_backend_pid();")
+    holder=int(line(a))
+    send(a,"BEGIN;"+auth(OWNER)+finalize)
+    assert line(a)=="false"
+    assert sql("SELECT count(*) FROM public.scores WHERE event_id='finalize-case';")=="0"
+    b=start()
+    send(b,"SET application_name='ranking_v1_finalize_wait';SET statement_timeout='15s';"+auth(OWNER)+finalize)
+    wait_blocked("ranking_v1_finalize_wait",holder,b)
+    send(a,"COMMIT;")
+    finish(a)
+    assert finish(b)=="true"
+    assert sql("SELECT count(*) FROM public.scores WHERE event_id='finalize-case';")=="2"
+    assert sql("SELECT count(*) FROM public.results WHERE event_id='finalize-case';")=="1"
+    assert sql("SELECT count(*) FROM ranking_v1_private.finalize_receipts WHERE event_id='finalize-case';")=="1"
+    assert sql("SELECT count(*) FROM ranking_v1_private.finalize_permits;")=="0"
+    assert sql("SELECT status FROM public.events WHERE id='finalize-case';")=="finalized"
+    print("PASS: concurrent identical finalize requests produce exactly one result, two scores and one receipt")
 finally:
     for p in PROCS:
         if p.poll() is None:
