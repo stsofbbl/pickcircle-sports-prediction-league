@@ -37,7 +37,12 @@ function sdk({jwt,storage=new Map()}={}){
       assert.ok(auth||url.pathname.startsWith("/rest/v1/"),"unexpected endpoint");
       const dest=new URL((auth?authBase:base)+url.pathname.slice(auth?8:8)+url.search);
       wire.push({method:init?.method||"GET",path:url.pathname});
-      return fetch(dest,{...init,signal:AbortSignal.timeout(10000)});
+      const response=await fetch(dest,{...init,signal:AbortSignal.timeout(10000)});
+      if(!auth&&!response.ok){
+        const body=await response.clone().json().catch(()=>({}));
+        console.log("HTTP rejection",url.pathname,response.status,JSON.stringify({code:body.code,message:body.message}));
+      }
+      return response;
     }}
   });
 }
@@ -72,8 +77,8 @@ async function main(){
   const event=randomUUID();
   const a=service(owner.client,owner.uid,club,event),m=service(member.client,member.uid,club,event),x=service(outsider.client,outsider.uid,club,event);
   const denied=e=>e?.code==="42501";
-  const stale=e=>e?.code==="40001";
-  const input={name:"HTTP ranking fixture",sportType:"baseball",deadline:new Date(Date.now()+20000).toISOString(),config};
+  const stale=e=>{assert.equal(e?.code,"40001",JSON.stringify({code:e?.code,message:e?.message}));return true;};
+  const input={name:"HTTP ranking fixture",sportType:"baseball",deadline:new Date(Date.now()+40000).toISOString(),config};
   await assert.rejects(m.api.createDraft(input),denied);
   const created=await a.api.createDraft(input);
   assert.equal(created.status,"draft");
@@ -115,7 +120,7 @@ async function main(){
     assert.ok(r.error,"invalid/anonymous token accessed snapshot");
   }
   const wait=Math.max(0,Date.parse(input.deadline)-Date.now()+500);
-  assert.ok(wait<=20500);await new Promise(resolve=>setTimeout(resolve,wait));
+  assert.ok(wait<=40500);await new Promise(resolve=>setTimeout(resolve,wait));
   assert.equal((await m2.api.snapshot()).predictionsPublic,true);
   await assert.rejects(m2.api.save(first,config),denied);
   assert.equal((await a.api.close()).status,"resultWait");

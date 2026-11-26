@@ -56,7 +56,7 @@ docker run --detach --rm --name "$auth_container" --network host \
 # The previously recorded digest returned registry 404.
 docker pull postgrest/postgrest:v12.2.3
 postgrest_image="$(docker image inspect --format '{{index .RepoDigests 0}}' postgrest/postgrest:v12.2.3)"
-[[ "$postgrest_image" =~ ^postgrest/postgrest@sha256:[a-f0-9]{64}$ ]]
+test "$postgrest_image" = "postgrest/postgrest@sha256:729bf65c733b73f5b52777f0e4b853f22ed73ae67a22d38269d289779b0a8401"
 echo "PostgREST resolved image: $postgrest_image"
 docker run --detach --rm --name "$container" --network host \
   -e PGRST_DB_URI="postgres://yoso_ranking_authenticator:$password@127.0.0.1:5432/$db" \
