@@ -74,3 +74,5 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### 既存大会編集ページへの無効状態の接続
 `js/ranking-v1.generated.js` は固定module allowlistの決定的生成物（CIで再生成一致を確認）。`index.html` にhiddenの独立sectionを置き、`host-entry.cjs` の定数 RELEASE_ENABLED=false により入口を無効化する。URL、localStorage、環境設定から有効化できない。既存app.jsは有効時のみrenderPageでscopeを同期、ログアウト・パスワード回復・club変更・所属再取得・削除/権限変更の手前でinvalidateする。明示クリックなしにRPCを開始しない。現段階は試験branchのみで本番未反映。実Chrome mock試験で無効時にmountしないこと、有効テスト時の画面離脱/club変更で破棄することを検証。実ブラウザと実DBの一体E2E、外部端末による除名の即時通知、全auth経路、正式UI/仕様は未検証。フラグは認可の代替ではない。リリース時までfalseを維持する。
+
+追加の接続検証: 実index.htmlからhidden sectionを抽出し、実CSS・実生成bundleをChromeで読み込む。無効状態の入口が非表示で、接続も開始しないことを確認する。app.js実関数を抽出したNode試験で無効フラグ時のrenderPage、クラブ不一致、auth ID切替時のinvalidateを確認する。全アプリ起動の実DB E2Eではない。

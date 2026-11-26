@@ -11,6 +11,10 @@ const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","
 // Fixed allowlist of CommonJS modules wrapped in ordinary script functions.
 // No eval, dynamic loading or production bundle creation.
 const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs'),...require('./workspace.cjs'),...require('./host-entry.cjs')};})();";
+const actualIndex=fs.readFileSync(path.join(__dirname,"../index.html"),"utf8");
+const actualSection=actualIndex.match(/<section[^>]+id="rankingV1Section"[^>]*>[\s\S]*?<\/section>/)?.[0];
+assert.ok(actualSection&&actualIndex.includes('<script src="./js/ranking-v1.generated.js"></script>'));
+const actualBundle=fs.readFileSync(path.join(__dirname,"../js/ranking-v1.generated.js"),"utf8");
 const checks=`
 const root=document.getElementById("root");
 const actorId="00000000-0000-0000-0000-000000000001",leagueId="00000000-0000-0000-0000-000000000010",eventId="demo";
@@ -145,6 +149,16 @@ function fill(kind){
  check(!root.textContent.includes("New Cup"),"workspace logout retained draft");
  ws.dispose();
  // Verify the release flag, explicit opening and synchronous scope cleanup.
+ const actualSection=document.getElementById("rankingV1Section"),actualButton=document.getElementById("rankingV1Open");
+ let unexpected=0;
+ window.YosoSupabase={client:async()=>{unexpected++;throw Error("unexpected connection");}};
+ window.YosoDataService={isAuthEnabled:()=>{unexpected++;return true;}};
+ check(window.YosoRankingV1.enabled===false,"actual shipped flag enabled");
+ window.YosoRankingV1.sync({...scope,provider:"supabase",page:"active",authRecoveryMode:false});
+ actualButton.click();
+ await Promise.resolve();
+ check(actualSection.hidden&&getComputedStyle(actualSection).display==="none"&&unexpected===0,"actual disabled section visible or made a request");
+ window.YosoRankingV1.invalidate();
  const section=document.createElement("section"),entryButton=document.createElement("button"),entryRoot=document.createElement("div");
  section.append(entryButton,entryRoot);root.append(section);
  let mounts=0,disposed=0;
@@ -169,12 +183,12 @@ function fill(kind){
  document.documentElement.dataset.result="pass";document.getElementById("result").textContent="PASS: member save, duplicate rejection, manager explicit review/finalize, safe rendering, logout";
 })().catch(error=>{document.documentElement.dataset.result="fail";document.getElementById("result").textContent=String(error.stack||error);});
 `;
-const page='<!doctype html><html lang="ja"><meta charset="utf-8"><title>Ranking panel fixture</title><div id="root"></div><pre id="result">pending</pre><script src="/bundle.js"></script><script src="/checks.js"></script></html>';
-const routes={"/":page,"/bundle.js":source,"/checks.js":checks};
+const page='<!doctype html><html lang="ja"><meta charset="utf-8"><title>Ranking panel fixture</title><link rel="stylesheet" href="/style.css"><div id="root"></div>'+actualSection+'<pre id="result">pending</pre><script src="/bundle.js"></script><script src="/actual.js"></script><script src="/checks.js"></script></html>';
+const routes={"/":page,"/bundle.js":source,"/actual.js":actualBundle,"/style.css":fs.readFileSync(path.join(__dirname,"../styles.css"),"utf8"),"/checks.js":checks};
 const server=http.createServer((req,res)=>{
  const pathname=new URL(req.url,"http://127.0.0.1").pathname;
- res.setHeader("Content-Security-Policy","default-src 'none'; script-src 'self'; connect-src 'none'; form-action 'none'");
- res.setHeader("Content-Type",pathname==="/"? "text/html; charset=utf-8":"application/javascript; charset=utf-8");
+ res.setHeader("Content-Security-Policy","default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; form-action 'none'");
+ res.setHeader("Content-Type",pathname==="/"? "text/html; charset=utf-8":pathname==="/style.css"?"text/css; charset=utf-8":"application/javascript; charset=utf-8");
  res.writeHead(Object.hasOwn(routes,pathname)?200:404);res.end(routes[pathname]||"");
 });
 (async()=>{
