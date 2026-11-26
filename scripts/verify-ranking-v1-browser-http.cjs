@@ -105,32 +105,44 @@ const server=http.createServer(async(req,res)=>{
 });
 async function browser(){
  const profile=fs.mkdtempSync(path.join(os.tmpdir(),"ranking-http-chrome-"));
- // A separate process group lets cleanup terminate only this disposable Chrome and its children.
- assert.equal(process.platform,"linux");
- const proc=spawn(process.env.CHROME_BIN,["--headless","--no-sandbox","--disable-gpu","--disable-background-networking","--no-proxy-server","--remote-debugging-port=0","--user-data-dir="+profile,"about:blank"],{stdio:"ignore",detached:true});
- const exited=new Promise(resolve=>{proc.once("exit",resolve);proc.once("error",resolve);});
- let ws;
- function signalGroup(signal){
-  if(!proc.pid)return;
-  try{process.kill(-proc.pid,signal);}catch(error){if(error.code!=="ESRCH")throw error;}
- }
+ // Preserve the launch mode from the successful browser run; do not detach Chrome.
+ const proc=spawn(process.env.CHROME_BIN,["--headless","--no-sandbox","--disable-gpu","--disable-background-networking","--no-proxy-server","--remote-debugging-port=0","--user-data-dir="+profile,"about:blank"],{stdio:["ignore","ignore","pipe"]});
+ let exitInfo=null,stderr="",ws;
+ const exited=new Promise(resolve=>{
+  proc.once("exit",(code,signal)=>{exitInfo={code,signal};resolve();});
+  proc.once("error",error=>{exitInfo={error:error.message};resolve();});
+ });
+ proc.stderr.on("data",chunk=>{stderr=(stderr+chunk.toString()).slice(-4000);});
  async function close(){
   try{ws?.close();}finally{
    try{
-    signalGroup("SIGTERM");
-    await Promise.race([exited,delay(2000)]);
-    signalGroup("SIGKILL");
-    await Promise.race([exited,delay(2000)]);
+    if(!exitInfo){
+     proc.kill("SIGTERM");
+     await Promise.race([exited,delay(3000)]);
+    }
+    if(!exitInfo){
+     proc.kill("SIGKILL");
+     await Promise.race([exited,delay(3000)]);
+    }
+    if(!exitInfo)throw Error("Chrome process did not exit");
    }finally{
-    // Chrome child processes may still be releasing files after the parent exits.
+    // A child may still be releasing profile files after the main process exits.
     await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
    }
   }
  }
  try{
   const portFile=path.join(profile,"DevToolsActivePort");
-  for(let i=0;i<100&&!fs.existsSync(portFile);i++)await delay(100);
-  const port=fs.readFileSync(portFile,"utf8").split("\n")[0];
+  let port="";
+  for(let i=0;i<200;i++){
+   if(exitInfo)throw Error("Chrome exited before DevTools ready: "+JSON.stringify(exitInfo)+" / "+stderr);
+   try{
+    const candidate=fs.readFileSync(portFile,"utf8").split("\n")[0].trim();
+    if(/^\d+$/.test(candidate)&&Number(candidate)>0&&Number(candidate)<=65535){port=candidate;break;}
+   }catch(error){if(error.code!=="ENOENT")throw error;}
+   await delay(100);
+  }
+  if(!port)throw Error("Chrome DevTools startup timed out: "+stderr);
   const tabs=await(await fetch("http://127.0.0.1:"+port+"/json/list")).json();
   const tab=tabs.find(t=>t.type==="page");assert.ok(tab);
   ws=new WebSocket(tab.webSocketDebuggerUrl);
@@ -149,7 +161,7 @@ async function browser(){
   for(let i=0;i<100;i++){if(await evaluate("typeof window.fixture==='object'"))break;await delay(100);}
   assert.equal(await evaluate("typeof window.fixture"),"object");
   return {call:(method,...args)=>evaluate("fixture["+JSON.stringify(method)+"]("+args.map(a=>JSON.stringify(a)).join(",")+")"),close};
- }catch(error){await close();throw error;}
+ }catch(error){try{await close();}catch(cleanupError){throw new AggregateError([error,cleanupError],"Chrome startup and cleanup failed");}throw error;}
 }
 (async()=>{
  const browsers=[];
