@@ -8,11 +8,11 @@ DO $f$ BEGIN
  BEGIN
   UPDATE public.players SET profile_id=NULL WHERE id='00000000-0000-0000-0000-000000000012';
   RAISE EXCEPTION 'historical player reassigned';
- EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+ EXCEPTION WHEN restrict_violation OR foreign_key_violation THEN NULL; END;
  BEGIN
   DELETE FROM public.players WHERE id='00000000-0000-0000-0000-000000000012';
   RAISE EXCEPTION 'historical player removed';
- EXCEPTION WHEN foreign_key_violation THEN NULL; END;
+ EXCEPTION WHEN restrict_violation OR foreign_key_violation THEN NULL; END;
  BEGIN
   DELETE FROM auth.users WHERE id='00000000-0000-0000-0000-000000000001';
   RAISE EXCEPTION 'owner account deletion accepted';
@@ -44,7 +44,7 @@ SET LOCAL ROLE authenticated;
 DO $f$ BEGIN
  BEGIN PERFORM public.delete_club('00000000-0000-0000-0000-000000000010','Fixture Club');
   RAISE EXCEPTION 'prototype club deletion accepted';
- EXCEPTION WHEN insufficient_privilege OR foreign_key_violation THEN NULL; END;
+ EXCEPTION WHEN insufficient_privilege OR foreign_key_violation OR restrict_violation THEN NULL; END;
 END $f$;
 RESET ROLE;
 DO $f$ BEGIN
