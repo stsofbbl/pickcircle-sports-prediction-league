@@ -28,7 +28,39 @@ function createRankingApi({client,getScope}){
     check(data);
     return data;
   }
+  function draftArgs({name,sportType,deadline,config}){
+    need(typeof name==="string"&&name.trim()===name&&name.length>=1&&name.length<=120&&!/[\u0000-\u001f\u007f]/.test(name),"invalid tournament name");
+    need(typeof sportType==="string"&&/^[a-z][a-z0-9_-]{0,31}$/.test(sportType),"invalid sport type");
+    need(typeof deadline==="string"&&/(?:Z|[+-]\d{2}:\d{2})$/i.test(deadline)&&Number.isFinite(Date.parse(deadline)),"invalid deadline");
+    return {p_name:name,p_sport:sportType,p_deadline:new Date(deadline).toISOString(),p_config:validateConfig(config)};
+  }
+  function managementCheck(data,status,args){
+    need(data.status===status&&typeof data.revision==="string"&&REV.test(data.revision)&&typeof data.recovered==="boolean","invalid management response");
+    validateConfig(data.config);
+    if(args)need(data.name===args.p_name&&data.sportType===args.p_sport&&Date.parse(data.deadline)===Date.parse(args.p_deadline)
+      &&JSON.stringify(validateConfig(data.config))===JSON.stringify(args.p_config),"draft response mismatch");
+  }
   return Object.freeze({
+    createDraft:input=>{
+      const s=capture();
+      need(typeof s.eventId==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[48][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(s.eventId),"invalid creation ID");
+      const args=draftArgs(input);
+      return call("ranking_v1_api_create_draft",args,true,data=>managementCheck(data,"draft",args));
+    },
+    draftReview:()=>call("ranking_v1_api_draft_review",{},true,data=>managementCheck(data,"draft")),
+    editDraft:(revision,input)=>{
+      need(typeof revision==="string"&&REV.test(revision),"invalid ranking revision");
+      const args=draftArgs(input);
+      return call("ranking_v1_api_edit_draft",{...args,p_revision:revision},true,data=>managementCheck(data,"draft",args));
+    },
+    open:revision=>{
+      need(typeof revision==="string"&&REV.test(revision),"invalid ranking revision");
+      return call("ranking_v1_api_open",{p_revision:revision},true,data=>{
+        managementCheck(data,"open");
+        need(data.revision===revision,"opened revision mismatch");
+      });
+    },
+    close:()=>call("ranking_v1_api_close",{},true,data=>managementCheck(data,"resultWait")),
     list:()=>call("ranking_v1_api_list",{},false,data=>{
       need(Array.isArray(data.events)&&data.events.length<=100&&typeof data.truncated==="boolean","invalid ranking catalog");
     }),

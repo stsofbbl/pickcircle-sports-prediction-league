@@ -55,11 +55,11 @@ def finish(p, expected=None):
     return out.strip()
 
 def create_event(event, duration):
-    sql(auth(OWNER) + f"""INSERT INTO public.events
-       SELECT '{event}','{CLUB}','Race','ranking_v1','draft',
-       clock_timestamp()+interval '{duration}',rules,'{OWNER}','baseball'
-       FROM public.events WHERE id='expired';
-       UPDATE public.events SET status='open' WHERE id='{event}';""")
+    revision=sql(auth(OWNER)+f"""SELECT public.ranking_v1_api_create_draft(
+       '{CLUB}','{event}','{OWNER}','Race','baseball',clock_timestamp()+interval '{duration}',
+       (SELECT rules FROM public.events WHERE id='expired'))->>'revision';""")
+    assert len(revision)==32
+    assert sql(auth(OWNER)+f"SELECT public.ranking_v1_api_open('{CLUB}','{event}','{OWNER}','{revision}')->>'status';")=="open"
 
 def insert(event, uid):
     return f"INSERT INTO public.predictions(event_id,user_id,payload) VALUES('{event}','{uid}',{PICK}) RETURNING event_id;"
@@ -79,53 +79,53 @@ def wait_blocked(name, holder_pid, waiter):
 
 try:
     # Exact NOWAIT error, followed by a successful retry with no extra row.
-    create_event("race-lock", "1 day")
+    create_event("a0000000-0000-4000-8000-000000000011", "1 day")
     a=start()
-    send(a,"BEGIN;"+auth(OWNER)+"UPDATE public.events SET name='Locked' WHERE id='race-lock' RETURNING id;")
-    assert line(a)=="race-lock"
-    sql(auth(MEMBER)+insert("race-lock",MEMBER),error="55P03")
-    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-lock';")=="0"
+    send(a,"BEGIN;"+auth(OWNER)+"UPDATE public.events SET name='Locked' WHERE id='a0000000-0000-4000-8000-000000000011' RETURNING id;")
+    assert line(a)=="a0000000-0000-4000-8000-000000000011"
+    sql(auth(MEMBER)+insert("a0000000-0000-4000-8000-000000000011",MEMBER),error="55P03")
+    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000011';")=="0"
     send(a,"ROLLBACK;")
     finish(a)
-    assert sql(auth(MEMBER)+insert("race-lock",MEMBER))=="race-lock"
-    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-lock';")=="1"
+    assert sql(auth(MEMBER)+insert("a0000000-0000-4000-8000-000000000011",MEMBER))=="a0000000-0000-4000-8000-000000000011"
+    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000011';")=="1"
     print("PASS: event lock rejects conflicting save (55P03), rollback permits exact retry")
 
     # One accepted save holds a parent lock while the clock crosses deadline.
     # Another transaction started before the deadline cannot exploit now().
-    create_event("race-close", "8 seconds")
+    create_event("a0000000-0000-4000-8000-000000000012", "8 seconds")
     a=start()
     send(a,"SELECT pg_backend_pid();")
     holder=int(line(a))
-    send(a,"BEGIN;"+auth(MEMBER)+insert("race-close",MEMBER))
-    assert line(a)=="race-close"
+    send(a,"BEGIN;"+auth(MEMBER)+insert("a0000000-0000-4000-8000-000000000012",MEMBER))
+    assert line(a)=="a0000000-0000-4000-8000-000000000012"
     late=start()
-    send(late,"BEGIN;"+auth(OWNER)+"SELECT public.is_prediction_open('race-close');")
+    send(late,"BEGIN;"+auth(OWNER)+"SELECT public.is_prediction_open('a0000000-0000-4000-8000-000000000012');")
     assert line(late)=="t"
-    wait_deadline("race-close")
-    send(late,"SELECT public.is_prediction_open('race-close') AND clock_timestamp()>=(SELECT prediction_deadline FROM public.events WHERE id='race-close');")
+    wait_deadline("a0000000-0000-4000-8000-000000000012")
+    send(late,"SELECT public.is_prediction_open('a0000000-0000-4000-8000-000000000012') AND clock_timestamp()>=(SELECT prediction_deadline FROM public.events WHERE id='a0000000-0000-4000-8000-000000000012');")
     assert line(late)=="t","old transaction must reproduce legacy now() bypass"
-    send(late,insert("race-close",OWNER))
+    send(late,insert("a0000000-0000-4000-8000-000000000012",OWNER))
     finish(late,expected="ranking prediction closed or unauthorized")
-    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-close';")=="0","uncommitted save unexpectedly visible"
+    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000012';")=="0","uncommitted save unexpectedly visible"
     b=start()
     send(b,"SET application_name='ranking_v1_close_wait';SET statement_timeout='15s';"+auth(OWNER)+
-         "UPDATE public.events SET status='resultWait' WHERE id='race-close' RETURNING status;")
+         f"SELECT public.ranking_v1_api_close('{CLUB}','a0000000-0000-4000-8000-000000000012','{OWNER}')->>'status';")
     wait_blocked("ranking_v1_close_wait",holder,b)
     send(a,"COMMIT;")
     finish(a)
     assert finish(b)=="resultWait"
-    assert sql(auth(OWNER)+"SELECT count(*) FROM public.predictions WHERE event_id='race-close';")=="1"
-    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-close' AND user_id='"+OWNER+"';")=="0"
+    assert sql(auth(OWNER)+"SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000012';")=="1"
+    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000012' AND user_id='"+OWNER+"';")=="0"
     print("PASS: stale-transaction late save rejected, close waits for accepted save, post-deadline publication correct")
 
     # Actual production membership removal must serialize with a save.
-    create_event("race-membership","1 day")
+    create_event("a0000000-0000-4000-8000-000000000013","1 day")
     a=start()
     send(a,"SELECT pg_backend_pid();")
     holder=int(line(a))
-    send(a,"BEGIN;"+auth(MEMBER)+insert("race-membership",MEMBER))
-    assert line(a)=="race-membership"
+    send(a,"BEGIN;"+auth(MEMBER)+insert("a0000000-0000-4000-8000-000000000013",MEMBER))
+    assert line(a)=="a0000000-0000-4000-8000-000000000013"
     b=start()
     send(b,"SET application_name='ranking_v1_remove_wait';SET statement_timeout='15s';"+auth(OWNER)+
          f"SELECT public.remove_club_member('{CLUB}','{MEMBER}')->>'removed';")
@@ -133,10 +133,10 @@ try:
     send(a,"COMMIT;")
     finish(a)
     assert finish(b)=="true"
-    assert sql(auth(MEMBER)+"SELECT count(*) FROM public.predictions WHERE event_id='race-membership';")=="0"
-    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-membership';")=="1"
-    sql(auth(MEMBER)+f"UPDATE public.predictions SET payload={PICK} WHERE event_id='race-membership';")
-    assert sql("SELECT count(*) FROM ranking_v1_private.prediction_players WHERE event_id='race-membership';")=="1"
+    assert sql(auth(MEMBER)+"SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000013';")=="0"
+    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000013';")=="1"
+    sql(auth(MEMBER)+f"UPDATE public.predictions SET payload={PICK} WHERE event_id='a0000000-0000-4000-8000-000000000013';")
+    assert sql("SELECT count(*) FROM ranking_v1_private.prediction_players WHERE event_id='a0000000-0000-4000-8000-000000000013';")=="1"
     # Restore synthetic membership for the other independent cases.
     sql(f"UPDATE public.league_members SET membership_status='active' WHERE league_id='{CLUB}' AND user_id='{MEMBER}';")
     print("PASS: removal waits for accepted save, old access revoked, historical binding retained")

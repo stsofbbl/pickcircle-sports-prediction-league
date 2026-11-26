@@ -69,7 +69,8 @@ GRANT SELECT ON inputs TO authenticated;
 INSERT INTO public.events VALUES
  ('legacy','00000000-0000-0000-0000-000000000010','old','koshien','open',now()+interval '1 day','{}','00000000-0000-0000-0000-000000000001','baseball'),
  ('expired','00000000-0000-0000-0000-000000000010','past','ranking_v1','open',now()-interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball'),
- ('expired-draft','00000000-0000-0000-0000-000000000010','draft','ranking_v1','draft',now()-interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball');
+ ('expired-draft','00000000-0000-0000-0000-000000000010','draft','ranking_v1','draft',now()-interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball'),
+ ('management-expired','00000000-0000-0000-0000-000000000010','expired','ranking_v1','open',now()-interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball');
 INSERT INTO public.predictions(event_id,user_id,payload) VALUES
  ('legacy','00000000-0000-0000-0000-000000000001','{"legacy":true}'),
  ('expired','00000000-0000-0000-0000-000000000001',(SELECT pick FROM inputs)),

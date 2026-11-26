@@ -47,3 +47,28 @@ test("review and finalize preserve reviewed revision and exact result, not score
   await h.api.finalize(revision,prediction,config);
   assert.deepEqual(h.calls[1].args,{p_league_id:leagueId,p_actor_id:actorId,p_event_id:eventId,p_revision:revision,p_result:prediction});
 });
+
+test("management create retains exact caller-provided ID and rejects mismatched draft responses",async()=>{
+  const h=harness(),id="a0000000-0000-4000-8000-000000000001";
+  const input={name:"Cup",sportType:"baseball",deadline:"2027-01-01T12:00:00+09:00",config};
+  h.change({eventId:id});
+  const data={actorId,leagueId,eventId:id,...input,deadline:"2027-01-01T03:00:00.000Z",status:"draft",revision,recovered:false};
+  h.respond(async()=>({data}));
+  await h.api.createDraft(input);
+  assert.deepEqual(h.calls[0].args,{p_actor_id:actorId,p_league_id:leagueId,p_event_id:id,p_name:"Cup",p_sport:"baseball",p_deadline:data.deadline,p_config:config});
+  h.respond(async()=>({data:{...data,recovered:true}}));
+  assert.equal((await h.api.createDraft(input)).recovered,true);
+  h.respond(async()=>({data:{...data,name:"Wrong"}}));
+  await assert.rejects(h.api.createDraft(input),/draft response mismatch/);
+  assert.throws(()=>h.api.createDraft({...input,deadline:"2027-01-01T12:00:00"}));
+});
+test("reviewed revision is preserved for edit and open; stale response fails",async()=>{
+  const h=harness(),input={name:"Cup",sportType:"baseball",deadline:"2027-01-01T03:00:00Z",config};
+  const data={actorId,leagueId,eventId,...input,status:"draft",revision,recovered:false};
+  h.respond(async()=>({data}));await h.api.draftReview();
+  await h.api.editDraft(revision,input);assert.equal(h.calls[1].args.p_revision,revision);
+  h.respond(async()=>({data:{...data,status:"open",revision:"b".repeat(32)}}));
+  await assert.rejects(h.api.open(revision),/revision mismatch/);
+  h.respond(async()=>({data:{...data,status:"open"}}));await h.api.open(revision);
+  h.respond(async()=>({data:{...data,status:"resultWait"}}));await h.api.close();
+});
