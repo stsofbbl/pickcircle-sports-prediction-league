@@ -7,10 +7,10 @@ const {promisify}=require("node:util");
 const run=promisify(execFile),chrome=process.env.CHROME_BIN;
 assert.ok(chrome);
 const dir=path.join(__dirname,"../prototypes/ranking-v1");
-const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs"];
+const names=["contract.cjs","api-client.cjs","view-model.cjs","controller.cjs","draft-form.cjs","panel.cjs","workspace.cjs"];
 // Fixed allowlist of CommonJS modules wrapped in ordinary script functions.
 // No eval, dynamic loading or production bundle creation.
-const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs')};})();";
+const source="(()=>{const modules={"+names.map(n=>JSON.stringify("./"+n)+":(module,exports,require)=>{\n"+fs.readFileSync(path.join(dir,n),"utf8")+"\n}").join(",")+"};const cache={};function require(id){if(!Object.hasOwn(modules,id))throw Error('unknown fixture module');if(cache[id])return cache[id].exports;const module={exports:{}};cache[id]=module;modules[id](module,module.exports,require);return module.exports;}window.RankingFixture={...require('./controller.cjs'),...require('./panel.cjs'),...require('./workspace.cjs')};})();";
 const checks=`
 const root=document.getElementById("root");
 const actorId="00000000-0000-0000-0000-000000000001",leagueId="00000000-0000-0000-0000-000000000010",eventId="demo";
@@ -94,6 +94,45 @@ function fill(kind){
  controller.select(null);panel.render();
  check(!root.textContent.includes("player")&&!root.textContent.includes("25pt"),"logout retained private view");
  panel.dispose();
+ let created=null,attempt=0,firstArgs=null;
+ const wsCalls=[];
+ const ws=RankingFixture.mountRankingWorkspace(root,{client:{rpc:async(name,args)=>{
+  wsCalls.push({name,args});
+  if(name.endsWith("_list"))return {data:{actorId,leagueId,events:created?[{id:created.eventId,name:created.name,sport_type:created.sportType,status:created.status,prediction_deadline:created.deadline}]:[],truncated:false}};
+  if(name.endsWith("_create_draft")){
+   attempt++;
+   if(attempt===1){firstArgs=JSON.stringify(args);return {error:{message:"timeout"}};}
+   check(JSON.stringify(args)===firstArgs,"creation retry changed ID or content");
+   created={actorId,leagueId,eventId:args.p_event_id,name:args.p_name,sportType:args.p_sport,deadline:args.p_deadline,config:args.p_config,
+    status:"draft",canManage:true,canSubmit:false,predictionsPublic:false,ownPrediction:null,publishedPredictions:[],result:null,ranking:[]};
+   return {data:{...created,revision:rev,recovered:true}};
+  }
+  if(name.endsWith("_snapshot"))return created?{data:created}:{error:{code:"42501"}};
+  throw Error("unexpected workspace RPC "+name);
+ }}});
+ await ws.setContext({actorId,leagueId,canManage:false});
+ check(!action("new-draft"),"member creation UI exposed");
+ await ws.setContext({actorId,leagueId,canManage:true});
+ action("new-draft").click();
+ function change(field,value){field.value=value;field.dispatchEvent(new Event("input",{bubbles:true}));}
+ change(root.querySelector('[data-draft-field="name"]'),"New Cup");
+ change(root.querySelector('[data-draft-field="deadline"]'),"2027-01-01T12:00:00+09:00");
+ [...root.querySelectorAll('[data-draft-field="candidate-label"]')].forEach((e,i)=>change(e,"Team "+i));
+ check(!action("create-draft").disabled,"complete creation disabled");
+ action("create-draft").click();
+ async function until(fn){for(let i=0;i<100;i++){await Promise.resolve();if(fn())return;}throw Error("workspace operation incomplete");}
+ await until(()=>!!action("verify-creation"));
+ check(!action("new-draft")&&!action("retry-creation"),"ambiguous create allowed immediate retry or new ID");
+ action("verify-creation").click();await until(()=>!!action("retry-creation"));
+ action("retry-creation").click();await until(()=>!!action("back-catalog"));
+ check(root.textContent.includes("New Cup"),"created draft not displayed");
+ check(attempt===2,"unexpected creation attempts");
+ action("back-catalog").click();await until(()=>!!action("select-event"));
+ action("select-event").click();await until(()=>!!action("back-catalog"));
+ check(root.textContent.includes("New Cup"),"selected draft not displayed");
+ await ws.setContext(null);
+ check(!root.textContent.includes("New Cup"),"workspace logout retained draft");
+ ws.dispose();
  document.documentElement.dataset.result="pass";document.getElementById("result").textContent="PASS: member save, duplicate rejection, manager explicit review/finalize, safe rendering, logout";
 })().catch(error=>{document.documentElement.dataset.result="fail";document.getElementById("result").textContent=String(error.stack||error);});
 `;
