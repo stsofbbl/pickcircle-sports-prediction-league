@@ -88,6 +88,12 @@ jobs:
           test -n "$CHROME_BIN"
           curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
           node scripts/verify-supabase-browser.cjs "$RUNNER_TEMP/yoso-supabase-sdk.js"
+      - name: Verify isolated ranking panel in real Chrome
+        shell: bash
+        run: |
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME_BIN"
+          node scripts/verify-ranking-v1-browser.cjs
       - name: Check Edge Functions
         run: |
           deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
