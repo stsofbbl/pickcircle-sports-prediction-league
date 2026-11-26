@@ -68,3 +68,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### タブ再読み込み後の作成復旧
 `creation-journal.cjs` はsessionStorageにユーザー/クラブ別の作成ID・大会設定のみ保存し、書込確認後に初回RPCを送信。再読込や同タブの再選択時は未解決情報を復元し、再取得後のみ同一ID・内容で再試行する。確定応答と再取得の完了時に該当記録だけを消去。他ユーザー/クラブの記録は画面に出さず、認証トークン・予想・得点は保存しない。タブ内の大会設定はログアウトしても復旧用に残り、タブ終了・storage消去・別端末間での復旧は保証しない。storage不可・破損時は新規作成を停止（勝手に記録を消さない）。同一ブラウザタブの再マウントとscope変更をChrome試験に追加。既存本体未接続。
+
+### 既存アプリとの接続境界
+`host-bridge.cjs` は実ソースで確認した `YosoSupabase.client()/sessionUser()` と `YosoDataService.league.listMyClubs()` を再利用し、明示されたオンラインactor/clubに対して前後で実sessionと所属を照合する接続アダプタ。管理UIのrole hintは選択クラブのmembership_roleだけから判定し、他クラブ役割・user_metadata・ローカルログインを使わない。非同期の古いscopeは世代チェックで棄却。ホスト側は `applyOnlineAuthUser` のID変更、`handleSupabaseAuthEvent` のSIGNED_OUT/PASSWORD_RECOVERY、`saveActiveClub` のclub変更、クラブ削除/除名/所属再取得、画面離脱時に同期的invalidateを先に呼び、明示的な画面起動時にopenを呼ぶ契約。既存の認証イベント内から追加認証通信を開始しない。ホストへの実際のhook登録とbundle/画面配置は未実装（現行app.js/index.html/CSSの変更なし）。本番認証/DB変更なし。6件の接続単体試験を追加。
