@@ -105,9 +105,28 @@ const server=http.createServer(async(req,res)=>{
 });
 async function browser(){
  const profile=fs.mkdtempSync(path.join(os.tmpdir(),"ranking-http-chrome-"));
- const proc=spawn(process.env.CHROME_BIN,["--headless","--no-sandbox","--disable-gpu","--disable-background-networking","--no-proxy-server","--remote-debugging-port=0","--user-data-dir="+profile,"about:blank"],{stdio:"ignore"});
+ // A separate process group lets cleanup terminate only this disposable Chrome and its children.
+ assert.equal(process.platform,"linux");
+ const proc=spawn(process.env.CHROME_BIN,["--headless","--no-sandbox","--disable-gpu","--disable-background-networking","--no-proxy-server","--remote-debugging-port=0","--user-data-dir="+profile,"about:blank"],{stdio:"ignore",detached:true});
+ const exited=new Promise(resolve=>{proc.once("exit",resolve);proc.once("error",resolve);});
  let ws;
- async function close(){ws?.close();proc.kill();await Promise.race([new Promise(r=>proc.once("exit",r)),delay(2000)]);fs.rmSync(profile,{recursive:true,force:true});}
+ function signalGroup(signal){
+  if(!proc.pid)return;
+  try{process.kill(-proc.pid,signal);}catch(error){if(error.code!=="ESRCH")throw error;}
+ }
+ async function close(){
+  try{ws?.close();}finally{
+   try{
+    signalGroup("SIGTERM");
+    await Promise.race([exited,delay(2000)]);
+    signalGroup("SIGKILL");
+    await Promise.race([exited,delay(2000)]);
+   }finally{
+    // Chrome child processes may still be releasing files after the parent exits.
+    await fs.promises.rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+   }
+  }
+ }
  try{
   const portFile=path.join(profile,"DevToolsActivePort");
   for(let i=0;i<100&&!fs.existsSync(portFile);i++)await delay(100);
@@ -163,5 +182,17 @@ async function browser(){
   await m.call("membershipDenied");
   await a.call("leave");await a.call("logout");await m.call("logout");await x.call("logout");
   console.log("PASS: actual Chrome independent profiles + real GoTrue/SDK/PostgREST, creation/open/save/deadline/finalize/ranking/revocation/logout; "+calls+" local HTTP requests");
- }finally{for(const b of browsers)await b.close();server.close();}
+ }finally{
+  // One cleanup failure must not leave other browsers or the proxy running.
+  const closed=await Promise.allSettled(browsers.map(b=>b.close()));
+  if(server.listening){
+   await new Promise((resolve,reject)=>{
+    server.close(error=>error?reject(error):resolve());
+    server.closeAllConnections();
+   });
+  }
+  const failures=closed.filter(result=>result.status==="rejected").map(result=>result.reason);
+  if(failures.length)throw new AggregateError(failures,"Chrome fixture cleanup failed");
+  console.log("PASS: all browser profiles and local HTTP proxy cleaned up");
+ }
 })().catch(e=>{console.error(e);process.exitCode=1;});
