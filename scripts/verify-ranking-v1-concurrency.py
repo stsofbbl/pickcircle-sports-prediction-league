@@ -141,6 +141,54 @@ try:
     sql(f"UPDATE public.league_members SET membership_status='active' WHERE league_id='{CLUB}' AND user_id='{MEMBER}';")
     print("PASS: removal waits for accepted save, old access revoked, historical binding retained")
 
+    # Two same-ID create requests from independent sessions must create
+    # exactly one draft and return one recovery. The deadline is frozen.
+    create_id="a0000000-0000-4000-8000-000000000014"
+    deadline=sql("SELECT (clock_timestamp()+interval '1 day')::text;")
+    create=f"""SELECT public.ranking_v1_api_create_draft(
+        '{CLUB}','{create_id}','{OWNER}','Concurrent Cup','baseball','{deadline}'::timestamptz,
+        (SELECT rules FROM public.events WHERE id='expired'))->>'recovered';"""
+    a=start()
+    send(a,"SELECT pg_backend_pid();")
+    holder=int(line(a))
+    send(a,"BEGIN;"+auth(OWNER)+create)
+    assert line(a)=="false"
+    b=start()
+    send(b,"SET application_name='ranking_v1_create_wait';SET statement_timeout='15s';"+auth(OWNER)+create)
+    wait_blocked("ranking_v1_create_wait",holder,b)
+    send(a,"COMMIT;")
+    finish(a)
+    assert finish(b)=="true"
+    assert sql(f"SELECT count(*) FROM public.events WHERE id='{create_id}' AND status='draft';")=="1"
+    assert sql("SELECT count(*) FROM ranking_v1_private.management_permits;")=="0"
+    print("PASS: concurrent same-ID creates produce one draft and one exact recovery")
+
+    # The draft edit owns the row until commit. A previously reviewed
+    # revision may not open the changed draft after waiting for that edit.
+    old_rev=sql(auth(OWNER)+f"SELECT public.ranking_v1_api_draft_review('{CLUB}','{create_id}','{OWNER}')->>'revision';")
+    edit=f"""SELECT public.ranking_v1_api_edit_draft(
+      '{CLUB}','{create_id}','{OWNER}','{old_rev}','Edited Cup','soccer','{deadline}'::timestamptz,
+      (SELECT rules FROM public.events WHERE id='{create_id}'))->>'revision';"""
+    open_old=f"SELECT public.ranking_v1_api_open('{CLUB}','{create_id}','{OWNER}','{old_rev}')->>'status';"
+    a=start()
+    send(a,"SELECT pg_backend_pid();")
+    holder=int(line(a))
+    send(a,"BEGIN;"+auth(OWNER)+edit)
+    new_rev=line(a)
+    assert len(new_rev)==32 and new_rev!=old_rev
+    b=start()
+    send(b,"SET application_name='ranking_v1_open_wait';SET statement_timeout='15s';"+auth(OWNER)+open_old)
+    wait_blocked("ranking_v1_open_wait",holder,b)
+    send(a,"COMMIT;")
+    finish(a)
+    finish(b,expected="ranking draft stale")
+    assert sql(f"SELECT status FROM public.events WHERE id='{create_id}';")=="draft"
+    assert sql(auth(OWNER)+f"SELECT public.ranking_v1_api_open('{CLUB}','{create_id}','{OWNER}','{new_rev}')->>'status';")=="open"
+    sql(auth(OWNER)+edit,error="42501")
+    assert sql(f"SELECT name||':'||sport_type FROM public.events WHERE id='{create_id}';")=="Edited Cup:soccer"
+    assert sql("SELECT count(*) FROM ranking_v1_private.management_permits;")=="0"
+    print("PASS: concurrent draft edit rejects stale open; reviewed open locks settings")
+
     # Two independent admin requests with the same reviewed inputs must
     # serialize on the event and return one creation plus one recovery.
     revision=sql(auth(OWNER)+"SELECT public.ranking_v1_review_revision('finalize-case');")
