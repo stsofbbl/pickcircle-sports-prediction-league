@@ -25,6 +25,15 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Verify Koshien conflict candidate and rollback in isolated PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql.service
+          sudo -u postgres createdb yoso_koshien_conflict_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_koshien_conflict_test' EXIT
+          cat tests/sql/koshien-conflict-fixture.sql supabase/release-candidates/koshien-http-conflict/apply.sql tests/sql/koshien-conflict-patched-checks.sql supabase/release-candidates/koshien-http-conflict/rollback.sql tests/sql/koshien-conflict-rollback-checks.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_conflict_test
+          test "$(sudo -u postgres psql -X -At -d yoso_koshien_conflict_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon','service_role'))")" = t
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash
         run: |

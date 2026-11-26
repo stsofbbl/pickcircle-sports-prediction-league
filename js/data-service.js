@@ -214,7 +214,7 @@
   }
 
   function phase2ConflictError(error) {
-    return ["23505", "40001", "55000"].includes(error?.code)
+    return ["23505", "40001", "PT409", "55000"].includes(error?.code)
       || /already|conflict|deadline|turn changed|not active/i.test(error?.message || "");
   }
 

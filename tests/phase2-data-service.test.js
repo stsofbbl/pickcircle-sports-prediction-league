@@ -123,3 +123,13 @@ test("legacy snapshot path cannot delete or bulk insert formal phase 2 picks", (
   assert.doesNotMatch(source, /\.from\("phase2_draft_picks"\)/);
   assert.match(source, /save_koshien_phase2_draft_pick/);
 });
+
+test("HTTP 409 conflict reloads state even without a recognizable message", async () => {
+  const { service, calls } = loadService({
+    rpcHandler: async name => name === "save_koshien_phase2_draft_pick"
+      ? { data: null, error: { code: "PT409", message: "stale" } }
+      : { data: draftState(5), error: null },
+  });
+  await assert.rejects(service.koshien.savePhase2DraftPick({ eventId: "event-1", draftId: "draft-1", teamId: "team-3", pickNo: 3, requestId: "request-3" }), error => error.retryable === true && error.latestState?.draft?.version === 5);
+  assert.deepEqual(calls.map(call => call.name), ["save_koshien_phase2_draft_pick", "get_koshien_phase2_draft_state"]);
+});
