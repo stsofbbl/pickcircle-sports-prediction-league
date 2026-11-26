@@ -40,6 +40,7 @@ jobs:
           { cat tests/sql/ranking-v1-save-visibility-fixture.sql prototypes/ranking-v1/save-visibility.sql prototypes/ranking-v1/finalize.sql prototypes/ranking-v1/membership-integrity.sql tests/sql/fixtures/ranking-v1-production-membership.sql prototypes/ranking-v1/api.sql prototypes/ranking-v1/management.sql; echo COMMIT\;; } | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_ranking_v1_test
           node scripts/verify-ranking-v1-score-parity.cjs yoso_ranking_v1_test
           python3 scripts/verify-ranking-v1-concurrency.py yoso_ranking_v1_test
+          bash scripts/verify-ranking-v1-http.sh yoso_ranking_v1_test
 
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash

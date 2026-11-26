@@ -45,3 +45,6 @@ CIで同じ合成fixtureを専用DBにのみコミットし、独立したpsql�
 `management.sql` を `api.sql` の後に適用する隔離検証。作成用UUID v4/v8は呼出側が保持し、同一ID・作成者・完全一致するdraft内容のみ復旧。異なる内容や他クラブのID衝突は拒否。管理者の編集・受付開始はDB revisionで確認し、直接DMLをprivate permitで拒否。受付開始後は既存ルール固定を維持し、締切到達後のみclose（resultWait）を実行。同じrevisionの受付開始・同じcloseの再試行は既存状態を返す。名前120文字・競技コード32文字は暫定。作成IDは同一操作内で保持する必要があり、別端末の別IDによる重複を自動排除する仕様ではない。編集通信失敗後は再読込して確認する。管理APIを実際のアプリへ接続していない。監査付き再開・削除、実HTTP/Auth、完全な本番schemaの検証は未完。本番適用不可。
 
 管理APIの並行試験を追加。同一UUID・作成入力の同時createでは一つのdraftのみ生成されること、編集トランザクション中に開始された旧revisionのopenは編集commit後に拒否されること、最新revisionで開いた後の編集は拒否されることを実DBの独立接続で検証する。対象は使い捨てCIのみ。
+
+## 実HTTP統合試作
+GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0、PostgREST v12.2.3、GoTrue v2.189.0を再利用。GoTrueは別の使い捨てDBとし、実signup/login発行のUIDをランキングfixtureのauth.users/profiles/membership/playerに合成登録する。10 RPCを実SDKから通し、2人の予想、締切、確定、ランキング、同一ID/revision再試行、別クラブ、署名不正・期限切れJWT、匿名、除名後のアクセス、セッションrefresh/再取得を確認する。既存甲子園fixtureの指紋比較も行う。Auth triggerや実本番のメール/OAuth/完全schema、ブラウザUIはこの試験の対象外。外部ネットワークはSDK/固定Dockerイメージの取得のみ。本番接続なし。
