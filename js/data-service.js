@@ -1264,7 +1264,14 @@
     const { data, error } = await supabase.rpc("open_koshien_draft", {
       p_event_id: id, p_expected_revision: expectedRevision,
     });
-    if (error) throw koshienSaveError("event_open", error, "受付を開始できませんでした。");
+    if (error) {
+      const wrapped = koshienSaveError("event_open", error, "受付を開始できませんでした。");
+      if (["40001", "PT409"].includes(error.code)
+        && ["draft changed; reload before opening", "draft not opened"].includes(error.message)) {
+        wrapped.message = "大会情報が変更されました。大会一覧から再読込し、内容を確認してから受付を開始してください。";
+      }
+      throw wrapped;
+    }
     if (data?.event_id !== id || data?.status !== "open") throw new Error("受付開始を確認できませんでした。");
     return data;
   }

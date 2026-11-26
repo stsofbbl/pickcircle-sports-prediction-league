@@ -48,7 +48,7 @@ function sdkFor(uid, options) {
       assert.ok(url.pathname.startsWith("/rest/v1/"), "unexpected SDK endpoint");
       url.pathname = url.pathname.slice("/rest/v1".length);
       wire.push({ method: init?.method || "GET", path: url.pathname });
-      return fetch(url, { ...init, signal: AbortSignal.timeout(10000) });
+      return fetch(url, { ...init, signal: AbortSignal.timeout(url.pathname === "/rpc/open_koshien_draft" ? 5000 : 10000) });
     } },
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
@@ -91,7 +91,7 @@ function realSdk(storage = new Map()) {
       assert.ok(isAuth||url.pathname.startsWith("/rest/v1/"),"unexpected SDK route");
       const dest=new URL((isAuth?authBase:base)+url.pathname.slice(isAuth?"/auth/v1".length:"/rest/v1".length)+url.search);
       wire.push({method:init?.method||"GET",path:url.pathname});
-      return fetch(dest,{...init,signal:AbortSignal.timeout(10000)});
+      return fetch(dest,{...init,signal:AbortSignal.timeout(dest.pathname === "/rpc/open_koshien_draft" ? 5000 : 10000)});
     }},
   });
 }
@@ -219,8 +219,22 @@ async function exerciseRosterAndPrediction(a,m,eventId) {
   await assert.rejects(m.service.openDraft({eventId,expectedRevision:rev}));
   // Actual HTTP route must not bypass the reviewed RPC, even as league owner.
   denied(await a.client.from("events").update({status:"open"}).eq("id",eventId));
-  assert.equal((await a.service.loadSnapshot({eventId,strictEventId:true})).event.status,"draft");
-  await a.service.openDraft({eventId,expectedRevision:rev});
+  const beforeStale=await a.service.loadSnapshot({eventId,strictEventId:true});
+  assert.equal(beforeStale.event.status,"draft");
+  assert.equal(beforeStale.resultRevision,rev);
+  const staleRevision=rev==="0".repeat(32)?"1".repeat(32):"0".repeat(32);
+  const conflict=await a.client.rpc("open_koshien_draft",{p_event_id:eventId,p_expected_revision:staleRevision});
+  assert.equal(conflict.status,409);
+  assert.equal(conflict.error?.code,"PT409");
+  assert.equal(conflict.error?.message,"draft changed; reload before opening");
+  await assert.rejects(a.service.openDraft({eventId,expectedRevision:staleRevision}),error=>
+    error?.code==="PT409" && error?.stage==="event_open" && /再読込/.test(error.message));
+  const afterStale=await a.service.loadSnapshot({eventId,strictEventId:true});
+  for (const field of ["event","teams","predictions","results","scores","resultRevision"]) {
+    assert.deepEqual(afterStale[field],beforeStale[field],"stale open changed "+field);
+  }
+  console.log("PASS: HTTP stale reviewed draft returns 409 PT409, no changes, reload succeeds");
+  await a.service.openDraft({eventId,expectedRevision:afterStale.resultRevision});
   const opened=await m.service.loadSnapshot({eventId,strictEventId:true});
   assert.equal(opened.event.status,"open");
   const saved=ok(await m.client.rpc("save_koshien_phase1_prediction",prediction));

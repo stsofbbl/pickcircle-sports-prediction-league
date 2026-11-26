@@ -55,7 +55,9 @@ DO $stale$ BEGIN
  BEGIN
   PERFORM public.open_koshien_draft('test-open-draft',repeat('0',32));
   RAISE EXCEPTION 'stale revision accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN
+   IF SQLERRM <> 'draft changed; reload before opening' THEN RAISE; END IF;
+  END;
 END $stale$;
 RESET ROLE;
 UPDATE public.teams SET metadata=jsonb_set(metadata,'{source_year}','2026') WHERE event_id='test-open-draft' AND name='Fixture school 1';

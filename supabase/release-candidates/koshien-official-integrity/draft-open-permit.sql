@@ -42,13 +42,13 @@ BEGIN
   END IF;
   v_revision := public.koshien_admin_result_revision(p_event_id);
   IF v_revision IS DISTINCT FROM p_expected_revision THEN
-    RAISE EXCEPTION 'draft changed; reload before opening' USING ERRCODE='40001';
+    RAISE EXCEPTION 'draft changed; reload before opening' USING ERRCODE='PT409';
   END IF;
   INSERT INTO yoso_admin_finalize_private.draft_open_permits(event_id,actor,txid)
   VALUES(p_event_id,v_actor,txid_current());
   -- Trigger validates and consumes the permit in the same transaction.
   UPDATE public.events SET status='open' WHERE id=p_event_id AND status='draft';
-  IF NOT FOUND THEN RAISE EXCEPTION 'draft not opened' USING ERRCODE='40001'; END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'draft not opened' USING ERRCODE='PT409'; END IF;
   IF EXISTS(SELECT 1 FROM yoso_admin_finalize_private.draft_open_permits
     WHERE event_id=p_event_id AND actor=v_actor AND txid=txid_current()) THEN
     RAISE EXCEPTION 'draft opening permit was not consumed';

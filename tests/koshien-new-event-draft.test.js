@@ -204,6 +204,21 @@ test("opening calls only the server RPC with the reviewed event revision", async
   await assert.rejects(invalid.service.koshien.openDraft({eventId,expectedRevision:"invalid"}));
   assert.equal(invalid.calls.length,0);
 });
+test("draft open business conflicts require an explicit reload, with no automatic retry", async () => {
+  const revision="a".repeat(32);
+  for (const code of ["40001","PT409"]) {
+    for (const message of ["draft changed; reload before opening","draft not opened"]) {
+      const h=harness({rpcError:{code,message}});
+      await assert.rejects(h.service.koshien.openDraft({eventId,expectedRevision:revision}),error=>
+        error.code===code && error.stage==="event_open" && /再読込/.test(error.message));
+      assert.equal(h.calls.length,1);
+      assert.equal(h.calls[0].name,"open_koshien_draft");
+    }
+  }
+  const unrelated=harness({rpcError:{code:"40001",message:"could not serialize access"}});
+  await assert.rejects(unrelated.service.koshien.openDraft({eventId,expectedRevision:revision}),error=>
+    error.code==="40001" && error.message==="could not serialize access");
+});
 test("draft open UI uses loaded ID and exact reload; official draft year is fixed",()=>{
   assert.match(app,/async function openOnlineKoshienDraft/);
   assert.match(app,/openDraft\(\{ eventId: id, expectedRevision: loadedKoshienResultRevision \}\)/);

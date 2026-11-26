@@ -19,11 +19,11 @@ BEGIN
   END IF;
   v_revision := public.koshien_admin_result_revision(p_event_id);
   IF v_revision IS DISTINCT FROM p_expected_revision THEN
-    RAISE EXCEPTION 'draft changed; reload before opening' USING ERRCODE='40001';
+    RAISE EXCEPTION 'draft changed; reload before opening' USING ERRCODE='PT409';
   END IF;
   -- Trigger validates the two actual roster tables and readiness under the lock.
   UPDATE public.events SET status='open' WHERE id=p_event_id AND status='draft';
-  IF NOT FOUND THEN RAISE EXCEPTION 'draft not opened' USING ERRCODE='40001'; END IF;
+  IF NOT FOUND THEN RAISE EXCEPTION 'draft not opened' USING ERRCODE='PT409'; END IF;
   RETURN jsonb_build_object('event_id',p_event_id,'status','open');
 END
 $rpc$;

@@ -66,7 +66,9 @@ DO $$ BEGIN
  BEGIN
   PERFORM public.open_koshien_draft('lifecycle-draft',repeat('0',32));
   RAISE EXCEPTION 'stale revision accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN
+   IF SQLERRM <> 'draft changed; reload before opening' THEN RAISE; END IF;
+  END;
  BEGIN
   INSERT INTO yoso_admin_finalize_private.draft_open_permits VALUES('lifecycle-draft',auth.uid(),txid_current());
   RAISE EXCEPTION 'authenticated user could mint permit';
@@ -116,6 +118,14 @@ DO $$ BEGIN
  THEN RAISE EXCEPTION 'rollback candidate did not restore original guard/RPC'; END IF;
 END $$;
 SET LOCAL ROLE authenticated;
+DO $stale_rollback$ BEGIN
+ BEGIN
+  PERFORM public.open_koshien_draft('lifecycle-draft',repeat('0',32));
+  RAISE EXCEPTION 'rollback restored stale revision acceptance';
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN
+  IF SQLERRM <> 'draft changed; reload before opening' THEN RAISE; END IF;
+ END;
+END $stale_rollback$;
 UPDATE public.events SET status='open' WHERE id='lifecycle-draft';
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM public.events WHERE id='lifecycle-draft' AND status='open') THEN

@@ -79,9 +79,9 @@ try:
     blocked("yoso_open_wait_roster",pid,b)
     finish(a,"COMMIT;")
     out,err=b.communicate(timeout=15)
-    assert b.returncode != 0 and "40001" in err,err
+    assert b.returncode != 0 and "PT409" in err and "draft changed; reload before opening" in err,err
     assert sql(f"SELECT status FROM public.events WHERE id='{EVENT}';")=="draft"
-    print("PASS: actual roster write wins; opening rejects stale revision (40001)")
+    print("PASS: actual roster write wins; opening rejects stale revision (PT409)")
 finally:
     close(a,b)
 
