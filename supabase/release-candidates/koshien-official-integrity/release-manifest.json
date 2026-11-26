@@ -2,12 +2,12 @@
   "format": 1,
   "pr": 58,
   "base_commit": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
-  "source_commit": "2834e410034ba7c634793c3f17e5d58262b15095",
+  "source_commit": "596565e0a4f326752ed65e304fe7cb07880a2698",
   "production_deployment": "dpl_FjsiVGYdCafxUo96d7N6ow72axJ4",
   "db_apply_order": [
     {
       "path": "supabase/migrations/20261124100000_guard_koshien_draft_open.sql",
-      "blob": "403a4d8dd87819758609438019c3f9b6e8a83b2c"
+      "blob": "f836b7bfdff96fe97dc2fff0119ba7261032ad75"
     },
     {
       "path": "supabase/migrations/20261124110000_keep_open_koshien_rounds_confirmed.sql",
@@ -19,7 +19,7 @@
     },
     {
       "path": "supabase/release-candidates/koshien-official-integrity/draft-open-permit.sql",
-      "blob": "b3111a2fc78c4b5f3af1ee0aba5e2e4083c20f82"
+      "blob": "ff96b463c536f57ac8bef3d9477ded01417afe7c"
     },
     {
       "path": "supabase/release-candidates/koshien-official-integrity/import-identity.sql",
@@ -41,7 +41,7 @@
     },
     {
       "path": "supabase/release-candidates/koshien-official-integrity/rollback-draft-open-permit.sql",
-      "blob": "d03173e5928ec80929ffe595cfdb6a74082a1ad6"
+      "blob": "daad6b61acec71ac78fc59b7432cfa86f39730ef"
     }
   ],
   "read_only_checks": [
