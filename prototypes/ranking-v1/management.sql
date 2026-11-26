@@ -90,7 +90,7 @@ BEGIN
  IF e.id IS NULL OR e.created_by IS DISTINCT FROM p_actor_id OR e.status IS DISTINCT FROM 'draft'
   OR e.name IS DISTINCT FROM p_name OR e.sport_type IS DISTINCT FROM p_sport
   OR e.prediction_deadline IS DISTINCT FROM p_deadline OR e.rules IS DISTINCT FROM p_config
- THEN RAISE EXCEPTION 'ranking creation conflict' USING ERRCODE='40001'; END IF;
+ THEN RAISE EXCEPTION 'ranking creation conflict' USING ERRCODE='PT409'; END IF;
  RETURN ranking_v1_private.management_response(e,NOT created);
 END $f$;
 
@@ -115,7 +115,7 @@ BEGIN
  PERFORM ranking_v1_private.lock_management_actor(p_league_id,p_actor_id);
  PERFORM ranking_v1_private.check_draft_input(p_name,p_sport,p_deadline,p_config);
  IF p_revision IS NULL OR p_revision !~ '^[0-9a-f]{32}$' OR p_revision IS DISTINCT FROM ranking_v1_private.draft_revision(e)
- THEN RAISE EXCEPTION 'ranking draft stale' USING ERRCODE='40001'; END IF;
+ THEN RAISE EXCEPTION 'ranking draft stale' USING ERRCODE='PT409'; END IF;
  IF p_deadline<=clock_timestamp() THEN RAISE EXCEPTION 'ranking deadline must be future' USING ERRCODE='22023'; END IF;
  INSERT INTO ranking_v1_private.management_permits VALUES(e.id,p_actor_id,txid_current(),'edit');
  UPDATE public.events SET name=p_name,sport_type=p_sport,prediction_deadline=p_deadline,rules=p_config
@@ -133,7 +133,7 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'ranking event unavailable' USING ERRCODE='42501'; END IF;
  PERFORM ranking_v1_private.lock_management_actor(p_league_id,p_actor_id);
  IF p_revision IS NULL OR p_revision !~ '^[0-9a-f]{32}$' OR p_revision IS DISTINCT FROM ranking_v1_private.draft_revision(e)
- THEN RAISE EXCEPTION 'ranking draft stale' USING ERRCODE='40001'; END IF;
+ THEN RAISE EXCEPTION 'ranking draft stale' USING ERRCODE='PT409'; END IF;
  IF e.status='open' THEN RETURN ranking_v1_private.management_response(e,true); END IF;
  IF e.status<>'draft' OR e.prediction_deadline IS NULL OR e.prediction_deadline<=clock_timestamp()
   OR EXISTS(SELECT 1 FROM public.predictions WHERE event_id=e.id)

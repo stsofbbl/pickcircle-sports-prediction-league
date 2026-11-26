@@ -11,7 +11,7 @@ BEGIN
  a:=public.ranking_v1_api_create_draft(club,v_id,me,'New Cup','baseball',deadline,c);
  IF a->'recovered'<>'true'::jsonb OR a->>'revision'<>rev THEN RAISE EXCEPTION 'create recovery failed'; END IF;
  BEGIN PERFORM public.ranking_v1_api_create_draft(club,v_id,me,'Different','baseball',deadline,c); RAISE EXCEPTION 'create overwrite accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
  BEGIN PERFORM public.ranking_v1_api_create_draft(club,'a0000000-0000-4000-8000-000000000002',me,'New Cup','baseball',now()-interval '1 day',c); RAISE EXCEPTION 'past deadline accepted';
  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
  BEGIN INSERT INTO public.events(id,league_id,name,preset_type,status,prediction_deadline,rules,created_by,sport_type)
@@ -29,9 +29,9 @@ BEGIN
  edited_rev:=a->>'revision';
  IF edited_rev=rev OR a->>'name'<>'Updated Cup' OR a->>'sportType'<>'soccer' THEN RAISE EXCEPTION 'draft edit failed'; END IF;
  BEGIN PERFORM public.ranking_v1_api_open(club,v_id,me,rev); RAISE EXCEPTION 'stale open accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
  BEGIN PERFORM public.ranking_v1_api_edit_draft(club,v_id,me,rev,'Stale','baseball',deadline,c); RAISE EXCEPTION 'stale edit accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
  a:=public.ranking_v1_api_open(club,v_id,me,edited_rev);
  IF a->>'status'<>'open' OR a->'recovered'<>'false'::jsonb THEN RAISE EXCEPTION 'open failed'; END IF;
  a:=public.ranking_v1_api_open(club,v_id,me,edited_rev);
@@ -61,7 +61,7 @@ DO $f$ BEGIN
  BEGIN PERFORM public.ranking_v1_api_close('00000000-0000-0000-0000-000000000010','expired',auth.uid()); RAISE EXCEPTION 'outsider close accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN PERFORM public.ranking_v1_api_create_draft('00000000-0000-0000-0000-000000000020','a0000000-0000-4000-8000-000000000001',auth.uid(),'New Cup','baseball',now()+interval '2 days',(SELECT config FROM inputs)); RAISE EXCEPTION 'cross-club collision accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
 END $f$;
 RESET ROLE;
 DO $f$ BEGIN

@@ -50,3 +50,6 @@ CIで同じ合成fixtureを専用DBにのみコミットし、独立したpsql�
 GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0、PostgREST v12.2.3、GoTrue v2.189.0を再利用。GoTrueは別の使い捨てDBとし、実signup/login発行のUIDをランキングfixtureのauth.users/profiles/membership/playerに合成登録する。10 RPCを実SDKから通し、2人の予想、締切、確定、ランキング、同一ID/revision再試行、別クラブ、署名不正・期限切れJWT、匿名、除名後のアクセス、セッションrefresh/再取得を確認する。既存甲子園fixtureの指紋比較も行う。Auth triggerや実本番のメール/OAuth/完全schema、ブラウザUIはこの試験の対象外。外部ネットワークはSDK/固定Dockerイメージの取得のみ。本番接続なし。
 
 初回HTTP CIで以前のPostgREST digestがregistry not found。v12.2.3タグを取得後、実際のRepoDigestをログに記録して同一実行内で固定する方式に変更。取得できない場合は停止する。恒久的なdigest固定は実際の取得結果を確認後に行う。
+
+## HTTP競合エラーの修正
+実HTTPで古いrevisionのopenが10秒でタイムアウトしたログと、PostgRESTの40001再試行仕様を照合した。業務上の決定的な競合（作成内容不一致・編集/開始revision不一致・確定review不一致・確定結果不一致）に限り `PT409` を返す。実際のDB serialization failureは変更しない。https://supabase.com/kb/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b および https://docs.postgrest.org/en/v12/references/errors.html を参照。HTTP拒否応答の速度・状態不変・確定後の異なる結果拒否も検証する。本番未適用。既存甲子園コードは対象外。

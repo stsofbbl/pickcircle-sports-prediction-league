@@ -153,7 +153,7 @@ BEGIN
  IF e.status='finalized' THEN
   SELECT * INTO receipt FROM ranking_v1_private.finalize_receipts WHERE event_id=e.id;
   IF NOT FOUND OR receipt.revision IS DISTINCT FROM p_revision OR receipt.result_payload IS DISTINCT FROM p_result THEN
-   RAISE EXCEPTION 'ranking already finalized with different review or result' USING ERRCODE='40001';
+   RAISE EXCEPTION 'ranking already finalized with different review or result' USING ERRCODE='PT409';
   END IF;
   RETURN jsonb_build_object('eventId',e.id,'status','finalized','scoreCount',receipt.score_count,'recovered',true);
  END IF;
@@ -175,7 +175,7 @@ BEGIN
  IF prediction_count=0 OR mapped_count<>prediction_count THEN
   RAISE EXCEPTION 'ranking missing submissions or player mapping' USING ERRCODE='22023';
  END IF;
- IF p_revision IS DISTINCT FROM ranking_v1_private.revision(e) THEN RAISE EXCEPTION 'ranking stale review' USING ERRCODE='40001'; END IF;
+ IF p_revision IS DISTINCT FROM ranking_v1_private.revision(e) THEN RAISE EXCEPTION 'ranking stale review' USING ERRCODE='PT409'; END IF;
  IF EXISTS(SELECT 1 FROM public.predictions p WHERE p.event_id=e.id AND NOT ranking_v1_private.valid_order(p.payload,e.rules)) THEN
   RAISE EXCEPTION 'ranking saved prediction invalid' USING ERRCODE='22023';
  END IF;

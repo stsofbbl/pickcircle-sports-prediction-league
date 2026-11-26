@@ -15,7 +15,7 @@ DO $f$ BEGIN
  BEGIN
   PERFORM public.ranking_v1_finalize('finalize-case',repeat('0',32),(SELECT pick FROM inputs));
   RAISE EXCEPTION 'stale revision accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
  BEGIN
   PERFORM public.ranking_v1_finalize('finalize-case',(SELECT revision FROM finalize_review),'{"version":1,"candidateIds":["a","a","b","c"]}');
   RAISE EXCEPTION 'invalid result accepted';
@@ -92,7 +92,7 @@ DO $f$ DECLARE answer jsonb; BEGIN
  answer:=public.ranking_v1_finalize('finalize-case',(SELECT revision FROM finalize_review),(SELECT pick FROM inputs));
  IF answer->'recovered' IS DISTINCT FROM 'true'::jsonb THEN RAISE EXCEPTION 'idempotent recovery failed'; END IF;
  BEGIN PERFORM public.ranking_v1_finalize('finalize-case',(SELECT revision FROM finalize_review),'{"version":1,"candidateIds":["b","a","c","d"]}'); RAISE EXCEPTION 'different retry accepted';
- EXCEPTION WHEN serialization_failure THEN NULL; END;
+ EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
  BEGIN UPDATE public.scores SET total_score=999 WHERE event_id='finalize-case'; RAISE EXCEPTION 'score tampering accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN UPDATE public.results SET payload='{}' WHERE event_id='finalize-case'; RAISE EXCEPTION 'result tampering accepted';

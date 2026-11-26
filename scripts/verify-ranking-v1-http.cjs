@@ -77,7 +77,7 @@ async function main(){
   const event=randomUUID();
   const a=service(owner.client,owner.uid,club,event),m=service(member.client,member.uid,club,event),x=service(outsider.client,outsider.uid,club,event);
   const denied=e=>e?.code==="42501";
-  const stale=e=>{assert.equal(e?.code,"40001",JSON.stringify({code:e?.code,message:e?.message}));return true;};
+  const stale=e=>{assert.equal(e?.code,"PT409",JSON.stringify({code:e?.code,message:e?.message}));assert.equal(e?.message,"ranking draft stale");return true;};
   const input={name:"HTTP ranking fixture",sportType:"baseball",deadline:new Date(Date.now()+40000).toISOString(),config};
   await assert.rejects(m.api.createDraft(input),denied);
   const created=await a.api.createDraft(input);
@@ -90,7 +90,11 @@ async function main(){
   const reviewed=await a.api.draftReview();
   const changed={...input,name:"HTTP ranking edited"};
   const edited=await a.api.editDraft(reviewed.revision,changed);
+  const staleStart=Date.now();
   await assert.rejects(a.api.open(reviewed.revision),stale);
+  assert.ok(Date.now()-staleStart<5000,"business conflict did not return promptly");
+  assert.equal((await a.api.snapshot()).status,"draft");
+  console.log("PASS: stale draft HTTP conflict returned promptly without opening");
   await assert.rejects(m.api.open(edited.revision),denied);
   assert.equal((await a.api.open(edited.revision)).status,"open");
   assert.equal((await a.api.open(edited.revision)).recovered,true);
@@ -129,6 +133,7 @@ async function main(){
   await assert.rejects(m2.api.finalize(finalReview.revision,first,config),denied);
   assert.equal((await a.api.finalize(finalReview.revision,first,config)).scoreCount,2);
   assert.equal((await a.api.finalize(finalReview.revision,first,config)).recovered,true);
+  await assert.rejects(a.api.finalize(finalReview.revision,second,config),e=>e?.code==="PT409"&&e?.message==="ranking already finalized with different review or result");
   const [sa,sm]=await Promise.all([a.api.snapshot(),m2.api.snapshot()]);
   assert.deepEqual(plain(sa.ranking),plain(sm.ranking));
   assert.equal(sm.status,"finalized");
