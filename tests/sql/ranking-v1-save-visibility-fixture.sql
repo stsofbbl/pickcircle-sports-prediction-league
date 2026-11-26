@@ -6,7 +6,11 @@ CREATE SCHEMA auth;
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $f$
  SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid
 $f$;
-CREATE TABLE public.league_members(league_id uuid,user_id uuid,role text,membership_status text,PRIMARY KEY(league_id,user_id));
+CREATE TABLE auth.users(id uuid PRIMARY KEY);
+CREATE TABLE public.profiles(id uuid PRIMARY KEY,auth_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+ display_name text NOT NULL,deleted_at timestamptz,updated_at timestamptz DEFAULT now());
+CREATE TABLE public.leagues(id uuid PRIMARY KEY,name text NOT NULL,created_by uuid NOT NULL REFERENCES public.profiles(id));
+CREATE TABLE public.league_members(league_id uuid REFERENCES public.leagues(id) ON DELETE CASCADE,user_id uuid REFERENCES public.profiles(id) ON DELETE CASCADE,role text,membership_status text,PRIMARY KEY(league_id,user_id));
 CREATE FUNCTION public.is_league_member(p_league_id uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.league_members WHERE league_id=p_league_id AND user_id=auth.uid() AND membership_status='active')
@@ -15,12 +19,14 @@ CREATE FUNCTION public.is_league_admin(p_league_id uuid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.league_members WHERE league_id=p_league_id AND user_id=auth.uid() AND membership_status='active' AND role IN('owner','co_owner'))
 $f$;
-CREATE TABLE public.events(id text PRIMARY KEY,league_id uuid NOT NULL,name text NOT NULL,preset_type text NOT NULL,status text NOT NULL,
+CREATE TABLE public.events(id text PRIMARY KEY,league_id uuid NOT NULL REFERENCES public.leagues(id) ON DELETE CASCADE,name text NOT NULL,preset_type text NOT NULL,status text NOT NULL,
  prediction_deadline timestamptz,rules jsonb NOT NULL,created_by uuid NOT NULL,sport_type text);
 CREATE TABLE public.predictions(id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,event_id text REFERENCES public.events(id) ON DELETE CASCADE,
- user_id uuid NOT NULL,payload jsonb NOT NULL,submitted_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),UNIQUE(event_id,user_id));
+ user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,payload jsonb NOT NULL,submitted_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now(),UNIQUE(event_id,user_id));
 CREATE TABLE public.results(event_id text PRIMARY KEY REFERENCES public.events(id),payload jsonb,updated_by uuid);
-CREATE TABLE public.players(id uuid PRIMARY KEY,league_id uuid NOT NULL,profile_id uuid,UNIQUE(league_id,profile_id));
+CREATE TABLE public.players(id uuid PRIMARY KEY,league_id uuid NOT NULL REFERENCES public.leagues(id) ON DELETE CASCADE,
+ profile_id uuid REFERENCES public.profiles(id) ON DELETE CASCADE,display_name text NOT NULL DEFAULT 'Fixture',is_admin boolean NOT NULL DEFAULT false,
+ updated_at timestamptz DEFAULT now(),UNIQUE(league_id,profile_id));
 CREATE TABLE public.scores(event_id text REFERENCES public.events(id),player_id uuid REFERENCES public.players(id),total_score numeric,breakdown jsonb NOT NULL DEFAULT '{}'::jsonb,PRIMARY KEY(event_id,player_id));
 CREATE FUNCTION public.is_prediction_open(p_event_id text) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='public' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.events e WHERE e.id=p_event_id AND e.status='open'
@@ -47,6 +53,11 @@ CREATE POLICY score_admin ON public.scores FOR ALL TO authenticated USING(EXISTS
 GRANT USAGE ON SCHEMA public,auth TO authenticated;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.events,public.predictions,public.results,public.scores TO authenticated;
 GRANT USAGE ON SEQUENCE public.predictions_id_seq TO authenticated;
+INSERT INTO auth.users VALUES ('00000000-0000-0000-0000-000000000001'),('00000000-0000-0000-0000-000000000002'),('00000000-0000-0000-0000-000000000003');
+INSERT INTO public.profiles(id,auth_user_id,display_name) SELECT id,id,'Fixture' FROM auth.users;
+INSERT INTO public.leagues VALUES
+ ('00000000-0000-0000-0000-000000000010','Fixture Club','00000000-0000-0000-0000-000000000001'),
+ ('00000000-0000-0000-0000-000000000020','Other Club','00000000-0000-0000-0000-000000000003');
 INSERT INTO public.league_members VALUES
  ('00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001','owner','active'),
  ('00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000002','member','active'),
@@ -64,7 +75,7 @@ INSERT INTO public.predictions(event_id,user_id,payload) VALUES
  ('expired','00000000-0000-0000-0000-000000000001',(SELECT pick FROM inputs)),
  ('expired-draft','00000000-0000-0000-0000-000000000001',(SELECT pick FROM inputs));
 INSERT INTO public.results VALUES('legacy','{"legacy":true}','00000000-0000-0000-0000-000000000001');
-INSERT INTO public.players VALUES
+INSERT INTO public.players(id,league_id,profile_id) VALUES
  ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001'),
  ('00000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000002'),
  ('00000000-0000-0000-0000-000000000013','00000000-0000-0000-0000-000000000020','00000000-0000-0000-0000-000000000003');

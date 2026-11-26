@@ -119,6 +119,28 @@ try:
     assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-close' AND user_id='"+OWNER+"';")=="0"
     print("PASS: stale-transaction late save rejected, close waits for accepted save, post-deadline publication correct")
 
+    # Actual production membership removal must serialize with a save.
+    create_event("race-membership","1 day")
+    a=start()
+    send(a,"SELECT pg_backend_pid();")
+    holder=int(line(a))
+    send(a,"BEGIN;"+auth(MEMBER)+insert("race-membership",MEMBER))
+    assert line(a)=="race-membership"
+    b=start()
+    send(b,"SET application_name='ranking_v1_remove_wait';SET statement_timeout='15s';"+auth(OWNER)+
+         f"SELECT public.remove_club_member('{CLUB}','{MEMBER}')->>'removed';")
+    wait_blocked("ranking_v1_remove_wait",holder,b)
+    send(a,"COMMIT;")
+    finish(a)
+    assert finish(b)=="true"
+    assert sql(auth(MEMBER)+"SELECT count(*) FROM public.predictions WHERE event_id='race-membership';")=="0"
+    assert sql("SELECT count(*) FROM public.predictions WHERE event_id='race-membership';")=="1"
+    sql(auth(MEMBER)+f"UPDATE public.predictions SET payload={PICK} WHERE event_id='race-membership';")
+    assert sql("SELECT count(*) FROM ranking_v1_private.prediction_players WHERE event_id='race-membership';")=="1"
+    # Restore synthetic membership for the other independent cases.
+    sql(f"UPDATE public.league_members SET membership_status='active' WHERE league_id='{CLUB}' AND user_id='{MEMBER}';")
+    print("PASS: removal waits for accepted save, old access revoked, historical binding retained")
+
     # Two independent admin requests with the same reviewed inputs must
     # serialize on the event and return one creation plus one recovery.
     revision=sql(auth(OWNER)+"SELECT public.ranking_v1_review_revision('finalize-case');")

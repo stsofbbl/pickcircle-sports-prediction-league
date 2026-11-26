@@ -120,5 +120,4 @@ DO $f$ BEGIN
  (SELECT to_jsonb(e) FROM public.events e WHERE id='legacy'),(SELECT to_jsonb(p) FROM public.predictions p WHERE event_id='legacy'),
  (SELECT to_jsonb(r) FROM public.results r WHERE event_id='legacy'),(SELECT to_jsonb(s) FROM public.scores s WHERE event_id='legacy')) THEN RAISE EXCEPTION 'finalization isolation or receipt failure'; END IF;
 END $f$;
-ROLLBACK;
 SELECT 'PASS: ranking atomic finalization, exact scores, rollback after partial write, retry, member publication, immutable result and legacy isolation';

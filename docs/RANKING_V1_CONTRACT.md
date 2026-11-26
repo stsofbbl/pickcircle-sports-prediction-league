@@ -34,3 +34,6 @@ CIで同じ合成fixtureを専用DBにのみコミットし、独立したpsql�
 
 ### 得点実装の照合・確定競合
 `verify-ranking-v1-score-parity.cjs` は実SQLと既存JS試作エンジンの全720ケースの得点・明細一致を確認する（6候補から4つの順列360×結果2パターン、倍率境界を含む）。独立DB接続から同一reviewの確定RPCを同時に実行し、後続が親行ロックを待ち、同一receiptを回収することも検証。DBは使い捨てCIのみ。実アプリには未接続。
+
+## 所属変更・履歴保護（隔離試作）
+`membership-integrity.sql` は予想の保存時に現在の有効所属行をロックし、historical playerの複合FKをprivate bindingに保存する案。表示名変更や退会時の匿名化を許容しながら、予想を保持したplayerのID・所属・profile付け替えや削除を拒否する。既存のクラブ削除は未承認につきランキング大会がある場合は引き続き拒否し、部分削除は許さない。本番から取得した5関数（退会匿名化、owner退会拒否、会員削除、owner確認、クラブ削除）を合成fixtureに再現。直接SQLによる架空auth.users削除と所属解除の並行試験で確認する。実Auth endpoint、完全schema、全既存FK/triggerとの互換性、監査付き削除/再開は未検証。実DBに適用しない。
