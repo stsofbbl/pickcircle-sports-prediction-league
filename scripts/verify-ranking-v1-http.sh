@@ -30,6 +30,14 @@ CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE SET searc
  SELECT coalesce(nullif(current_setting('request.jwt.claim.sub',true),''),
   nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid
 $f$;
+-- Synthetic membership list contract used by the actual browser data-service.
+CREATE FUNCTION public.list_my_clubs() RETURNS TABLE(league_id uuid,membership_role text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
+ SELECT lm.league_id,lm.role FROM public.league_members lm
+ WHERE lm.user_id=auth.uid() AND lm.membership_status='active'
+$f$;
+REVOKE ALL ON FUNCTION public.list_my_clubs() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.list_my_clubs() TO authenticated;
 CREATE POLICY result_member_read ON public.results FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=results.event_id AND public.is_league_member(e.league_id)));
 CREATE POLICY score_member_read ON public.scores FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=scores.event_id AND public.is_league_member(e.league_id)));
 SQL
@@ -82,5 +90,8 @@ for attempt in $(seq 1 30); do
 done
 if [[ "$ready" != true ]]; then docker logs "$container"; exit 1; fi
 node scripts/verify-ranking-v1-http.cjs "$sdk"
+export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+test -n "$CHROME_BIN"
+node scripts/verify-ranking-v1-browser-http.cjs "$sdk"
 test "$before" = "$(fingerprint)"
 echo "PASS: legacy event, predictions, results and scores unchanged"

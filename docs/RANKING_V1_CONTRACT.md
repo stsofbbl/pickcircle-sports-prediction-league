@@ -76,3 +76,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 `js/ranking-v1.generated.js` は固定module allowlistの決定的生成物（CIで再生成一致を確認）。`index.html` にhiddenの独立sectionを置き、`host-entry.cjs` の定数 RELEASE_ENABLED=false により入口を無効化する。URL、localStorage、環境設定から有効化できない。既存app.jsは有効時のみrenderPageでscopeを同期、ログアウト・パスワード回復・club変更・所属再取得・削除/権限変更の手前でinvalidateする。明示クリックなしにRPCを開始しない。現段階は試験branchのみで本番未反映。実Chrome mock試験で無効時にmountしないこと、有効テスト時の画面離脱/club変更で破棄することを検証。実ブラウザと実DBの一体E2E、外部端末による除名の即時通知、全auth経路、正式UI/仕様は未検証。フラグは認可の代替ではない。リリース時までfalseを維持する。
 
 追加の接続検証: 実index.htmlからhidden sectionを抽出し、実CSS・実生成bundleをChromeで読み込む。無効状態の入口が非表示で、接続も開始しないことを確認する。app.js実関数を抽出したNode試験で無効フラグ時のrenderPage、クラブ不一致、auth ID切替時のinvalidateを確認する。全アプリ起動の実DB E2Eではない。
+
+### 実ブラウザからDBまでの一体検証
+既存の使い捨てGoTrue/PostgREST/DBと固定SDKを再利用する `verify-ranking-v1-browser-http.cjs` を追加。Chromeの独立profile3件とローカルHTTP proxyを使用。実生成bundleのコピーだけを有効化し、実indexのsection・CSS・既存Supabase client/data-service・app.jsのhost関数を読み込む。管理者・会員・別クラブで実ログインし、大会作成、受付開始、別ブラウザの予想、締切公開、確定、ランキング一致、除名後の再取得拒否、画面離脱・ログアウトを検証する。周辺の本体画面/認証イベントは合成ホスト、list_my_clubsは合成契約、GoTrue DBは別。完全なアプリ起動や本番schemaの再現ではない。既存の実HTTP/SQL試験とlegacy指紋比較も維持。チェックインされた有効化フラグはfalseのまま。
