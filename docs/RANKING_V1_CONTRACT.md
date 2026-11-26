@@ -53,3 +53,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ## HTTP競合エラーの修正
 実HTTPで古いrevisionのopenが10秒でタイムアウトしたログと、PostgRESTの40001再試行仕様を照合した。業務上の決定的な競合（作成内容不一致・編集/開始revision不一致・確定review不一致・確定結果不一致）に限り `PT409` を返す。実際のDB serialization failureは変更しない。https://supabase.com/kb/troubleshooting/high-cpu-and-infinite-transaction-retries-when-using-custom-error-codes-in-rpc-functions-77326b および https://docs.postgrest.org/en/v12/references/errors.html を参照。HTTP拒否応答の速度・状態不変・確定後の異なる結果拒否も検証する。本番未適用。既存甲子園コードは対象外。
+
+## 画面接続準備：表示モデルと操作制御
+既存 `app.js:renderRankingOddsForm` は全参加者の予想・倍率を入力でき、`confirmSave` はローカル保存、ランキングは端末計算。オンライン形式にそのまま流用しない。`view-model.cjs` はサーバーのsnapshotから候補、本人予想、公開予想、確定得点と内訳、許可された操作だけを生成。名前はHTMLではなくプレーンテキスト。サーバーの確定得点を再計算しない。`controller.cjs` は scope generation、操作中の重複拒否、明示review（結果とrevisionの固定）、サーバー応答後の再読込、失敗時の画面データ無効化を担当。書込応答確認後に再取得が失敗した場合と、書込そのものが未確認の場合を区別し、自動再送やローカル保存に切替えない。選択変更・ログアウト時にselectを呼ぶ必要あり。作成IDは呼出側が保持する従来契約のまま。単体試験と既存GoTrue/SDK/PostgREST統合試験で同じcontrollerを利用する。既存画面、HTML、CSS、本番DBは変更していない。実ブラウザの描画とイベント結線・認証ライフサイクル・作成ID永続化・仕様承認は未完。
