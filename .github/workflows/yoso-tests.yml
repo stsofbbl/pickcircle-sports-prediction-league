@@ -34,6 +34,10 @@ jobs:
           trap 'sudo -u postgres dropdb --if-exists yoso_koshien_conflict_test' EXIT
           cat tests/sql/koshien-conflict-fixture.sql supabase/release-candidates/koshien-http-conflict/apply.sql tests/sql/koshien-conflict-patched-checks.sql supabase/release-candidates/koshien-http-conflict/rollback.sql tests/sql/koshien-conflict-rollback-checks.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_conflict_test
           test "$(sudo -u postgres psql -X -At -d yoso_koshien_conflict_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon','service_role'))")" = t
+          # Second installation is committed only in the disposable CI DB.
+          trap 'sudo -u postgres dropdb --if-exists yoso_koshien_conflict_test; sudo -u postgres psql -X -q -d postgres -c "DROP ROLE IF EXISTS yoso_conflict_http_authenticator; DROP ROLE IF EXISTS authenticated; DROP ROLE IF EXISTS anon; DROP ROLE IF EXISTS service_role;"' EXIT
+          { cat tests/sql/koshien-conflict-fixture.sql supabase/release-candidates/koshien-http-conflict/apply.sql; echo COMMIT\;; } | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_conflict_test
+          bash scripts/verify-koshien-conflict-http.sh yoso_koshien_conflict_test
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash
         run: |
