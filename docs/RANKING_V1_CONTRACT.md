@@ -85,3 +85,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### 本番コアテーブル・既存トリガー互換fixture（2026-11-27・未適用）
 本番カタログから6テーブル（events/predictions/results/scores/players/league_members）の列順・型・NULL・default・identity・生成式・PK/UK/FK/CHECKを取得し、合成データのfixtureに反映。既存8トリガーと依存する甲子園確定permit・再開監査の2テーブルも定義を取得して組み込む。既存テスト用データのみを先に投入し、甲子園の直接確定拒否を確認した後、同一fixtureで既存のranking SQL・実HTTP・Chrome試験を実行する。非甲子園の得点処理が既存甲子園再計算トリガーに干渉されないことを確認する意図。甲子園固有の全関連テーブル/関数・全RLS・全認証schema・全既存データを復元する試験ではなく、本番適用の代替ではない。データ・シークレットを取得せずDDLのみ。採点や本番DBは変更しない。
+
+### コアRLSと連鎖削除の検証（2026-11-27・未適用）
+`07f23f74` の実CIで、本番同様の scores.player_id ON DELETE CASCADE により、プレイヤー削除が外部キーの前に順位得点保護トリガーの42501で拒否されることを確認した。保護は変更せず、テストはこの正確なエラーメッセージまたはFK拒否を受け入れ、直後に予想・得点・結果・確定receipt・player bindingとプレイヤーIDが不変であることを検査する。6主要テーブルの本番17RLS policyとData APIのSELECT/INSERT/UPDATE/DELETE権限を合成fixtureへ反映（その他のACL・全schema・Auth構成は再現しない）。重複していたfixtureのmember read policyを削除し、anonと除名後の6テーブル直接読取拒否を追加。変更はテスト/文書のみ。本番RLS・採点・履歴保護の実装は変更しない。

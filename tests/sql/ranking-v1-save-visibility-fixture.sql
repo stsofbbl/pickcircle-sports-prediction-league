@@ -113,23 +113,52 @@ CREATE FUNCTION public.is_prediction_public(p_event_id text) RETURNS boolean LAN
  SELECT EXISTS(SELECT 1 FROM public.events e WHERE e.id=p_event_id AND public.is_league_member(e.league_id)
   AND (e.status IN('resultWait','finalized','archive') OR (e.prediction_deadline IS NOT NULL AND now()>=e.prediction_deadline)))
 $f$;
+-- Captured live RLS predicates on the six core tables (2026-11-27).
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.scores ENABLE ROW LEVEL SECURITY;
-CREATE POLICY events_select_members ON public.events FOR SELECT TO authenticated USING(public.is_league_member(league_id));
-CREATE POLICY events_insert_admin ON public.events FOR INSERT TO authenticated WITH CHECK(created_by=auth.uid() AND public.is_league_admin(league_id));
-CREATE POLICY events_update_admin ON public.events FOR UPDATE TO authenticated USING(public.is_league_admin(league_id)) WITH CHECK(public.is_league_admin(league_id));
-CREATE POLICY events_delete_admin ON public.events FOR DELETE TO authenticated USING(public.is_league_admin(league_id));
-CREATE POLICY predictions_select_owner_or_public ON public.predictions FOR SELECT TO authenticated USING((user_id=auth.uid() AND EXISTS(SELECT 1 FROM public.events e WHERE e.id=predictions.event_id AND public.is_league_member(e.league_id))) OR public.is_prediction_public(event_id));
-CREATE POLICY predictions_insert_self_before_deadline ON public.predictions FOR INSERT TO authenticated WITH CHECK(user_id=auth.uid() AND public.is_prediction_open(event_id));
-CREATE POLICY predictions_update_self_before_deadline ON public.predictions FOR UPDATE TO authenticated USING(user_id=auth.uid() AND public.is_prediction_open(event_id)) WITH CHECK(user_id=auth.uid() AND public.is_prediction_open(event_id));
-CREATE POLICY predictions_delete_self_before_deadline ON public.predictions FOR DELETE TO authenticated USING(user_id=auth.uid() AND public.is_prediction_open(event_id));
-CREATE POLICY result_admin ON public.results FOR ALL TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=results.event_id AND public.is_league_admin(e.league_id))) WITH CHECK(EXISTS(SELECT 1 FROM public.events e WHERE e.id=results.event_id AND public.is_league_admin(e.league_id)));
-CREATE POLICY score_admin ON public.scores FOR ALL TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=scores.event_id AND public.is_league_admin(e.league_id))) WITH CHECK(EXISTS(SELECT 1 FROM public.events e WHERE e.id=scores.event_id AND public.is_league_admin(e.league_id)));
-GRANT USAGE ON SCHEMA public,auth TO authenticated;
-GRANT SELECT,INSERT,UPDATE,DELETE ON public.events,public.predictions,public.results,public.scores TO authenticated;
-GRANT USAGE ON SEQUENCE public.predictions_id_seq,public.results_id_seq TO authenticated;
+ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.league_members ENABLE ROW LEVEL SECURITY;
+CREATE POLICY events_delete_admin ON public.events AS PERMISSIVE FOR DELETE TO authenticated USING ((is_league_admin(league_id) AND ((preset_type IS DISTINCT FROM 'koshien'::text) OR ((status IS DISTINCT FROM 'finalized'::text) AND (status IS DISTINCT FROM 'archive'::text) AND (((rules -> 'resultFlow'::text) ->> 'status'::text) IS DISTINCT FROM 'finalized'::text)))));
+CREATE POLICY events_insert_admin ON public.events AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((created_by = ( SELECT auth.uid() AS uid)) AND is_league_admin(league_id)));
+CREATE POLICY events_select_members ON public.events AS PERMISSIVE FOR SELECT TO authenticated USING (is_league_member(league_id));
+CREATE POLICY events_update_admin ON public.events AS PERMISSIVE FOR UPDATE TO authenticated USING (is_league_admin(league_id)) WITH CHECK (is_league_admin(league_id));
+CREATE POLICY league_members_select_same_league ON public.league_members AS PERMISSIVE FOR SELECT TO authenticated USING (((membership_status = 'active'::text) AND is_league_member(league_id)));
+CREATE POLICY players_insert_self_member ON public.players AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((profile_id = ( SELECT auth.uid() AS uid)) AND is_league_member(league_id)));
+CREATE POLICY players_select_members ON public.players AS PERMISSIVE FOR SELECT TO authenticated USING (is_league_member(league_id));
+CREATE POLICY players_update_self_or_admin ON public.players AS PERMISSIVE FOR UPDATE TO authenticated USING (((profile_id = ( SELECT auth.uid() AS uid)) OR is_league_admin(league_id))) WITH CHECK (((profile_id = ( SELECT auth.uid() AS uid)) OR is_league_admin(league_id)));
+CREATE POLICY predictions_delete_self_before_deadline ON public.predictions AS PERMISSIVE FOR DELETE TO authenticated USING (((user_id = ( SELECT auth.uid() AS uid)) AND is_prediction_open(event_id)));
+CREATE POLICY predictions_insert_self_before_deadline ON public.predictions AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND is_prediction_open(event_id)));
+CREATE POLICY predictions_select_owner_or_public ON public.predictions AS PERMISSIVE FOR SELECT TO authenticated USING ((((user_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = predictions.event_id) AND is_league_member(e.league_id))))) OR is_prediction_public(event_id)));
+CREATE POLICY predictions_update_self_before_deadline ON public.predictions AS PERMISSIVE FOR UPDATE TO authenticated USING (((user_id = ( SELECT auth.uid() AS uid)) AND is_prediction_open(event_id))) WITH CHECK (((user_id = ( SELECT auth.uid() AS uid)) AND is_prediction_open(event_id)));
+CREATE POLICY results_insert_admin ON public.results AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK (((updated_by = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = results.event_id) AND is_league_admin(e.league_id))))));
+CREATE POLICY results_select_members ON public.results AS PERMISSIVE FOR SELECT TO authenticated USING ((EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = results.event_id) AND is_league_member(e.league_id)))));
+CREATE POLICY results_update_admin ON public.results AS PERMISSIVE FOR UPDATE TO authenticated USING ((EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = results.event_id) AND is_league_admin(e.league_id))))) WITH CHECK (((updated_by = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = results.event_id) AND is_league_admin(e.league_id))))));
+CREATE POLICY scores_admin_all ON public.scores AS PERMISSIVE FOR ALL TO authenticated USING ((EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = scores.event_id) AND is_league_admin(e.league_id))))) WITH CHECK ((EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = scores.event_id) AND is_league_admin(e.league_id)))));
+CREATE POLICY scores_select_members ON public.scores AS PERMISSIVE FOR SELECT TO authenticated USING ((EXISTS ( SELECT 1
+   FROM events e
+  WHERE ((e.id = scores.event_id) AND is_league_member(e.league_id)))));
+-- Match Data API DML grants only; this is not a clone of every role/ACL.
+GRANT USAGE ON SCHEMA public,auth TO anon,authenticated;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.events,public.predictions,public.results,public.scores,public.players TO anon,authenticated;
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.league_members TO anon;
+GRANT SELECT,INSERT,DELETE ON public.league_members TO authenticated;
+GRANT USAGE ON SEQUENCE public.predictions_id_seq,public.results_id_seq TO anon,authenticated;
 INSERT INTO auth.users VALUES ('00000000-0000-0000-0000-000000000001'),('00000000-0000-0000-0000-000000000002'),('00000000-0000-0000-0000-000000000003');
 INSERT INTO public.profiles(id,auth_user_id,display_name) SELECT id,id,'Fixture' FROM auth.users;
 INSERT INTO public.leagues VALUES

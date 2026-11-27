@@ -1,7 +1,5 @@
 -- Runs after save/visibility checks in same rollback-only transaction.
--- Mirror members' production read permissions for results and scores.
-CREATE POLICY result_member_read ON public.results FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=results.event_id AND public.is_league_member(e.league_id)));
-CREATE POLICY score_member_read ON public.scores FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=scores.event_id AND public.is_league_member(e.league_id)));
+-- Member result/score read policies are now installed by the production-catalog fixture.
 CREATE TEMP TABLE finalize_review AS SELECT ''::text AS revision;
 GRANT SELECT,UPDATE ON finalize_review TO authenticated;
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000001';
