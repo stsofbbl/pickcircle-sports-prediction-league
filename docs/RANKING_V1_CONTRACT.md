@@ -88,3 +88,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### コアRLSと連鎖削除の検証（2026-11-27・未適用）
 `07f23f74` の実CIで、本番同様の scores.player_id ON DELETE CASCADE により、プレイヤー削除が外部キーの前に順位得点保護トリガーの42501で拒否されることを確認した。保護は変更せず、テストはこの正確なエラーメッセージまたはFK拒否を受け入れ、直後に予想・得点・結果・確定receipt・player bindingとプレイヤーIDが不変であることを検査する。6主要テーブルの本番17RLS policyとData APIのSELECT/INSERT/UPDATE/DELETE権限を合成fixtureへ反映（その他のACL・全schema・Auth構成は再現しない）。重複していたfixtureのmember read policyを削除し、anonと除名後の6テーブル直接読取拒否を追加。変更はテスト/文書のみ。本番RLS・採点・履歴保護の実装は変更しない。
+
+### 読み取り専用の本番基準チェック（2026-11-27）
+`prototypes/ranking-v1/preflight.sql` は、本番で実行済みの単一SELECT（16項目すべてtrue）を固定する。主要6テーブルの列49・制約25・policy17・trigger8（関数本体hash/owner/security設定含む）・role×table権限18組・関連関数9件を件数とfingerprintで照合し、名前衝突/既存ranking event/会員とplayer/profile整合/RLS有効を再確認する。search_pathは実測 `{public,extensions}` と一致必須。DBデータや秘密情報を出力しない。#58/#60適用前の基準であり、#58の承認済み変更後は意図された差分と他のdriftをレビューして再基準化すること。falseの場合は停止、勝手に修復・hash更新しない。全schemaや全関数、認証設定の代替ではない。候補SQLの本番適用を許可するものではなく、復元可能なbackup、完全schema検証、正式仕様承認が別途必要。
