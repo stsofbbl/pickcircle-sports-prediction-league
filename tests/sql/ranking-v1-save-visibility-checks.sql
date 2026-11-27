@@ -41,7 +41,7 @@ DO $f$ BEGIN
   INSERT INTO public.results VALUES('new','{}',auth.uid()); RAISE EXCEPTION 'unvalidated result accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
-  INSERT INTO public.scores VALUES('new',auth.uid(),999); RAISE EXCEPTION 'forged score accepted';
+  INSERT INTO public.scores(event_id,player_id,phase1_score) VALUES('new',auth.uid(),999); RAISE EXCEPTION 'forged score accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
   UPDATE public.predictions SET event_id='legacy' WHERE event_id='new'; RAISE EXCEPTION 'prediction moved';

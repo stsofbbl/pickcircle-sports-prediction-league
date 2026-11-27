@@ -27,7 +27,12 @@ CREATE TABLE public.results(event_id text PRIMARY KEY REFERENCES public.events(i
 CREATE TABLE public.players(id uuid PRIMARY KEY,league_id uuid NOT NULL REFERENCES public.leagues(id) ON DELETE CASCADE,
  profile_id uuid REFERENCES public.profiles(id) ON DELETE CASCADE,display_name text NOT NULL DEFAULT 'Fixture',is_admin boolean NOT NULL DEFAULT false,
  updated_at timestamptz DEFAULT now(),UNIQUE(league_id,profile_id));
-CREATE TABLE public.scores(event_id text REFERENCES public.events(id),player_id uuid REFERENCES public.players(id),total_score numeric,breakdown jsonb NOT NULL DEFAULT '{}'::jsonb,PRIMARY KEY(event_id,player_id));
+-- Match the live scores numeric columns/defaults and stored generated total (catalog verified 2026-11-27).
+CREATE TABLE public.scores(event_id text REFERENCES public.events(id),player_id uuid REFERENCES public.players(id),
+ phase1_score numeric(12,3) NOT NULL DEFAULT 0,phase2_score numeric(12,3) NOT NULL DEFAULT 0,
+ phase3_score numeric(12,3) NOT NULL DEFAULT 0,revenge_score numeric(12,3) NOT NULL DEFAULT 0,zombie_score numeric(12,3) NOT NULL DEFAULT 0,
+ total_score numeric(12,3) GENERATED ALWAYS AS (phase1_score+phase2_score+phase3_score+revenge_score+zombie_score) STORED,
+ breakdown jsonb NOT NULL DEFAULT '{}'::jsonb,PRIMARY KEY(event_id,player_id));
 CREATE FUNCTION public.is_prediction_open(p_event_id text) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='public' AS $f$
  SELECT EXISTS(SELECT 1 FROM public.events e WHERE e.id=p_event_id AND e.status='open'
   AND (e.prediction_deadline IS NULL OR now()<e.prediction_deadline) AND public.is_league_member(e.league_id))
@@ -80,7 +85,18 @@ INSERT INTO public.players(id,league_id,profile_id) VALUES
  ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000001'),
  ('00000000-0000-0000-0000-000000000012','00000000-0000-0000-0000-000000000010','00000000-0000-0000-0000-000000000002'),
  ('00000000-0000-0000-0000-000000000013','00000000-0000-0000-0000-000000000020','00000000-0000-0000-0000-000000000003');
-INSERT INTO public.scores(event_id,player_id,total_score) VALUES('legacy','00000000-0000-0000-0000-000000000001',25);
+INSERT INTO public.scores(event_id,player_id,phase1_score) VALUES('legacy','00000000-0000-0000-0000-000000000001',25);
+-- Prove the old prototype's write shape cannot work even as the fixture owner.
+DO $f$ BEGIN
+ BEGIN
+  INSERT INTO public.scores(event_id,player_id,total_score)
+  VALUES('legacy','00000000-0000-0000-0000-000000000012',999);
+  RAISE EXCEPTION 'generated total accepted explicit insert';
+ EXCEPTION WHEN SQLSTATE '428C9' THEN NULL; END;
+ IF (SELECT total_score FROM public.scores WHERE event_id='legacy') IS DISTINCT FROM 25::numeric THEN
+  RAISE EXCEPTION 'generated total fixture mismatch';
+ END IF;
+END $f$;
 INSERT INTO public.events
  SELECT x.id,'00000000-0000-0000-0000-000000000010','Finalize fixture','ranking_v1','resultWait',now()-interval '1 day',
  (SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball'

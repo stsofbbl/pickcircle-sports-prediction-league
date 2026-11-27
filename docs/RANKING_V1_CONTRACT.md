@@ -79,3 +79,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### 実ブラウザからDBまでの一体検証
 既存の使い捨てGoTrue/PostgREST/DBと固定SDKを再利用する `verify-ranking-v1-browser-http.cjs` を追加。Chromeの独立profile3件とローカルHTTP proxyを使用。実生成bundleのコピーだけを有効化し、実indexのsection・CSS・既存Supabase client/data-service・app.jsのhost関数を読み込む。管理者・会員・別クラブで実ログインし、大会作成、受付開始、別ブラウザの予想、締切公開、確定、ランキング一致、除名後の再取得拒否、画面離脱・ログアウトを検証する。周辺の本体画面/認証イベントは合成ホスト、list_my_clubsは合成契約、GoTrue DBは別。完全なアプリ起動や本番schemaの再現ではない。既存の実HTTP/SQL試験とlegacy指紋比較も維持。チェックインされた有効化フラグはfalseのまま。
+
+### 本番生成列との互換性（2026-11-27・未適用）
+本番のカタログを読み取り専用で照合し、`scores.total_score` が `numeric(12,3)` の5得点列の和を自動生成するSTORED列であることを確認した。従来の試作はこの列へ直接INSERTしていたため本番互換ではなかった。試作の単一順位得点は既存の `phase1_score` に収納し、他4列は既存のdefault 0、合計はDBに生成させる（収納先は技術的な暫定マッピングであり採点式・倍率・順位仕様は無変更）。生成列を直接書き込む旧方式がSQLSTATE 428C9で拒否されること、正常確定で生成合計と明細が一致すること、実HTTPで書換えが拒否されることを使い捨てfixtureで検証する。実カタログ上の甲子園再計算トリガーは非koshien大会を早期returnする。完全な本番スキーマでの検証および仕様承認は引き続き必要。

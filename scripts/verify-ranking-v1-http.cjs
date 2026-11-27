@@ -156,8 +156,9 @@ async function main(){
   const expected=[first,second].map(prediction=>scoreRanking({config,prediction,result:first}).scoreTenths/10).sort((a,b)=>b-a);
   assert.deepEqual(plain(sm.ranking.map(r=>r.score)),expected);
   assert.deepEqual(plain(sm.ranking.map(r=>r.rank)),[1,2]);
-  const altered=await owner.client.from("scores").update({total_score:999}).eq("event_id",event);
+  const altered=await owner.client.from("scores").update({phase1_score:999}).eq("event_id",event);
   assert.equal(altered.error?.code,"42501");
+  assert.deepEqual(plain((await a.api.snapshot()).ranking.map(r=>r.score)),expected);
   assert.match(member.uid,uuid);
   sql("UPDATE public.league_members SET membership_status='removed' WHERE league_id='"+club+"' AND user_id='"+member.uid+"'");
   await assert.rejects(m2.api.snapshot(),denied);
