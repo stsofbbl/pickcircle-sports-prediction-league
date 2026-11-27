@@ -89,11 +89,12 @@ DO $f$ DECLARE answer jsonb; BEGIN
  IF answer IS DISTINCT FROM '{"eventId":"finalize-case","status":"finalized","scoreCount":2,"recovered":false}'::jsonb THEN RAISE EXCEPTION 'unexpected finalize response %',answer; END IF;
  IF (SELECT total_score FROM public.scores WHERE event_id='finalize-case' AND player_id='00000000-0000-0000-0000-000000000001') IS DISTINCT FROM 32.8::numeric
  OR (SELECT total_score FROM public.scores WHERE event_id='finalize-case' AND player_id='00000000-0000-0000-0000-000000000012') IS DISTINCT FROM 11.6::numeric THEN RAISE EXCEPTION 'score mismatch'; END IF;
+ IF EXISTS(SELECT 1 FROM public.scores WHERE event_id='finalize-case' AND (phase1_score IS DISTINCT FROM total_score OR phase2_score<>0 OR phase3_score<>0 OR revenge_score<>0 OR zombie_score<>0 OR total_score IS DISTINCT FROM (breakdown->>'scoreTenths')::numeric/10)) THEN RAISE EXCEPTION 'generated ranking total or component mismatch'; END IF;
  answer:=public.ranking_v1_finalize('finalize-case',(SELECT revision FROM finalize_review),(SELECT pick FROM inputs));
  IF answer->'recovered' IS DISTINCT FROM 'true'::jsonb THEN RAISE EXCEPTION 'idempotent recovery failed'; END IF;
  BEGIN PERFORM public.ranking_v1_finalize('finalize-case',(SELECT revision FROM finalize_review),'{"version":1,"candidateIds":["b","a","c","d"]}'); RAISE EXCEPTION 'different retry accepted';
  EXCEPTION WHEN SQLSTATE 'PT409' THEN NULL; END;
- BEGIN UPDATE public.scores SET total_score=999 WHERE event_id='finalize-case'; RAISE EXCEPTION 'score tampering accepted';
+ BEGIN UPDATE public.scores SET phase1_score=999 WHERE event_id='finalize-case'; RAISE EXCEPTION 'score tampering accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN UPDATE public.results SET payload='{}' WHERE event_id='finalize-case'; RAISE EXCEPTION 'result tampering accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;

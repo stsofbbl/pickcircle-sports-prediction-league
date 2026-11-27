@@ -181,13 +181,20 @@ BEGIN
  END IF;
  INSERT INTO ranking_v1_private.finalize_permits VALUES(e.id,v_actor,txid_current());
  INSERT INTO public.results(event_id,payload,updated_by) VALUES(e.id,p_result,v_actor);
- INSERT INTO public.scores(event_id,player_id,total_score,breakdown)
+ -- Production total_score is GENERATED ALWAYS; ranking has a single score component.
+ -- Store it in the existing phase1_score slot, leaving other components at zero.
+ INSERT INTO public.scores(event_id,player_id,phase1_score,breakdown)
  SELECT e.id,pl.id,(sc.score->>'scoreTenths')::numeric/10,sc.score
  FROM public.predictions p JOIN public.players pl ON pl.profile_id=p.user_id AND pl.league_id=e.league_id
  CROSS JOIN LATERAL (SELECT ranking_v1_private.score_order(e.rules,p.payload,p_result) score) sc
  WHERE p.event_id=e.id;
  GET DIAGNOSTICS inserted_count=ROW_COUNT;
  IF inserted_count<>prediction_count THEN RAISE EXCEPTION 'ranking incomplete score write'; END IF;
+ IF EXISTS(SELECT 1 FROM public.scores s WHERE s.event_id=e.id
+  AND (s.total_score IS DISTINCT FROM (s.breakdown->>'scoreTenths')::numeric/10
+   OR s.phase1_score IS DISTINCT FROM s.total_score OR s.phase2_score<>0 OR s.phase3_score<>0 OR s.revenge_score<>0 OR s.zombie_score<>0)) THEN
+  RAISE EXCEPTION 'ranking stored score mismatch' USING ERRCODE='55000';
+ END IF;
  INSERT INTO ranking_v1_private.finalize_receipts(event_id,revision,result_payload,actor,score_count)
  VALUES(e.id,p_revision,p_result,v_actor,inserted_count);
  UPDATE public.events SET status='finalized' WHERE id=e.id;
