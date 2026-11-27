@@ -40,6 +40,7 @@ window.YOSO_SUPABASE_CONFIG={url:location.origin,anonKey:${JSON.stringify(anon)}
 `;
 const harness=`
 let onlineAuthUser=null,onlineLeagueId=${JSON.stringify(club)},authRecoveryMode=false,lastRenderedPageId="",loadedKoshienOnlineEventId="",lastKoshienOnlineLoadUserId="";
+let onlineKoshienCatalogSequence=0,onlineKoshienCatalog={scope:"",rows:[],busy:false,error:"",truncated:false};
 let pageId="active";
 const els={pages:[],navLinks:[]};
 const currentAuthUser=()=>onlineAuthUser,currentPageId=()=>pageId;
@@ -56,7 +57,10 @@ window.fixture={
  async login(email,password,uid){
   const c=await YosoSupabase.client(),r=await c.auth.signInWithPassword({email,password});
   check(!r.error&&r.data.user.id===uid,"login failed");
+  onlineKoshienCatalog={scope:"previous",rows:[{id:"old-event"}],busy:true,error:"old",truncated:true};
+  const sequence=onlineKoshienCatalogSequence;
   applyOnlineAuthUser({id:uid,provider:"supabase"});renderPage();
+  check(onlineKoshienCatalogSequence===sequence+1&&onlineKoshienCatalog.scope===""&&onlineKoshienCatalog.rows.length===0&&!onlineKoshienCatalog.busy&&!onlineKoshienCatalog.error&&!onlineKoshienCatalog.truncated,"login retained old Koshien catalog");
   check(!section.hidden,"entry hidden after login");return true;
  },
  async enter(expect){document.getElementById("rankingV1Open").click();
@@ -76,7 +80,7 @@ window.fixture={
  async finalize(ids){await action("close",()=>!!button("review-result"));fill("result",ids);await action("review-result",()=>!!button("finalize"));await action("finalize",()=>root.textContent.includes("ランキング"));return root.textContent;},
  async membershipDenied(){await action("refresh",()=>root.textContent.includes("所属・権限"));check(!root.textContent.includes("Browser team"),"revoked member retained view");return true;},
  async leave(){pageId="home";renderPage();check(section.hidden&&root.textContent==="","navigation retained data");pageId="active";renderPage();return true;},
- async logout(){YosoRankingV1.invalidate();const c=await YosoSupabase.client();await c.auth.signOut();applyOnlineAuthUser(null);renderPage();check(section.hidden&&root.textContent==="","logout retained data");return true;},
+ async logout(){YosoRankingV1.invalidate();const c=await YosoSupabase.client();await c.auth.signOut();onlineKoshienCatalog={scope:"current",rows:[{id:"old-event"}],busy:true,error:"",truncated:false};const sequence=onlineKoshienCatalogSequence;applyOnlineAuthUser(null);renderPage();check(section.hidden&&root.textContent==="","logout retained data");check(onlineKoshienCatalogSequence===sequence+1&&onlineKoshienCatalog.scope===""&&onlineKoshienCatalog.rows.length===0&&!onlineKoshienCatalog.busy,"logout retained Koshien catalog");return true;},
  text(){return root.textContent;},canCreate(){return !!button("new-draft");},visible(){return !section.hidden;}
 };
 `;

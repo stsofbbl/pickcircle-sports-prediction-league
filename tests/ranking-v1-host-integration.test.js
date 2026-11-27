@@ -12,7 +12,8 @@ function harness(){
   currentAuthUser:()=>user,currentPageId:()=>page,els:{pages:[],navLinks:[]},requestAnimationFrame:()=>{},
   YosoRankingV1:{enabled:false,sync:s=>calls.push(s),invalidate:()=>calls.push("invalidate")},
   lastRenderedPageId:"",onlineLeagueId:"club-a",authRecoveryMode:false,onlineAuthUser:user,
-  loadedKoshienOnlineEventId:"old",lastKoshienOnlineLoadUserId:"old"});
+  loadedKoshienOnlineEventId:"old",lastKoshienOnlineLoadUserId:"old",onlineKoshienCatalogSequence:7,
+  onlineKoshienCatalog:{scope:"old-scope",rows:[{id:"old-event"}],busy:true,error:"old",truncated:true}});
  vm.runInContext(extract("function rankingV1HostContext()","function applyTheme(")+extract("function applyOnlineAuthUser(","async function bootstrapSupabaseAuth("),ctx);
  return {ctx,calls,run:s=>vm.runInContext(s,ctx),select:s=>selected=s,page:p=>page=p,user:u=>user=u};
 }
@@ -35,4 +36,15 @@ test("real auth identity change invalidates ranking before changing user",()=>{
  assert.deepEqual(h.calls,["invalidate"]);
  assert.equal(h.ctx.onlineAuthUser.id,"other");
  assert.equal(h.ctx.loadedKoshienOnlineEventId,"");
+ assert.equal(h.ctx.lastKoshienOnlineLoadUserId,"");
+ assert.equal(h.ctx.onlineKoshienCatalogSequence,8);
+ assert.deepEqual(JSON.parse(JSON.stringify(h.ctx.onlineKoshienCatalog)),{scope:"",rows:[],busy:false,error:"",truncated:false});
+});
+test("same actor refresh preserves both catalog generation and ranking workspace",()=>{
+ const h=harness();const catalog=h.ctx.onlineKoshienCatalog;
+ h.run("applyOnlineAuthUser({id:'actor',provider:'supabase',displayName:'updated'})");
+ assert.deepEqual(h.calls,[]);
+ assert.equal(h.ctx.onlineKoshienCatalogSequence,7);
+ assert.equal(h.ctx.onlineKoshienCatalog,catalog);
+ assert.equal(h.ctx.onlineAuthUser.displayName,"updated");
 });
