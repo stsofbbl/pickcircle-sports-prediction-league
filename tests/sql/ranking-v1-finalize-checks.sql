@@ -42,7 +42,7 @@ DO $f$ BEGIN
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  PERFORM set_config('ranking_v1.finalize_permit','true',true);
  BEGIN
-  INSERT INTO public.results VALUES('finalize-case',(SELECT pick FROM inputs),auth.uid());
+  INSERT INTO public.results(event_id,payload,updated_by) VALUES('finalize-case',(SELECT pick FROM inputs),auth.uid());
   RAISE EXCEPTION 'GUC bypass accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $f$;

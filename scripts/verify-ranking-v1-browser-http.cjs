@@ -25,7 +25,7 @@ async function account(role,name){
  assert.ok(response.ok,"fixture signup failed: "+response.status);
  const uid=data.user?.id||data.id;assert.match(uid,/^[0-9a-f-]{36}$/);
  const league=role==="outsider"?otherClub:club,r=role==="member"?"member":"owner";
- sql("BEGIN; INSERT INTO auth.users(id) VALUES('"+uid+"'); INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES('"+uid+"','"+uid+"','"+name+"'); INSERT INTO public.league_members VALUES('"+league+"','"+uid+"','"+r+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name,is_admin) VALUES('"+randomUUID()+"','"+league+"','"+uid+"','"+name+"',"+(r==="owner")+"); COMMIT;");
+ sql("BEGIN; INSERT INTO auth.users(id) VALUES('"+uid+"'); INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES('"+uid+"','"+uid+"','"+name+"'); INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES('"+league+"','"+uid+"','"+r+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name,is_admin) VALUES('"+randomUUID()+"','"+league+"','"+uid+"','"+name+"',"+(r==="owner")+"); COMMIT;");
  return {uid,email,password};
 }
 const index=read("index.html"),section=index.match(/<section[^>]+id="rankingV1Section"[^>]*>[\s\S]*?<\/section>/)?.[0];assert.ok(section);

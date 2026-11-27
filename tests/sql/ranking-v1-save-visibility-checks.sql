@@ -10,10 +10,10 @@ DO $f$ BEGIN
  END IF;
 END $f$;
 SET LOCAL ROLE authenticated;
-INSERT INTO public.events VALUES ('new','00000000-0000-0000-0000-000000000010','Ranking','ranking_v1','draft',now()+interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball');
+INSERT INTO public.events(id,league_id,name,preset_type,status,prediction_deadline,rules,created_by,sport_type) VALUES ('new','00000000-0000-0000-0000-000000000010','Ranking','ranking_v1','draft',now()+interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball');
 DO $f$ BEGIN
  BEGIN
-  INSERT INTO public.events VALUES ('bad','00000000-0000-0000-0000-000000000010','Ranking','ranking_v1','open',now()+interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball');
+  INSERT INTO public.events(id,league_id,name,preset_type,status,prediction_deadline,rules,created_by,sport_type) VALUES ('bad','00000000-0000-0000-0000-000000000010','Ranking','ranking_v1','open',now()+interval '1 day',(SELECT config FROM inputs),'00000000-0000-0000-0000-000000000001','baseball');
   RAISE EXCEPTION 'open insert accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
@@ -38,7 +38,7 @@ DO $f$ BEGIN
   UPDATE public.events SET preset_type='ranking_v1' WHERE id='legacy'; RAISE EXCEPTION 'reclassified legacy';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
-  INSERT INTO public.results VALUES('new','{}',auth.uid()); RAISE EXCEPTION 'unvalidated result accepted';
+  INSERT INTO public.results(event_id,payload,updated_by) VALUES('new','{}',auth.uid()); RAISE EXCEPTION 'unvalidated result accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
   INSERT INTO public.scores(event_id,player_id,phase1_score) VALUES('new',auth.uid(),999); RAISE EXCEPTION 'forged score accepted';

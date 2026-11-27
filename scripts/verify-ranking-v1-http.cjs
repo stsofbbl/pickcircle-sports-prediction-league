@@ -57,7 +57,7 @@ function sql(s){return execFileSync("sudo",["-u","postgres","psql","-X","-qAt","
 const uuid=/^[0-9a-f-]{36}$/;
 function seed(uid,role,league,name){
   assert.match(uid,uuid);assert.match(league,uuid);assert.ok(["owner","member"].includes(role));assert.ok(["HTTP owner","HTTP member","HTTP outsider"].includes(name));
-  sql("BEGIN; INSERT INTO auth.users(id) VALUES('"+uid+"'); INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES('"+uid+"','"+uid+"','"+name+"'); INSERT INTO public.league_members VALUES('"+league+"','"+uid+"','"+role+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name,is_admin) VALUES('"+randomUUID()+"','"+league+"','"+uid+"','"+name+"',"+(role==="owner")+"); COMMIT;");
+  sql("BEGIN; INSERT INTO auth.users(id) VALUES('"+uid+"'); INSERT INTO public.profiles(id,auth_user_id,display_name) VALUES('"+uid+"','"+uid+"','"+name+"'); INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES('"+league+"','"+uid+"','"+role+"','active'); INSERT INTO public.players(id,league_id,profile_id,display_name,is_admin) VALUES('"+randomUUID()+"','"+league+"','"+uid+"','"+name+"',"+(role==="owner")+"); COMMIT;");
 }
 function service(client,actorId,leagueId,eventId){
   let scope={actorId,leagueId,eventId,generation:1};
