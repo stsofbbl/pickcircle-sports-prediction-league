@@ -38,8 +38,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $f$
 $f$;
 REVOKE ALL ON FUNCTION public.list_my_clubs() FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.list_my_clubs() TO authenticated;
-CREATE POLICY result_member_read ON public.results FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=results.event_id AND public.is_league_member(e.league_id)));
-CREATE POLICY score_member_read ON public.scores FOR SELECT TO authenticated USING(EXISTS(SELECT 1 FROM public.events e WHERE e.id=scores.event_id AND public.is_league_member(e.league_id)));
+-- Member result/score read policies already installed by the catalog fixture.
 SQL
 fingerprint() {
  sudo -u postgres psql -X -qAt -v ON_ERROR_STOP=1 -d "$db" -c "SELECT md5(jsonb_build_array((SELECT to_jsonb(e) FROM public.events e WHERE id='legacy'),(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM public.predictions p WHERE event_id='legacy'),(SELECT to_jsonb(r) FROM public.results r WHERE event_id='legacy'),(SELECT jsonb_agg(to_jsonb(s) ORDER BY player_id) FROM public.scores s WHERE event_id='legacy'))::text)"
