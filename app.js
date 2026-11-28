@@ -179,6 +179,9 @@ const defaultState = {
   events: null,
   event: null,
 };
+// Once this page enters online mode, never write its workspace to the legacy shared key.
+let onlineWorkspaceMode = isSupabaseAuthEnabled();
+let scopedLocalWorkspace = null;
 let state = loadState();
 
 const els = {
@@ -299,7 +302,23 @@ const els = {
 
 if (els.newEventButton) els.newEventButton.hidden = true;
 
+function createOnlineWorkspaceState() {
+  const base = structuredClone(defaultState);
+  const config = window.YosoSupabase?.config?.() || {};
+  base.leagueName = "クラブ未選択";
+  base.participants = [];
+  base.connection = normalizeConnectionSettings({ mode: "supabase", leagueId: config.inviteCode || "" });
+  base.event = createEvent("worldCup", [], { name: "オンライン大会未選択", status: "draft" });
+  base.event.id = "";
+  base.activeEventId = null;
+  base.events = [];
+  return base;
+}
+
 function loadState() {
+  // Untagged legacy cache cannot prove which account or club owns its data.
+  // Preserve it unchanged for an explicit local-only recovery path, not as an online fallback.
+  if (onlineWorkspaceMode) return createOnlineWorkspaceState();
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return createDefaultState();
@@ -339,6 +358,10 @@ let clubPathwayState = {
   pendingRequests: [],
 };
 let pendingKoshienLoadPromise = null;
+let pendingKoshienLoadScope = null;
+let onlineKoshienScopeVersion = 0;
+let koshienPhase2LoadRequest = null;
+let koshienLaterLoadRequest = null;
 let lastKoshienOnlineLoadUserId = "";
 let koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
 let koshienPhase2DraftLoading = false;
@@ -474,8 +497,9 @@ function applyOnlineAuthUser(user) {
   if (previousUserId !== nextUserId) {
     onlineKoshienCatalogSequence++;
     onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
-    loadedKoshienOnlineEventId = "";
-    lastKoshienOnlineLoadUserId = "";
+    invalidateOnlineKoshienScope({ clearWorkspace: true, clearIdentity: true });
+    renderAuthState();
+    render();
   }
 }
 
@@ -699,6 +723,10 @@ function handleConnectionSave() {
       auth: { enabled: true },
       sync: { autoSaveKoshien: true },
     });
+    if (isSupabaseAuthEnabled()) {
+      onlineWorkspaceMode = true;
+      invalidateOnlineKoshienScope({ clearWorkspace: true, clearIdentity: true });
+    }
     state.connection = normalizeConnectionSettings({
       ...state.connection,
       mode: "supabase",
@@ -708,8 +736,8 @@ function handleConnectionSave() {
       lastSyncAt: state.connection?.lastSyncAt || "",
     });
     persist();
-    renderConnectionSettings();
     renderAuthState();
+    render();
     setConnectionMessage("Supabase接続設定を保存しました。オンラインログインに切り替わります。ログイン後に甲子園データを保存・読込できます。");
     return;
   }
@@ -811,7 +839,7 @@ async function syncKoshienToSupabaseNow() {
       return;
     }
     state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
-    if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+    saveLocalStateOnly();
     renderConnectionSettings();
     setConnectionMessage(koshienSaveOutcomeMessage(result, `Supabaseへ保存しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`));
   } catch (error) {
@@ -825,7 +853,7 @@ function koshienSaveSkipMessage(reason) {
   if (reason === "Supabase session is not ready") return "Supabaseログインが確認できません。メールアドレスでログインしてください。";
   if (reason === "league is not ready") return "参加リーグを確認できませんでした。リーグIDを確認してください。";
   if (reason === "online Koshien state is not loaded") return "オンラインの正式な甲子園大会を読み込んでから保存してください。";
-  if (reason === "admin must create the Koshien event before members can save predictions") return "まだ管理者が甲子園大会をオンライン作成していません。先に管理者で保存してください。";
+  if (reason === "online Koshien save scope changed") return "保存中に対象が切り替わりました。元の大会を再読込して確認してください。";
   return "Supabaseへ保存できませんでした。設定とログイン状態を確認してください。";
 }
 
@@ -1656,15 +1684,126 @@ function normalizeResultFlow(flow, participants = state.participants || defaultS
   return next;
 }
 
+function localWorkspaceIdentity() {
+  if (!onlineWorkspaceMode) return null;
+  const actorId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  const config = window.YosoSupabase?.config?.() || {};
+  const project = String(config.url || "");
+  if (!actorId || !leagueId || !project || String(config.activeLeagueId || "") !== leagueId) return null;
+  return JSON.stringify([project, actorId, leagueId]);
+}
+
+function scopedLocalWorkspaceReady() {
+  return Boolean(scopedLocalWorkspace && scopedLocalWorkspace.identity === localWorkspaceIdentity());
+}
+
+function activateScopedLocalWorkspace(club) {
+  const identity = localWorkspaceIdentity();
+  if (!identity || String(club?.league_id || "") !== String(onlineLeagueId)) return false;
+  if (scopedLocalWorkspaceReady()) return true;
+  const key = STORAGE_KEY + ":local-formats:v1:" + encodeURIComponent(identity);
+  try {
+    const raw = localStorage.getItem(key);
+    const data = raw === null ? { version: 1, identity, events: [] } : JSON.parse(raw);
+    if (data?.version !== 1 || data.identity !== identity || !Array.isArray(data.events)
+      || data.events.some(event => !event?.id || !Object.hasOwn(templates, event.templateId)
+        || baseTemplateId(event.templateId) === "koshien")
+      || new Set(data.events.map(event => event.id)).size !== data.events.length) return false;
+    const existing = new Set((state.events || []).map(event => event.id));
+    if (data.events.some(event => existing.has(event.id))) return false;
+    const restored = data.events.map(event => normalizeEvent(event, state));
+    scopedLocalWorkspace = { identity, key, ids: new Set(restored.map(event => event.id)) };
+    state.events = [...(state.events || []), ...restored];
+    if (!state.event?.id && restored.length) {
+      state.participants = uniqueStrings([String(currentAuthUser()?.displayName || ""), ...restored.flatMap(event => Object.keys(event.predictions || {}))]);
+      setActiveEvent(restored[0].id);
+    }
+    return true;
+  } catch (error) {
+    console.warn("Scoped local storage unavailable", error);
+    return false;
+  }
+}
+
 function persist() {
   syncActiveEvent();
-  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
-  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return saveLocalStateOnly();
 }
 
 function saveLocalStateOnly() {
+  if (onlineWorkspaceMode || isSupabaseAuthEnabled()) {
+    if (!scopedLocalWorkspaceReady()) return false;
+    const { key, identity, ids } = scopedLocalWorkspace;
+    // Only explicit local-format creations/restores, never server snapshots.
+    const events = (state.events || []).filter(event => ids.has(event.id) && baseTemplateId(event.templateId) !== "koshien");
+    try {
+      localStorage.setItem(key, JSON.stringify({ version: 1, identity, events }));
+      return true;
+    } catch (error) {
+      console.warn("Scoped local save failed", error);
+      return false;
+    }
+  }
   if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return true;
+}
+
+function invalidateOnlineKoshienScope({ clearWorkspace = false, clearIdentity = false } = {}) {
+  onlineKoshienScopeVersion++;
+  pendingKoshienLoadPromise = null;
+  pendingKoshienLoadScope = null;
+  loadedKoshienOnlineEventId = "";
+  loadedKoshienResultRevision = "";
+  lastKoshienOnlineLoadUserId = "";
+  koshienPhase2LoadRequest = null;
+  koshienLaterLoadRequest = null;
+  koshienPhase2DraftLoading = false;
+  koshienLaterPhaseLoading = false;
+  koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
+  koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
+  koshienOnlineRankingView = { eventId: "", loadedFromDb: false, members: [], players: [], scores: [] };
+  koshienPhase2DraftMessage = "";
+  koshienPhase2DraftMessageKind = "";
+  koshienLaterPhaseMessage = "";
+  koshienLaterPhaseMessageKind = "";
+  if (clearWorkspace) {
+    scopedLocalWorkspace = null;
+    state = createOnlineWorkspaceState();
+    onlineLeagueMembers = [];
+    onlineLeagueAdminMessage = "";
+    onlineKoshienEventId = "";
+    koshienLaterPreviewState = null;
+    // Dialog content may outlive render(); do not retain the former user's preview.
+    for (const dialog of [els.confirmDialog, els.koshienLaterPreviewDialog]) {
+      if (dialog?.open) dialog.close();
+    }
+    if (els.koshienLaterPreviewRoot) els.koshienLaterPreviewRoot.textContent = "";
+    if (clearIdentity) {
+      onlineLeagueId = "";
+      clubPathwayState = { mode: "", busy: false, message: "", messageKind: "",
+        searchQuery: "", renameName: null, renameLeagueId: "", searchResults: [],
+        inviteMatch: null, myClubs: [], myRequests: [], pendingRequests: [] };
+    }
+  }
+}
+
+function captureOnlineKoshienScope() {
+  const config = window.YosoSupabase?.config?.() || {};
+  return {
+    version: onlineKoshienScopeVersion,
+    userId: String(currentAuthUser()?.id || ""),
+    leagueId: String(onlineLeagueId || ""),
+    configLeagueId: String(config.activeLeagueId || ""),
+    inviteCode: String(config.inviteCode || ""),
+    eventId: String(state.activeEventId || state.event?.id || ""),
+  };
+}
+
+function isOnlineKoshienScopeCurrent(scope) {
+  const current = captureOnlineKoshienScope();
+  return Object.keys(scope).every(key => scope[key] === current[key]);
 }
 
 async function saveKoshienOnlineNow({ participantName = currentKoshienParticipantName(), updateConnection = true } = {}) {
@@ -1688,13 +1827,25 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
     || activeEventId !== displayedEventId) {
     return { skipped: true, reason: "online Koshien state is not loaded" };
   }
+  const userId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  if (!userId || !leagueId) return { skipped: true, reason: "league is not ready" };
+  const saveScope = captureOnlineKoshienScope();
   const result = await window.YosoDataService.koshien.saveSnapshot({
     state,
     event: state.event,
     eventId: displayedEventId,
+    leagueId,
+    userId,
     participantName,
     scoreRows: koshienHasScorableResults(state.event) ? koshienScoreRows() : [],
   });
+  if (!isOnlineKoshienScopeCurrent(saveScope)
+    || String(state.activeEventId || "") !== displayedEventId
+    || String(state.event?.id || "") !== displayedEventId
+    || String(loadedKoshienOnlineEventId || "") !== displayedEventId) {
+    return { skipped: true, reason: "online Koshien save scope changed" };
+  }
   if (!result?.skipped && updateConnection) {
     state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
     saveLocalStateOnly();
@@ -1705,43 +1856,60 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
 
 async function loadKoshienOnlineState({ force = false, exactEventId = "", expectedLeagueId = "" } = {}) {
   if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.loadSnapshot) return null;
-  const userId = currentAuthUser()?.id || "";
-  const originalEventId = String(state.activeEventId || state.event?.id || "");
-  const selectedEventId = String(exactEventId || "") || (baseTemplateId(state.event?.templateId) === "koshien"
-    ? originalEventId
-    : "");
-  if (!force
-    && userId
-    && lastKoshienOnlineLoadUserId === userId
-    && selectedEventId
+  let scope = captureOnlineKoshienScope();
+  if (!scope.userId) return null;
+  const requestedLeagueId = String(expectedLeagueId || scope.configLeagueId || scope.leagueId || "");
+  if ((scope.leagueId && requestedLeagueId !== scope.leagueId)
+    || (scope.configLeagueId && requestedLeagueId !== scope.configLeagueId)
+    || (exactEventId && !requestedLeagueId)) return null;
+  const selectedEventId = String(exactEventId || "") || (baseTemplateId(state.event?.templateId) === "koshien" ? scope.eventId : "");
+  if (!force && lastKoshienOnlineLoadUserId === scope.userId && selectedEventId
     && loadedKoshienOnlineEventId === selectedEventId) return null;
-  if (pendingKoshienLoadPromise) return exactEventId ? null : pendingKoshienLoadPromise;
+  if (pendingKoshienLoadPromise && pendingKoshienLoadScope
+    && isOnlineKoshienScopeCurrent(pendingKoshienLoadScope.scope)) {
+    return exactEventId ? null : pendingKoshienLoadPromise;
+  }
+  onlineKoshienScopeVersion++;
+  scope = captureOnlineKoshienScope();
   loadedKoshienOnlineEventId = "";
   loadedKoshienResultRevision = "";
+  const request = { scope };
+  pendingKoshienLoadScope = request;
+  const requestIsCurrent = () => pendingKoshienLoadScope === request;
   setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
   pendingKoshienLoadPromise = (async () => {
+    let appliedScope = scope;
     try {
       const snapshot = await window.YosoDataService.koshien.loadSnapshot({
         eventId: selectedEventId, ...(exactEventId ? { strictEventId: true } : {}),
       });
-      if (exactEventId && (!snapshot?.ok
-        || String(snapshot.event?.id || "") !== String(exactEventId)
-        || String(snapshot.league?.id || "") !== String(expectedLeagueId)
-        || String(snapshot.currentUser?.id || "") !== userId
-        || String(currentAuthUser()?.id || "") !== userId
-        || String(onlineLeagueId || "") !== String(expectedLeagueId)
-        || String(state.activeEventId || state.event?.id || "") !== originalEventId)) {
-        setConnectionMessage("作成した大会の厳密な再読込を確認できませんでした。");
-        return null;
-      }
+      if (!requestIsCurrent() || !isOnlineKoshienScopeCurrent(scope)) return null;
       if (snapshot?.ok) {
+        const leagueId = String(snapshot.league?.id || "");
+        const eventId = String(snapshot.event?.id || "");
+        if (!leagueId || !eventId || String(snapshot.currentUser?.id || "") !== scope.userId
+          || String(snapshot.event?.league_id || "") !== leagueId
+          || snapshot.event?.preset_type !== "koshien"
+          || (requestedLeagueId && leagueId !== requestedLeagueId)
+          || (scope.inviteCode && String(snapshot.league?.invite_code || "") !== scope.inviteCode)
+          || (exactEventId && eventId !== String(exactEventId))) {
+          setConnectionMessage("甲子園大会の所属先とログイン状態を確認できませんでした。");
+          return null;
+        }
         applyKoshienOnlineSnapshot(snapshot);
-        lastKoshienOnlineLoadUserId = snapshot.currentUser?.id || userId || lastKoshienOnlineLoadUserId;
+        appliedScope = captureOnlineKoshienScope();
+        request.scope = appliedScope;
+        // Applying a legitimate snapshot can select the initial club or a different event.
+        // Subsequent phase responses must stay in that new scope.
         await Promise.all([
           refreshKoshienPhase2DraftState({ renderAfter: false }),
           refreshKoshienLaterPhaseState({ renderAfter: false }),
         ]);
-        loadedKoshienOnlineEventId = String(snapshot.event?.id || "");
+        if (!requestIsCurrent() || !isOnlineKoshienScopeCurrent(appliedScope)
+          || appliedScope.userId !== scope.userId || appliedScope.leagueId !== leagueId
+          || appliedScope.eventId !== eventId) return null;
+        lastKoshienOnlineLoadUserId = scope.userId;
+        loadedKoshienOnlineEventId = eventId;
         render();
         setConnectionMessage(`Supabaseから甲子園データを読み込みました。${snapshot.predictionsPublic ? "締切後のため他メンバーの予想も取得しています。" : "締切前のため自分の予想だけ取得しています。"}`);
       } else if (snapshot?.skipped) {
@@ -1749,13 +1917,17 @@ async function loadKoshienOnlineState({ force = false, exactEventId = "", expect
       }
       return snapshot;
     } catch (error) {
+      if (!requestIsCurrent() || !isOnlineKoshienScopeCurrent(appliedScope)) return null;
       loadedKoshienOnlineEventId = "";
       loadedKoshienResultRevision = "";
       console.warn("Koshien Supabase load failed", error);
-      setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。");
+      setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。オンライン保存は未確認です。再読込してください。");
       return null;
     } finally {
-      pendingKoshienLoadPromise = null;
+      if (requestIsCurrent()) {
+        pendingKoshienLoadPromise = null;
+        pendingKoshienLoadScope = null;
+      }
     }
   })();
   return pendingKoshienLoadPromise;
@@ -1789,16 +1961,21 @@ async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
     return koshienPhase2DraftView;
   }
 
+  const scope = captureOnlineKoshienScope();
+  const request = {};
+  koshienPhase2LoadRequest = request;
+  const isCurrent = () => koshienPhase2LoadRequest === request && isOnlineKoshienScopeCurrent(scope);
   koshienPhase2DraftLoading = true;
   if (renderAfter) render();
   try {
     const response = await service.loadPhase2DraftState(requestedEventId);
-    if (String(state.event?.id || "") !== requestedEventId) return koshienPhase2DraftView;
+    if (!isCurrent() || String(state.event?.id || "") !== requestedEventId) return koshienPhase2DraftView;
     applyKoshienPhase2DraftResponse(response, requestedEventId);
     koshienPhase2DraftMessage = "";
     koshienPhase2DraftMessageKind = "";
     return koshienPhase2DraftView;
   } catch (error) {
+    if (!isCurrent()) return koshienPhase2DraftView;
     console.warn("Koshien phase 2 draft load failed", error);
     koshienPhase2DraftView = {
       available: false,
@@ -1811,8 +1988,11 @@ async function refreshKoshienPhase2DraftState({ renderAfter = true } = {}) {
     koshienPhase2DraftMessageKind = "error";
     return koshienPhase2DraftView;
   } finally {
-    koshienPhase2DraftLoading = false;
-    if (renderAfter) render();
+    if (koshienPhase2LoadRequest === request) {
+      koshienPhase2LoadRequest = null;
+      koshienPhase2DraftLoading = false;
+      if (renderAfter && isOnlineKoshienScopeCurrent(scope)) render();
+    }
   }
 }
 
@@ -1838,22 +2018,30 @@ async function refreshKoshienLaterPhaseState({ renderAfter = true } = {}) {
     if (renderAfter) render();
     return koshienLaterPhaseView;
   }
+  const scope = captureOnlineKoshienScope();
+  const request = {};
+  koshienLaterLoadRequest = request;
+  const isCurrent = () => koshienLaterLoadRequest === request && isOnlineKoshienScopeCurrent(scope);
   koshienLaterPhaseLoading = true;
   if (renderAfter) render();
   try {
     const response = await service.loadLaterPhaseState(eventId);
-    if (String(state.event?.id || "") !== eventId) return koshienLaterPhaseView;
+    if (!isCurrent() || String(state.event?.id || "") !== eventId) return koshienLaterPhaseView;
     applyKoshienLaterPhaseResponse(response, eventId);
     koshienLaterPhaseMessage = "";
     koshienLaterPhaseMessageKind = "";
   } catch (error) {
+    if (!isCurrent()) return koshienLaterPhaseView;
     console.warn("Koshien later phase load failed", error);
     koshienLaterPhaseView = { eventId, loadedFromDb: false, rounds: {}, teams: [], error: true };
     koshienLaterPhaseMessage = "後半フェーズを読み込めませんでした。最新状態を再取得してください。";
     koshienLaterPhaseMessageKind = "error";
   } finally {
-    koshienLaterPhaseLoading = false;
-    if (renderAfter) render();
+    if (koshienLaterLoadRequest === request) {
+      koshienLaterLoadRequest = null;
+      koshienLaterPhaseLoading = false;
+      if (renderAfter && isOnlineKoshienScopeCurrent(scope)) render();
+    }
   }
   return koshienLaterPhaseView;
 }
@@ -2085,11 +2273,11 @@ async function updateKoshienLaterPhaseSchedule(phase, root) {
 }
 
 function koshienLoadSkipMessage(reason) {
-  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期は無効です。ローカル保存を表示しています。";
-  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できないため、ローカル保存を表示しています。";
-  if (reason === "league is not ready") return "参加リーグを確認できませんでした。ローカル保存を表示しています。";
+  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期は無効です。オンライン保存は未確認です。再読込してください。";
+  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できないため、オンライン保存は未確認です。再読込してください。";
+  if (reason === "league is not ready") return "参加リーグを確認できませんでした。オンライン保存は未確認です。再読込してください。";
   if (reason === "koshien event is not found") return "Supabaseに甲子園大会がまだありません。管理者が大会を保存すると別端末で読み込めます。";
-  return "Supabaseから読み込むデータがないため、ローカル保存を表示しています。";
+  return "Supabaseから読み込むデータがないため、オンライン保存は未確認です。再読込してください。";
 }
 
 function resolveKoshienOnlineGameMultiplier(metadata, current) {
@@ -2227,8 +2415,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
     leagueId: snapshot.league?.invite_code || state.connection?.leagueId,
     lastSyncAt: new Date().toISOString(),
   });
-  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
-  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  saveLocalStateOnly();
 }
 
 function mergeEventList(events, nextEvent) {
@@ -2248,7 +2435,7 @@ function statusToResultFlow(status) {
 }
 
 function syncActiveEvent() {
-  if (!state.event) return;
+  if (!state.event?.id) return;
   state.events ||= [];
   const index = state.events.findIndex((event) => event.id === state.event.id);
   if (index >= 0) state.events[index] = state.event;
@@ -2761,6 +2948,9 @@ function saveActiveClub(club) {
   const leagueId = String(club?.league_id || "");
   if (!leagueId) return;
   const leagueChanged = String(onlineLeagueId) !== leagueId;
+  if (leagueChanged) {
+    invalidateOnlineKoshienScope({ clearWorkspace: true });
+  }
   state.leagueName = club.league_name || state.leagueName;
   clubPathwayState.renameLeagueId = leagueId;
   clubPathwayState.renameName = club.league_name || null;
@@ -2779,7 +2969,7 @@ function saveActiveClub(club) {
     onlineKoshienCatalogSequence++;
     onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
     onlineKoshienEventId = "";
-    loadedKoshienOnlineEventId = "";
+    render();
   }
   lastKoshienOnlineLoadUserId = "";
 }
@@ -2792,12 +2982,18 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
     if (renderAfter) renderClubPathways();
     return;
   }
+  let scope = captureOnlineKoshienScope();
   try {
     const league = window.YosoDataService?.league;
     const clubs = await league?.listMyClubs?.() || [];
+    if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.myClubs = clubs;
-    const requestedClub = activeClubRecord() || clubs[0];
-    if (!window.YosoSupabase?.config?.().activeLeagueId && requestedClub?.league_id) saveActiveClub(requestedClub);
+    const selected = activeClubRecord();
+    const requestedClub = selected || (!scope.configLeagueId ? clubs[0] : null);
+    if (requestedClub?.league_id && (!scope.configLeagueId || !scope.leagueId)) {
+      saveActiveClub(requestedClub);
+      scope = captureOnlineKoshienScope();
+    }
     const activeClub = activeClubRecord();
     const [requests, pending] = await Promise.all([
       league?.listMyJoinRequests?.() || [],
@@ -2805,9 +3001,19 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
         ? league?.listPendingJoinRequests?.({ leagueId: activeClub.league_id }) || []
         : [],
     ]);
+    if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.myRequests = requests;
     clubPathwayState.pendingRequests = pending;
+    if (activeClub) {
+      const restored = activateScopedLocalWorkspace(activeClub);
+      if (restored) render();
+    } else if (onlineLeagueId) {
+      invalidateOnlineKoshienScope({ clearWorkspace: true });
+      onlineLeagueId = "";
+      render();
+    }
   } catch (error) {
+    if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.message = error?.message || "クラブ情報を取得できませんでした。";
     clubPathwayState.messageKind = "error";
   }
@@ -2897,6 +3103,7 @@ async function handleClubPathwayAction(button) {
       await league?.deleteClub?.({ leagueId: activeClub?.league_id, confirmationName });
       onlineLeagueId = "";
       onlineKoshienEventId = "";
+      invalidateOnlineKoshienScope({ clearWorkspace: true });
       window.YosoSupabase?.saveConfig?.({ activeLeagueId: "", inviteCode: "", leagueName: state.leagueName });
       clubPathwayState.message = "クラブを削除しました。";
     }
@@ -2948,6 +3155,10 @@ function renderDashboard() {
 function renderHomeReadinessPanel({ participant, missingTournamentCount, openEvents }) {
   if (!els.homeReadinessPanel) return;
   const activeEvent = openEvents[0] || state.event;
+  if (!activeEvent?.id) {
+    els.homeReadinessPanel.innerHTML = '<article class="readiness-card"><div><strong>オンライン大会未選択</strong><small>大会一覧から選択してください。</small></div><a class="primary-link" href="#settings">大会一覧へ</a></article>';
+    return;
+  }
   els.homeReadinessPanel.innerHTML = `
     <article class="readiness-card primary-readiness">
       <div>
@@ -3010,7 +3221,7 @@ function renderActiveTournaments() {
 function renderActiveEventManager() {
   if (!els.activeEventManager) return;
   const event = state.event;
-  if (!event) {
+  if (!event?.id) {
     els.activeEventManager.innerHTML = emptyTournamentMarkup("管理する大会がありません");
     return;
   }
@@ -4186,6 +4397,7 @@ function updateEventStatuses() {
 function setActiveEvent(eventId) {
   const event = (state.events || []).find((item) => item.id === eventId);
   if (!event) return;
+  if (String(state.activeEventId || "") !== String(event.id)) invalidateOnlineKoshienScope();
   state.event = event;
   state.activeEventId = event.id;
   state.activeTemplate = event.templateId;
@@ -4418,7 +4630,7 @@ function renderTournamentCreateOptions() {
   const onlineKoshienAvailable = Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
   els.newTournamentTemplate.innerHTML = Object.values(templates).map((template) => {
     const onlineSupported = baseTemplateId(template.id) === "koshien" && onlineKoshienAvailable;
-    const label = onlineSupported ? "オンライン対応" : "端末内のみ";
+    const label = onlineSupported ? "オンライン対応" : onlineWorkspaceMode && baseTemplateId(template.id) === "koshien" ? "現在利用不可" : "端末内のみ";
     return `<option value="${escapeAttr(template.id)}" ${template.id === currentValue ? "selected" : ""}>${escapeHtml(template.name)}（${label}）</option>`;
   }).join("");
 }
@@ -4534,6 +4746,13 @@ async function createTournamentFromSettingsAction(options = {}) {
   const onlineKoshien = baseTemplateId(event.templateId) === "koshien"
     && Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
   if (!onlineKoshien) {
+    if (onlineWorkspaceMode) {
+      if (baseTemplateId(event.templateId) === "koshien" || !scopedLocalWorkspaceReady()) {
+        window.alert("端末内保存には利用可能な形式と確認済みのクラブが必要です。");
+        return;
+      }
+      scopedLocalWorkspace.ids.add(event.id);
+    }
     addAndSelectEvent(event);
     render();
     return;
@@ -5077,6 +5296,15 @@ function updatePresetSummary() {
 }
 
 function renderEvent() {
+  if (!state.event?.id) {
+    els.eventTitle.textContent = "オンライン大会未選択";
+    els.eventSubtitle.textContent = "大会一覧から選択して、最新データを読み込んでください。";
+    if (els.eventRuleGuide) els.eventRuleGuide.innerHTML = "";
+    els.eventForm.innerHTML = "";
+    if (els.saveButton) els.saveButton.disabled = true;
+    return;
+  }
+  if (els.saveButton) els.saveButton.disabled = false;
   ensureResultFlow();
   const template = templates[state.event.templateId];
   els.eventTitle.textContent = state.event.name;
@@ -8059,23 +8287,24 @@ els.koshienLaterPreviewDialog?.addEventListener("close", () => {
 });
 
 async function confirmSave() {
-  persist();
+  if (!state.event?.id) return;
+  const localSaved = persist();
   if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
     els.saveButton.textContent = UI_TEXT.save.syncing;
     try {
       const result = await saveKoshienOnlineNow();
-      els.saveButton.textContent = result?.skipped ? UI_TEXT.save.local : result?.partial ? UI_TEXT.save.partial : UI_TEXT.save.saved;
+      els.saveButton.textContent = result?.skipped ? (onlineWorkspaceMode ? "未保存" : UI_TEXT.save.local) : result?.partial ? UI_TEXT.save.partial : UI_TEXT.save.saved;
     } catch (error) {
       console.warn("Koshien Supabase save failed", error);
-      els.saveButton.textContent = UI_TEXT.save.local;
+      els.saveButton.textContent = onlineWorkspaceMode ? "未保存" : UI_TEXT.save.local;
     }
     setTimeout(() => {
       els.saveButton.textContent = UI_TEXT.save.confirm;
     }, 900);
     return;
   }
-  // This path persists only on this device; never imply shared confirmation.
-  els.saveButton.textContent = UI_TEXT.save.local;
+  // Local-format saves are never presented as shared confirmation.
+  els.saveButton.textContent = localSaved ? UI_TEXT.save.local : "未保存";
   setTimeout(() => {
     els.saveButton.textContent = UI_TEXT.save.confirm;
   }, 900);
@@ -8083,8 +8312,12 @@ async function confirmSave() {
 
 els.resetButton?.addEventListener("click", () => {
   if (!confirm("ローカル保存データを初期化しますか？")) return;
-  localStorage.removeItem(STORAGE_KEY);
-  state = createDefaultState();
+  if (onlineWorkspaceMode) {
+    invalidateOnlineKoshienScope({ clearWorkspace: true });
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+    state = createDefaultState();
+  }
   render();
 });
 
@@ -8154,8 +8387,13 @@ async function archiveOnlineKoshienEvent(item, requestedStatus) {
   if (!confirm(`「${item.name}」をアーカイブしますか？`)) return;
   onlineKoshienArchiveBusy = true;
   try {
-    await archive({ eventId: item.id });
-    const snapshot = await loadKoshienOnlineState({ force: true });
+    const userId = String(currentAuthUser()?.id || "");
+    const leagueId = String(onlineLeagueId || "");
+    if (!userId || !leagueId) throw new Error("対象クラブとログイン状態を確認してください。");
+    await archive({ eventId: item.id, leagueId, userId });
+    if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId
+      || String(state.activeEventId || "") !== String(item.id)) return;
+    const snapshot = await loadKoshienOnlineState({ force: true, exactEventId: item.id, expectedLeagueId: leagueId });
     if (!snapshot?.ok || snapshot.event?.id !== item.id || snapshot.event?.status !== "archive") {
       throw new Error("保存後の状態を確認できませんでした。再読み込みして確認してください。");
     }
@@ -8187,12 +8425,18 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (!confirm(`「${target.name}」を削除しますか？`)) return;
-    if (isSupabaseAuthEnabled() && currentAuthUser() && baseTemplateId(target.templateId) === "koshien") {
+    if (isSupabaseAuthEnabled() && baseTemplateId(target.templateId) === "koshien") {
       try {
-        await window.YosoDataService?.koshien?.deleteEvent?.({
-          eventId,
-          confirmationName: target.name,
-        });
+        const deleteEvent = window.YosoDataService?.koshien?.deleteEvent;
+        if (typeof deleteEvent !== "function") throw new Error("削除機能を読み込めませんでした。再読み込みしてください。");
+        const userId = String(currentAuthUser()?.id || "");
+        const leagueId = String(onlineLeagueId || "");
+        if (!userId || !leagueId) throw new Error("対象クラブとログイン状態を確認してください。");
+        const result = await deleteEvent({ eventId, confirmationName: target.name, leagueId, userId });
+        if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId) return;
+        if (result?.ok !== true || String(result.eventId) !== String(eventId)) {
+          throw new Error("オンライン大会の削除を確認できませんでした。");
+        }
       } catch (error) {
         alert(error?.message || "オンラインの大会を削除できませんでした。");
         return;

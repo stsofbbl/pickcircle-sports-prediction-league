@@ -17,6 +17,9 @@ function createSupabaseMock({
   eventStatus = "open",
   predictionDeadline = "2099-08-31T15:00:00.000Z",
   missingEventId = "",
+  existingEventLeagueId = "league-id",
+  existingEventPreset = "koshien",
+  eventUpdateMissing = false,
   existingEventTeams = null,
   existingEventRules = {},
   structuredTeamRows = null,
@@ -155,13 +158,15 @@ function createSupabaseMock({
         };
       }
       if (this.table === "events" && this.operation === "select" && this.filters.id) {
-        if (this.filters.id === missingEventId) return { data: null, error: null };
+        if (this.filters.id === missingEventId
+          || (this.filters.league_id && this.filters.league_id !== existingEventLeagueId)
+          || (this.filters.preset_type && this.filters.preset_type !== existingEventPreset)) return { data: null, error: null };
         return {
           data: {
             id: this.filters.id,
-            league_id: "league-id",
+            league_id: existingEventLeagueId,
             name: "選択中の夏の甲子園",
-            preset_type: "koshien",
+            preset_type: existingEventPreset,
             status: eventStatus,
             prediction_deadline: predictionDeadline,
             rules: existingEventRules,
@@ -169,6 +174,10 @@ function createSupabaseMock({
           error: null,
         };
       }
+      if (this.table === "events" && this.operation === "update") return {
+        data: eventUpdateMissing ? null : { id: this.filters.id, league_id: existingEventLeagueId, preset_type: existingEventPreset },
+        error: null,
+      };
       if (this.table === "events" && this.operation === "select") return { data: { id: "event-id" }, error: null };
       if (this.table === "players" && this.operation === "upsert") return { data: { id: "player-id" }, error: null };
       if (this.table === "players") return {
@@ -300,6 +309,7 @@ test("transactional result failure rejects without falling back to separate tabl
 
   await assert.rejects(
     service.koshien.saveSnapshot({
+      leagueId: "league-id", userId: "user-id",
       state: { approvalPolicy: "half" },
       event: completedEvent(),
       participantName: "Admin",
@@ -350,6 +360,7 @@ test("score payload preparation failure stops before the result transaction", as
 
   await assert.rejects(
     service.koshien.saveSnapshot({
+      leagueId: "league-id", userId: "user-id",
       state: { approvalPolicy: "half" },
       event: completedEvent(),
       participantName: "Admin",
@@ -367,6 +378,7 @@ test("completed results reject when scoreRows is empty", async () => {
 
   await assert.rejects(
     service.koshien.saveSnapshot({
+      leagueId: "league-id", userId: "user-id",
       state: { approvalPolicy: "half" },
       event: completedEvent(),
       participantName: "Admin",
@@ -382,6 +394,7 @@ test("saveSnapshot returns ok only after matches, scores, and raw results succee
   const service = loadDataService(supabase.client);
 
   const result = await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event: completedEvent(),
     participantName: "Admin",
@@ -419,6 +432,7 @@ test("phase 1 autosave never writes later-phase tables directly", async () => {
   event.results = { matches: [], finishes: {} };
 
   await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
@@ -449,6 +463,7 @@ test("phase 1 save uses the explicitly displayed event id for the RPC", async ()
     captain: "Team A",
   };
   await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     eventId: displayedEventId,
@@ -461,6 +476,7 @@ test("phase 1 save uses the explicitly displayed event id for the RPC", async ()
 
   await assert.rejects(
     service.koshien.saveSnapshot({
+      leagueId: "league-id", userId: "user-id",
       state: { approvalPolicy: "half" },
       event,
       eventId: "stale-local-event-id",
@@ -479,6 +495,7 @@ test("phase 1 save uses the explicitly displayed event id for the RPC", async ()
   const failingService = loadDataService(failingSupabase.client);
   await assert.rejects(
     failingService.koshien.saveSnapshot({
+      leagueId: "league-id", userId: "user-id",
       state: { approvalPolicy: "half" },
       event,
       eventId: displayedEventId,
@@ -502,6 +519,7 @@ test("existing Koshien autosave never rewrites the roster or draw-owned rules", 
   event.results = { matches: [], finishes: {} };
 
   await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
@@ -517,24 +535,40 @@ test("existing Koshien autosave never rewrites the roster or draw-owned rules", 
   assert.equal(supabase.calls.some((call) => call.name === "replace_koshien_representatives"), false);
 });
 
-test("new Koshien roster initialization uses the atomic representative RPC", async () => {
-  const supabase = createSupabaseMock({ missingEventId: "event-id" });
+test("snapshot save rejects missing, cross-club, other-preset and draft events without writes", async () => {
+  for (const opts of [
+    { missingEventId: "event-id" }, { existingEventLeagueId: "other-league" },
+    { existingEventPreset: "ranking_v1" }, { eventStatus: "draft" },
+  ]) {
+    const supabase = createSupabaseMock(opts);
+    const service = loadDataService(supabase.client);
+    const event = withDefault49Roster(completedEvent());
+    event.status = "open";
+    event.results = { matches: [], finishes: {} };
+    await assert.rejects(service.koshien.saveSnapshot({
+      event, leagueId: "league-id", userId: "user-id", participantName: "Admin",
+    }), /既存甲子園大会/);
+    assert.equal(supabase.calls.length, 0);
+  }
+});
+
+test("snapshot save requires actor and club and confirms scoped UPDATE before child writes", async () => {
+  for (const args of [{ leagueId: "", userId: "user-id" }, { leagueId: "league-id", userId: "other" }, { leagueId: "other-league", userId: "user-id" }]) {
+    const supabase = createSupabaseMock();
+    const service = loadDataService(supabase.client);
+    await assert.rejects(service.koshien.saveSnapshot({ ...args, event: completedEvent() }), /クラブ/);
+    assert.equal(supabase.calls.length, 0);
+  }
+  const supabase = createSupabaseMock({ eventUpdateMissing: true });
   const service = loadDataService(supabase.client);
-  const event = withDefault49Roster(completedEvent());
-  event.status = "open";
-  event.deadline = "2099-08-31T15:00:00.000Z";
+  const event = completedEvent();
   event.results = { matches: [], finishes: {} };
-
-  await service.koshien.saveSnapshot({
-    state: { approvalPolicy: "half" },
-    event,
-    participantName: "Admin",
-    scoreRows: [],
-  });
-
-  assert.equal(supabase.calls.some((call) => call.name === "replace_koshien_representatives"), true);
-  assert.equal(supabase.calls.some((call) => call.table === "event_teams" && call.operation === "upsert"), false);
-  assert.equal(supabase.calls.some((call) => call.table === "teams" && call.operation === "upsert"), false);
+  await assert.rejects(service.koshien.saveSnapshot({
+    event, leagueId: "league-id", userId: "user-id", participantName: "Admin",
+  }), /対象大会の更新/);
+  assert.deepEqual(supabase.calls.map(c => [c.table, c.operation]), [["events", "update"]]);
+  const query = supabase.queries.find(q => q.table === "events" && q.operation === "update");
+  assert.deepEqual(query.filters, { id: "event-id", league_id: "league-id", preset_type: "koshien" });
 });
 
 test("a 49-row display roster with an incomplete structured roster is atomically repaired", async () => {
@@ -560,6 +594,7 @@ test("a 49-row display roster with an incomplete structured roster is atomically
   event.results = { matches: [], finishes: {} };
 
   await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
@@ -598,6 +633,7 @@ test("an incomplete display roster is repaired from the saved 49-school rules sn
   event.results = { matches: [], finishes: {} };
 
   await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
@@ -636,6 +672,7 @@ test("existing Koshien autosave preserves confirmed DB start rounds", async () =
   event.results = { matches: [], finishes: {} };
 
   await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
@@ -656,6 +693,7 @@ test("resultWait result save does not rewrite prediction tables after the deadli
   event.predictions.Admin = { teams: ["Team A"], captain: "Team A" };
 
   const result = await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
@@ -678,6 +716,7 @@ test("prediction-only fallback reports partial when structured tables are missin
   event.predictions.Admin = { teams: ["Team A"], captain: "Team A" };
 
   const result = await service.koshien.saveSnapshot({
+    leagueId: "league-id", userId: "user-id",
     state: { approvalPolicy: "half" },
     event,
     participantName: "Admin",
