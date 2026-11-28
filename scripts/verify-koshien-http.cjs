@@ -47,7 +47,7 @@ function sdkFor(uid, options) {
       assert.equal(url.origin, base, "non-local request");
       assert.ok(url.pathname.startsWith("/rest/v1/"), "unexpected SDK endpoint");
       url.pathname = url.pathname.slice("/rest/v1".length);
-      wire.push({ method: init?.method || "GET", path: url.pathname });
+      wire.push({ method: init?.method || "GET", path: url.pathname, query: url.search });
       return fetch(url, { ...init, signal: AbortSignal.timeout(url.pathname === "/rpc/open_koshien_draft" ? 5000 : 10000) });
     } },
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -251,6 +251,73 @@ async function exerciseRosterAndPrediction(a,m,eventId) {
   console.log("PASS: HTTP roster 49, confirmed start rounds, admin open, member prediction, pre-deadline privacy and open roster guard");
 }
 
+async function exerciseScopedWrites(a,m,openEventId) {
+  // All rows are synthetic in the disposable database. Seed already-finalized
+  // rows without calling the unrelated result-finalization workflow; restore
+  // the specific trigger before testing any HTTP operation.
+  const otherClub=randomUUID(), foreignOpen=randomUUID(), legacyOpen=randomUUID();
+  const ownDraft=randomUUID(), ownFinal=randomUUID(), foreignFinal=randomUUID(), legacyFinal=randomUUID();
+  const name="Scoped fixture";
+  fixtureSql(`BEGIN;
+    INSERT INTO public.leagues(id,name,invite_code) VALUES ('${otherClub}','Other fixture','other-fixture');
+    INSERT INTO public.league_members(league_id,user_id,role,membership_status) VALUES ('${otherClub}','${owner}','owner','active');
+    ALTER TABLE public.events DISABLE TRIGGER yoso_guard_admin_result_finalization;
+    INSERT INTO public.events(id,league_id,preset_type,status,rules,name,created_by) VALUES
+      ('${foreignOpen}','${otherClub}','koshien','open','{}','${name}','${owner}'),
+      ('${legacyOpen}','${leagueId}','rankingOdds','open','{}','${name}','${owner}'),
+      ('${ownDraft}','${leagueId}','koshien','draft','{}','${name}','${owner}'),
+      ('${ownFinal}','${leagueId}','koshien','finalized','{"resultFlow":{"status":"finalized"}}','${name}','${owner}'),
+      ('${foreignFinal}','${otherClub}','koshien','finalized','{"resultFlow":{"status":"finalized"}}','${name}','${owner}'),
+      ('${legacyFinal}','${leagueId}','rankingOdds','finalized','{}','${name}','${owner}');
+    ALTER TABLE public.events ENABLE TRIGGER yoso_guard_admin_result_finalization;
+    COMMIT;`);
+  const scope={leagueId,userId:owner};
+  const get=async id=>ok(await a.client.from("events").select("*").eq("id",id).maybeSingle());
+  const protectedIds=[foreignOpen,legacyOpen,ownDraft,foreignFinal,legacyFinal];
+  const before=await Promise.all(protectedIds.map(get));
+  assert.ok(before.every(Boolean),"same owner must have read access to all target rows");
+  for (const id of [foreignOpen,legacyOpen,ownDraft,randomUUID()]) {
+    const start=wire.length;
+    await assert.rejects(a.service.saveSnapshot({...scope,eventId:id,event:{id,templateId:"koshien",name:"wrong",status:"open",config:{teams:[]}}}),/既存甲子園大会/);
+    assert.ok(wire.slice(start).every(x=>x.method==="GET"),"rejected snapshot must not write");
+  }
+  for (const id of [foreignOpen,legacyOpen,ownFinal]) {
+    await assert.rejects(a.service.deleteEvent({...scope,eventId:id,confirmationName:name}),/対象大会だけ/);
+  }
+  for (const id of [foreignFinal,legacyFinal]) {
+    await assert.rejects(a.service.archiveEvent({...scope,eventId:id}),/状態が変更されたか/);
+  }
+  await assert.rejects(m.service.archiveEvent({leagueId,userId:member,eventId:ownFinal}),/状態が変更されたか/);
+  await assert.rejects(m.service.deleteEvent({leagueId,userId:member,eventId:ownDraft,confirmationName:name}),/対象大会だけ/);
+  assert.deepEqual(await Promise.all(protectedIds.map(get)),before);
+  assert.equal((await get(ownFinal)).status,"finalized");
+  // Inspect the actual SDK request, not merely a mock's eq() calls.
+  const scopedWrites=wire.filter(x=>x.path==="/events"&&["PATCH","DELETE"].includes(x.method)&&x.query);
+  assert.ok(scopedWrites.some(x=>x.method==="PATCH"&&new URLSearchParams(x.query).get("id")==="eq."+foreignFinal));
+  assert.ok(scopedWrites.some(x=>x.method==="DELETE"&&new URLSearchParams(x.query).get("id")==="eq."+foreignOpen));
+  for (const req of scopedWrites.filter(x=>[foreignFinal,foreignOpen,legacyOpen,legacyFinal,ownFinal,ownDraft].some(id=>new URLSearchParams(x.query).get("id")==="eq."+id))) {
+    const q=new URLSearchParams(req.query);
+    assert.equal(q.get("league_id"),"eq."+leagueId);
+    assert.equal(q.get("preset_type"),"eq.koshien");
+  }
+  const archived=await a.service.archiveEvent({...scope,eventId:ownFinal});
+  assert.equal(archived.status,"archive");
+  assert.ok((await get(ownFinal)).archived_at);
+  const deleted=await a.service.deleteEvent({...scope,eventId:ownDraft,confirmationName:name});
+  assert.equal(deleted.ok,true);
+  assert.equal(await get(ownDraft),null);
+  // Real SDK snapshot update on the previously opened, complete-roster event.
+  const opened=await get(openEventId);
+  const teams=ok(await a.client.from("teams").select("name").eq("event_id",openEventId));
+  const result=await a.service.saveSnapshot({...scope,eventId:openEventId,participantName:"Fixture admin",
+    event:{id:openEventId,templateId:"koshien",name:"Scoped valid save",status:"open",deadline:opened.prediction_deadline,
+      config:{teams:teams.map(t=>t.name)},predictions:{}}});
+  assert.equal(result.ok,true);
+  assert.equal((await get(openEventId)).name,"Scoped valid save");
+  assert.deepEqual(await Promise.all([foreignOpen,legacyOpen,foreignFinal,legacyFinal].map(get)),[before[0],before[1],before[3],before[4]]);
+  console.log("PASS: scoped SDK save, delete, archive against real PostgREST; wrong club/preset/actor blocked; other rows unchanged");
+}
+
 async function main() {
   const a = service(owner), b = service(owner), m = service(member), o = service(outsider);
   const eventId = randomUUID();
@@ -276,6 +343,7 @@ async function main() {
   }
   console.log("PASS: actual HTTP concurrent INSERT/recovery, strict snapshot, outsider/member denial, signed JWT rejection");
   await exerciseRosterAndPrediction(a,m,eventId);
+  await exerciseScopedWrites(a,m,eventId);
   await actualAuth();
   console.log("Verified " + wire.length + " local SDK HTTP requests (synthetic and GoTrue sessions)");
 }

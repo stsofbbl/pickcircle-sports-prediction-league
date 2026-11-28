@@ -21,6 +21,7 @@ cleanup() {
   sudo -u postgres psql -X -q -d postgres -c "ALTER ROLE yoso_http_authenticator NOLOGIN" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d "$db" < supabase/migrations/20261124040000_protect_finalized_koshien_event_delete.sql
 sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d "$db" < tests/sql/fixtures/koshien-http-fixture.sql
 sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -d "$db" -c "ALTER ROLE yoso_http_authenticator PASSWORD '$password'"
 # Verify old tournament data before and after real HTTP writes.

@@ -41,6 +41,12 @@ CREATE POLICY http_score_select ON public.scores FOR SELECT TO authenticated USI
 CREATE POLICY http_profile_update ON public.profiles FOR UPDATE TO authenticated USING(id=auth.uid()) WITH CHECK(id=auth.uid());
 CREATE POLICY http_players_update ON public.players FOR UPDATE TO authenticated USING(profile_id=auth.uid() OR public.is_league_admin(league_id)) WITH CHECK(profile_id=auth.uid() OR public.is_league_admin(league_id));
 GRANT UPDATE ON public.profiles,public.players TO authenticated;
+-- Production player upsert contract for the snapshot SDK path.
+ALTER TABLE public.players ALTER COLUMN id SET DEFAULT gen_random_uuid();
+ALTER TABLE public.players ADD UNIQUE(league_id,profile_id);
+CREATE POLICY http_players_insert_self ON public.players FOR INSERT TO authenticated
+  WITH CHECK(profile_id=auth.uid() AND public.is_league_member(league_id));
+GRANT INSERT ON public.players TO authenticated;
 GRANT SELECT ON public.leagues,public.league_members,public.profiles TO authenticated;
 GRANT USAGE ON SCHEMA public TO anon;
 -- The authenticator cannot bypass RLS and cannot assume postgres/service_role.
