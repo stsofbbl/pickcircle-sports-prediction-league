@@ -34,7 +34,7 @@ function extract(start,end){const a=app.indexOf(start),b=app.indexOf(end,a+start
 const bundle=read("js/ranking-v1.generated.js");
 assert.equal(bundle.split("const RELEASE_ENABLED=false;").length,2);
 const enabled=bundle.replace("const RELEASE_ENABLED=false;","const RELEASE_ENABLED=true;");
-const hook=extract("function rankingV1HostContext()","function applyTheme(")+extract("function applyOnlineAuthUser(","async function bootstrapSupabaseAuth(")+extract("function invalidateOnlineKoshienScope()","function captureOnlineKoshienScope()");
+const hook=extract("function rankingV1HostContext()","function applyTheme(")+extract("function applyOnlineAuthUser(","async function bootstrapSupabaseAuth(")+extract("function invalidateOnlineKoshienScope(","function captureOnlineKoshienScope()");
 const setup=`
 window.YOSO_SUPABASE_CONFIG={url:location.origin,anonKey:${JSON.stringify(anon)},sdkUrl:"/sdk.js",activeLeagueId:${JSON.stringify(club)},auth:{enabled:true}};
 `;

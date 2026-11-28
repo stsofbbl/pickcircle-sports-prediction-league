@@ -4586,7 +4586,7 @@ function renderTournamentCreateOptions() {
   const onlineKoshienAvailable = Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
   els.newTournamentTemplate.innerHTML = Object.values(templates).map((template) => {
     const onlineSupported = baseTemplateId(template.id) === "koshien" && onlineKoshienAvailable;
-    const label = onlineSupported ? "オンライン対応" : "端末内のみ";
+    const label = onlineSupported ? "オンライン対応" : onlineWorkspaceMode ? "一時保持のみ（再読込で消去）" : "端末内のみ";
     return `<option value="${escapeAttr(template.id)}" ${template.id === currentValue ? "selected" : ""}>${escapeHtml(template.name)}（${label}）</option>`;
   }).join("");
 }
