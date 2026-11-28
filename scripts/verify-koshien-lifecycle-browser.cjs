@@ -19,7 +19,7 @@ const fixture = String.raw`
   const owner = {id:"00000000-0000-4000-8000-000000000001",displayName:"Fixture Owner",clubRole:"owner",role:"admin"};
   const member = {id:"00000000-0000-4000-8000-000000000002",displayName:"Fixture Member",clubRole:"member",role:"member"};
   let user = scenario === "owner" ? owner : member;
-  let offline = false;
+  let offline = false, membershipRevoked = false;
   const poisoned = JSON.stringify({
     leagueName:"LEGACY PRIVATE CLUB",participants:["LEGACY PRIVATE PERSON"],
     activeTemplate:"rankingOdds",activeEventId:"legacy-private",
@@ -91,7 +91,7 @@ const fixture = String.raw`
   window.YosoDataService={
     isAuthEnabled:()=>true,shouldAutoSaveKoshien:()=>true,
     auth:{currentUser:async()=>clone(user),onAuthStateChange:async()=>{}},
-    league:{listMyClubs:async()=>[{league_id:leagueId,league_name:"Fixture club",invite_code:"fixture-club",membership_role:user.clubRole}],listMyJoinRequests:async()=>[],listPendingJoinRequests:async()=>[]},
+    league:{listMyClubs:async()=>membershipRevoked?[]:[{league_id:leagueId,league_name:"Fixture club",invite_code:"fixture-club",membership_role:user.clubRole}],listMyJoinRequests:async()=>{if(membershipRevoked)throw Error("secondary request unavailable");return [];},listPendingJoinRequests:async()=>[]},
     koshien:{
       listEvents:async({leagueId:id})=>{
         if(id!==leagueId) throw Error("wrong catalog scope");
@@ -156,7 +156,8 @@ const fixture = String.raw`
   window.lifecycleFixture={scenario,user,leagueId,priorId,nextId,revision,calls,alerts,errors,events,roster,priorUnchanged:()=>JSON.stringify(prior)===priorBefore,
     cacheUnchanged:()=>localStorage.getItem("yoso-league-state-v1")===poisoned,
     switchOffline(){offline=true;user=scenario==="owner"?member:owner;return clone(user);},
-    restoreOriginal(){user=scenario==="owner"?owner:member;return clone(user);}
+    restoreOriginal(){user=scenario==="owner"?owner:member;return clone(user);},
+    revokeMembership(){membershipRevoked=true;}
   };
 })();
 `;
@@ -277,6 +278,26 @@ const assertions = String.raw`
     await wait(()=>active()===localTitle,"verified actor failed to restore local format");
     check(state.events.every(e=>baseTemplateId(e.templateId)!=="koshien"),"offline restoration included server snapshot");
     check(JSON.parse(localStorage.getItem(localKey)).events.length===1,"local restore duplicated event");
+    // A distinct same-origin browsing context generates a genuine storage event.
+    const peer=document.createElement("iframe");
+    peer.hidden=true;
+    document.body.append(peer);
+    const external=JSON.parse(localStorage.getItem(localKey));
+    external.events[0].name="Fixture updated in peer window";
+    const changed=JSON.stringify(external);
+    peer.contentWindow.localStorage.setItem(localKey,changed);
+    await wait(()=>scopedLocalWorkspace?.conflict===true,"cross-window storage event not received");
+    state.event.name="Fixture stale edit";
+    await confirmSave();
+    check(q("#saveButton").textContent==="別タブで変更・未保存","missing stale write warning");
+    check(localStorage.getItem(localKey)===changed,"stale browser overwrote peer update");
+    peer.remove();
+    f.revokeMembership();
+    await refreshClubPathwayData();
+    check(!state.event.id&&state.events.length===0,"revoked membership retained workspace");
+    check(!isClubAdmin(),"revoked owner retained club admin controls");
+    check(!document.body.textContent.includes("Fixture stale edit"),"revoked workspace is rendered");
+    check(localStorage.getItem(localKey)===changed,"revocation changed local storage");
   }
   check(f.alerts.length===0,"unexpected alert: "+f.alerts.join(";"));
   check(f.errors.length===0,"unexpected browser error: "+f.errors.join(";"));

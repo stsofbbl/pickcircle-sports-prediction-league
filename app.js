@@ -1774,6 +1774,9 @@ function invalidateOnlineKoshienScope({ clearWorkspace = false, clearIdentity = 
   koshienLaterLoadRequest = null;
   koshienPhase2DraftLoading = false;
   koshienLaterPhaseLoading = false;
+  koshienPhase2DraftSaving = false;
+  koshienLaterPhaseSaving = false;
+  koshienLaterAdminSaving = "";
   koshienPhase2DraftView = { available: false, eventId: "", formalDraftExists: false, loadedFromDb: false, status: "not_ready" };
   koshienLaterPhaseView = { eventId: "", loadedFromDb: false, rounds: {}, teams: [] };
   koshienOnlineRankingView = { eventId: "", loadedFromDb: false, members: [], players: [], scores: [] };
@@ -2080,28 +2083,35 @@ async function confirmKoshienPhase2DraftPick() {
     return;
   }
 
-  koshienPhase2DraftSaving = true;
-  const requestEventId = String(state.event.id);
+  const scope = captureOnlineKoshienScope();
+  const requestEventId = String(state.event?.id || "");
+  if (!scope.userId || !scope.leagueId || !requestEventId || koshienPhase2DraftView.eventId !== requestEventId) return;
+  const request = { scope };
+  const current = () => koshienPhase2DraftSaving === request && isOnlineKoshienScopeCurrent(scope);
+  const draftId = koshienPhase2DraftView.draftId;
+  const pickNo = koshienPhase2DraftView.currentTurn.pickNo;
+  koshienPhase2DraftSaving = request;
   koshienPhase2DraftMessage = "指名を保存しています…";
   koshienPhase2DraftMessageKind = "pending";
   render();
   try {
     const response = await window.YosoDataService.koshien.savePhase2DraftPick({
       eventId: requestEventId,
-      draftId: koshienPhase2DraftView.draftId,
+      draftId,
       teamId,
-      pickNo: koshienPhase2DraftView.currentTurn.pickNo,
+      pickNo,
       requestId: createKoshienPhase2RequestId(),
     });
-    if (String(state.event?.id || "") === requestEventId) applyKoshienPhase2DraftResponse(response, requestEventId);
+    if (!current()) return;
+    applyKoshienPhase2DraftResponse(response, requestEventId);
     koshienPhase2DraftMessage = "指名を確定しました。";
     koshienPhase2DraftMessageKind = "success";
   } catch (error) {
+    if (!current()) return;
     console.warn("Koshien phase 2 draft pick failed", error);
     let appliedLatest = false;
     if (error?.latestState) {
       try {
-        if (String(state.event?.id || "") !== requestEventId) throw new Error("active event changed");
         applyKoshienPhase2DraftResponse(error.latestState, requestEventId);
         appliedLatest = true;
       } catch (stateError) {
@@ -2113,14 +2123,17 @@ async function confirmKoshienPhase2DraftPick() {
       const refreshed = await refreshKoshienPhase2DraftState({ renderAfter: false });
       appliedLatest = refreshed.loadedFromDb === true;
     }
+    if (!current()) return;
     const restored = koshienPhase2DraftView.status !== "error" && appliedLatest;
     koshienPhase2DraftMessage = restored
       ? "指名を確定できませんでした。最新状態へ戻しました。"
       : "指名を確定できませんでした。最新状態を取得できず、手番は未確認です。再読込してください。";
     koshienPhase2DraftMessageKind = "error";
   } finally {
-    koshienPhase2DraftSaving = false;
-    render();
+    if (koshienPhase2DraftSaving === request) {
+      koshienPhase2DraftSaving = false;
+      render();
+    }
   }
 }
 
@@ -2136,7 +2149,20 @@ async function saveKoshienLaterChoice(kind) {
     render();
     return;
   }
-  koshienLaterPhaseSaving = true;
+  const scope = captureOnlineKoshienScope();
+  if (!scope.userId || !scope.leagueId || !eventId || koshienLaterPhaseView.eventId !== eventId) return;
+  const request = { scope };
+  const current = () => koshienLaterPhaseSaving === request && isOnlineKoshienScopeCurrent(scope);
+  // render() rebuilds the prediction form, so capture the user's input first.
+  const choice = {
+    revenge: els.eventForm.querySelector("[data-koshien-revenge-team]")?.value || "",
+    zombie: els.eventForm.querySelector("[data-koshien-zombie-team]")?.value || "",
+    scoreA: els.eventForm.querySelector("[data-koshien-phase3-score='a']")?.value,
+    scoreB: els.eventForm.querySelector("[data-koshien-phase3-score='b']")?.value,
+    tiebreakScoreA: els.eventForm.querySelector("[data-koshien-phase3-tiebreak-score='a']")?.value,
+    tiebreakScoreB: els.eventForm.querySelector("[data-koshien-phase3-tiebreak-score='b']")?.value,
+  };
+  koshienLaterPhaseSaving = request;
   koshienLaterPhaseMessage = "保存しています…";
   koshienLaterPhaseMessageKind = "pending";
   render();
@@ -2144,18 +2170,15 @@ async function saveKoshienLaterChoice(kind) {
     let response;
     const requestId = createKoshienPhase2RequestId();
     if (kind === "revenge") {
-      const teamId = els.eventForm.querySelector("[data-koshien-revenge-team]")?.value || "";
+      const teamId = choice.revenge;
       if (!teamId) throw new Error("リベンジ校を選択してください。");
       response = await service.saveRevengePick({ eventId, teamId, version: Number(round.version), requestId });
     } else if (kind === "zombie") {
-      const teamId = els.eventForm.querySelector("[data-koshien-zombie-team]")?.value || "";
+      const teamId = choice.zombie;
       if (!teamId) throw new Error("ゾンビ対象校を選択してください。");
       response = await service.saveZombiePrediction({ eventId, teamId, version: Number(round.version), requestId });
     } else {
-      const scoreA = els.eventForm.querySelector("[data-koshien-phase3-score='a']")?.value;
-      const scoreB = els.eventForm.querySelector("[data-koshien-phase3-score='b']")?.value;
-      const tiebreakScoreA = els.eventForm.querySelector("[data-koshien-phase3-tiebreak-score='a']")?.value;
-      const tiebreakScoreB = els.eventForm.querySelector("[data-koshien-phase3-tiebreak-score='b']")?.value;
+      const { scoreA, scoreB, tiebreakScoreA, tiebreakScoreB } = choice;
       const validation = window.YosoKoshienLaterPhases?.validateFinalScore(scoreA, scoreB);
       const tiebreakValidation = window.YosoKoshienLaterPhases?.validateFinalScore(tiebreakScoreA, tiebreakScoreB);
       if (!validation?.ok) throw new Error(`通常決着用: ${validation?.message || "決勝スコアを確認してください。"}`);
@@ -2170,17 +2193,22 @@ async function saveKoshienLaterChoice(kind) {
         requestId,
       });
     }
+    if (!current()) return;
     applyKoshienLaterPhaseResponse(response, eventId);
     koshienLaterPhaseMessage = "保存しました。";
     koshienLaterPhaseMessageKind = "success";
   } catch (error) {
+    if (!current()) return;
     console.warn("Koshien later phase save failed", error);
     await refreshKoshienLaterPhaseState({ renderAfter: false });
+    if (!current()) return;
     koshienLaterPhaseMessage = error?.message || "保存できませんでした。最新状態へ戻しました。";
     koshienLaterPhaseMessageKind = "error";
   } finally {
-    koshienLaterPhaseSaving = false;
-    render();
+    if (koshienLaterPhaseSaving === request) {
+      koshienLaterPhaseSaving = false;
+      render();
+    }
   }
 }
 
@@ -2196,53 +2224,73 @@ async function prepareKoshienLaterPhase(phase, root) {
     return;
   }
   if (!window.confirm("対象データを生成して準備します。準備しても参加者にはまだ公開されません。続けますか？")) return;
-  koshienLaterAdminSaving = phase;
+  const scope = captureOnlineKoshienScope();
+  if (!scope.userId || !scope.leagueId || !scope.eventId) return;
+  const request = { scope, phase };
+  const current = () => koshienLaterAdminSaving === request && isOnlineKoshienScopeCurrent(scope);
+  koshienLaterAdminSaving = request;
   setKoshienMatchMessage("後半フェーズを準備しています…", "success");
   renderActiveEventManager();
   try {
     const response = await window.YosoDataService.koshien.prepareLaterPhase({
-      eventId: String(state.event.id),
+      eventId: scope.eventId,
       phase,
       opensAt: koshienJapanInputToIso(opensAt),
       deadlineAt: koshienJapanInputToIso(deadlineAt),
       startMode,
       endMode,
     });
-    applyKoshienLaterPhaseResponse(response, state.event.id);
+    if (!current()) return;
+    applyKoshienLaterPhaseResponse(response, scope.eventId);
     await refreshKoshienPhase2DraftState({ renderAfter: false });
+    if (!current()) return;
     await refreshKoshienLaterPhaseState({ renderAfter: false });
+    if (!current()) return;
     setKoshienMatchMessage(`${phase === "best16" ? "ベスト16・リベンジ・フェーズ2" : phase === "zombie" ? "ゾンビ" : "フェーズ3"}を準備しました。`, "success");
   } catch (error) {
+    if (!current()) return;
     console.warn("Koshien later phase preparation failed", error);
     setKoshienMatchMessage(error?.message || "後半フェーズを準備できませんでした。", "error");
   } finally {
-    koshienLaterAdminSaving = "";
+    if (koshienLaterAdminSaving === request) {
+      koshienLaterAdminSaving = "";
+      renderActiveEventManager();
+      render();
+    }
   }
-  renderActiveEventManager();
-  render();
 }
 
 async function setKoshienLaterPhaseStatus(phase, action) {
   if (koshienLaterAdminSaving) return;
-  koshienLaterAdminSaving = phase;
+  const scope = captureOnlineKoshienScope();
+  if (!scope.userId || !scope.leagueId || !scope.eventId) return;
+  const request = { scope, phase };
+  const current = () => koshienLaterAdminSaving === request && isOnlineKoshienScopeCurrent(scope);
+  koshienLaterAdminSaving = request;
   setKoshienMatchMessage(action === "open" ? "後半フェーズを公開しています…" : "後半フェーズを締め切っています…", "success");
   renderActiveEventManager();
   try {
     const response = await window.YosoDataService.koshien.setLaterPhaseStatus({
-      eventId: String(state.event.id), phase, action,
+      eventId: scope.eventId, phase, action,
     });
-    applyKoshienLaterPhaseResponse(response, state.event.id);
+    if (!current()) return;
+    applyKoshienLaterPhaseResponse(response, scope.eventId);
     await refreshKoshienPhase2DraftState({ renderAfter: false });
+    if (!current()) return;
     await refreshKoshienLaterPhaseState({ renderAfter: false });
+    if (!current()) return;
     setKoshienMatchMessage(action === "open" ? "入力を公開しました。" : "入力を締め切りました。", "success");
   } catch (error) {
+    if (!current()) return;
     console.warn("Koshien later phase status change failed", error);
     setKoshienMatchMessage(error?.message || "後半フェーズの状態を変更できませんでした。", "error");
   } finally {
-    koshienLaterAdminSaving = "";
+    if (koshienLaterAdminSaving === request) {
+      koshienLaterAdminSaving = "";
+      renderActiveEventManager();
+      render();
+    }
   }
-  renderActiveEventManager();
-  render();
 }
 
 async function updateKoshienLaterPhaseSchedule(phase, root) {
@@ -2259,30 +2307,40 @@ async function updateKoshienLaterPhaseSchedule(phase, root) {
     renderActiveEventManager();
     return;
   }
-  koshienLaterAdminSaving = phase;
+  const scope = captureOnlineKoshienScope();
+  if (!scope.userId || !scope.leagueId || !scope.eventId) return;
+  const request = { scope, phase };
+  const current = () => koshienLaterAdminSaving === request && isOnlineKoshienScopeCurrent(scope);
+  koshienLaterAdminSaving = request;
   setKoshienMatchMessage("受付日時を変更しています…", "success");
   renderActiveEventManager();
   try {
     const response = await window.YosoDataService.koshien.updateLaterPhaseSchedule({
-      eventId: String(state.event.id),
+      eventId: scope.eventId,
       phase,
       opensAt: round.status === "open" ? round.opens_at : koshienJapanInputToIso(opensInput),
       deadlineAt: koshienJapanInputToIso(deadlineInput),
       startMode: round.status === "open" ? round.start_mode : startMode,
       endMode,
     });
-    applyKoshienLaterPhaseResponse(response, state.event.id);
+    if (!current()) return;
+    applyKoshienLaterPhaseResponse(response, scope.eventId);
     await refreshKoshienPhase2DraftState({ renderAfter: false });
+    if (!current()) return;
     await refreshKoshienLaterPhaseState({ renderAfter: false });
+    if (!current()) return;
     setKoshienMatchMessage("受付日時を変更しました。", "success");
   } catch (error) {
+    if (!current()) return;
     console.warn("Koshien later phase schedule change failed", error);
     setKoshienMatchMessage(error?.message || "受付日時を変更できませんでした。", "error");
   } finally {
-    koshienLaterAdminSaving = "";
+    if (koshienLaterAdminSaving === request) {
+      koshienLaterAdminSaving = "";
+      renderActiveEventManager();
+      render();
+    }
   }
-  renderActiveEventManager();
-  render();
 }
 
 function koshienLoadSkipMessage(reason) {
@@ -2996,10 +3054,19 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
     return;
   }
   let scope = captureOnlineKoshienScope();
+  const pathway = clubPathwayState;
+  const request = {};
+  pathway.refreshRequest = request;
+  const requestCurrent = () => clubPathwayState === pathway && pathway.refreshRequest === request
+    && isOnlineKoshienScopeCurrent(scope);
   try {
     const league = window.YosoDataService?.league;
-    const clubs = await league?.listMyClubs?.() || [];
-    if (!isOnlineKoshienScopeCurrent(scope)) return;
+    if (typeof league?.listMyClubs !== "function") throw new Error("所属クラブを確認できませんでした。");
+    const clubs = await league.listMyClubs();
+    if (!requestCurrent()) return;
+    if (!Array.isArray(clubs) || clubs.some(club => !club?.league_id)) {
+      throw new Error("所属クラブの取得結果を確認できませんでした。");
+    }
     clubPathwayState.myClubs = clubs;
     const selected = activeClubRecord();
     const requestedClub = selected || (!scope.configLeagueId ? clubs[0] : null);
@@ -3008,25 +3075,45 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
       scope = captureOnlineKoshienScope();
     }
     const activeClub = activeClubRecord();
+    // A verified loss of membership is authoritative even if secondary requests fail.
+    // Do not keep the former club's event, pending requests or administrator controls.
+    if (!activeClub && (onlineLeagueId || scope.configLeagueId)) {
+      invalidateOnlineKoshienScope({ clearWorkspace: true });
+      onlineLeagueId = "";
+      onlineKoshienCatalogSequence++;
+      onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
+      clubPathwayState.pendingRequests = [];
+      clubPathwayState.renameName = null;
+      clubPathwayState.renameLeagueId = "";
+      onlineAuthUser = { ...onlineAuthUser, clubRole: "member", role: "member" };
+      scope = captureOnlineKoshienScope();
+      renderAuthState();
+      render();
+    } else if (activeClub && onlineAuthUser) {
+      const clubRole = activeClub.membership_role === "admin" ? "co_owner" : activeClub.membership_role;
+      const role = ["owner", "co_owner"].includes(clubRole) ? "admin" : "member";
+      if (role !== "admin") clubPathwayState.pendingRequests = [];
+      if (onlineAuthUser.clubRole !== (clubRole || "member") || onlineAuthUser.role !== role) {
+        onlineAuthUser = { ...onlineAuthUser, clubRole: clubRole || "member", role };
+        renderAuthState();
+        render();
+      }
+    }
     const [requests, pending] = await Promise.all([
       league?.listMyJoinRequests?.() || [],
       activeClub && ["owner", "co_owner", "admin"].includes(activeClub.membership_role)
         ? league?.listPendingJoinRequests?.({ leagueId: activeClub.league_id }) || []
         : [],
     ]);
-    if (!isOnlineKoshienScopeCurrent(scope)) return;
+    if (!requestCurrent()) return;
     clubPathwayState.myRequests = requests;
     clubPathwayState.pendingRequests = pending;
     if (activeClub) {
       const restored = activateScopedLocalWorkspace(activeClub);
       if (restored) render();
-    } else if (onlineLeagueId) {
-      invalidateOnlineKoshienScope({ clearWorkspace: true });
-      onlineLeagueId = "";
-      render();
     }
   } catch (error) {
-    if (!isOnlineKoshienScopeCurrent(scope)) return;
+    if (!requestCurrent()) return;
     clubPathwayState.message = error?.message || "クラブ情報を取得できませんでした。";
     clubPathwayState.messageKind = "error";
   }
@@ -3036,6 +3123,7 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
 
 async function handleClubPathwayAction(button) {
   const action = button.dataset.clubAction;
+  if (clubPathwayState.busy) return;
   if (action === "show-create" || action === "show-join") {
     clubPathwayState.mode = action === "show-create" ? "create" : "join";
     clubPathwayState.message = "";
@@ -3073,30 +3161,41 @@ async function handleClubPathwayAction(button) {
     clubPathwayState.renameLeagueId = String(activeClubRecord()?.league_id || "");
     clubPathwayState.renameName = readValue("[data-club-rename-name]");
   }
+  const pathway = clubPathwayState;
+  let scope = captureOnlineKoshienScope();
+  const actionCurrent = () => clubPathwayState === pathway && isOnlineKoshienScopeCurrent(scope);
   clubPathwayState.busy = true;
   renderClubPathways();
   try {
     if (action === "create") {
       const club = await league?.createClub?.({ name: readValue("[data-club-create-name]") });
+      if (!actionCurrent()) return;
       if (!club?.league_id) throw new Error("クラブを作成できませんでした。");
       saveActiveClub(club);
+      scope = captureOnlineKoshienScope();
       clubPathwayState.mode = "";
       clubPathwayState.message = `「${club.league_name}」を作成しました。`;
     } else if (action === "search") {
-      clubPathwayState.searchResults = await league?.searchClubs?.({ query: readValue("[data-club-search-query]") }) || [];
+      const results = await league?.searchClubs?.({ query: readValue("[data-club-search-query]") }) || [];
+      if (!actionCurrent()) return;
+      clubPathwayState.searchResults = results;
       clubPathwayState.inviteMatch = null;
       clubPathwayState.message = clubPathwayState.searchResults.length ? "" : "一致するクラブが見つかりませんでした。";
     } else if (action === "lookup-invite") {
-      clubPathwayState.inviteMatch = await league?.lookupClubInvite?.({ inviteCode: readValue("[data-club-invite-code]") });
+      const match = await league?.lookupClubInvite?.({ inviteCode: readValue("[data-club-invite-code]") });
+      if (!actionCurrent()) return;
+      clubPathwayState.inviteMatch = match;
       clubPathwayState.searchResults = [];
       clubPathwayState.message = clubPathwayState.inviteMatch ? "" : "有効な招待コードが見つかりませんでした。";
     } else if (action === "request") {
       const result = await league?.requestJoin?.({ leagueId: button.dataset.clubLeagueId });
+      if (!actionCurrent()) return;
       clubPathwayState.mode = "";
       clubPathwayState.message = result?.league_name ? `「${result.league_name}」へ参加申請しました。` : "参加申請しました。";
     } else if (action === "review") {
       const approved = button.dataset.clubApprove === "true";
       await league?.reviewJoinRequest?.({ requestId: button.dataset.clubRequestId, approve: approved });
+      if (!actionCurrent()) return;
       clubPathwayState.message = approved ? "加入申請を承認しました。" : "加入申請を拒否しました。";
     } else if (action === "rename") {
       const activeClub = activeClubRecord();
@@ -3104,8 +3203,10 @@ async function handleClubPathwayAction(button) {
         leagueId: activeClub?.league_id,
         name: readValue("[data-club-rename-name]"),
       });
-      if (!club?.league_id) throw new Error("クラブ名を変更できませんでした。");
+      if (!actionCurrent()) return;
+      if (!club?.league_id || String(club.league_id) !== scope.leagueId) throw new Error("クラブ名を変更できませんでした。");
       saveActiveClub(club);
+      scope = captureOnlineKoshienScope();
       clubPathwayState.renameLeagueId = String(club.league_id);
       clubPathwayState.renameName = club.league_name;
       clubPathwayState.message = "「" + club.league_name + "」に変更しました。";
@@ -3114,21 +3215,26 @@ async function handleClubPathwayAction(button) {
       const confirmationName = window.prompt("削除するクラブ名を入力してください。大会・予想を含むクラブデータも削除されます。", activeClub?.league_name || "");
       if (confirmationName === null) return;
       await league?.deleteClub?.({ leagueId: activeClub?.league_id, confirmationName });
+      if (!actionCurrent()) return;
       onlineLeagueId = "";
       onlineKoshienEventId = "";
       invalidateOnlineKoshienScope({ clearWorkspace: true });
       window.YosoSupabase?.saveConfig?.({ activeLeagueId: "", inviteCode: "", leagueName: state.leagueName });
+      scope = captureOnlineKoshienScope();
       clubPathwayState.message = "クラブを削除しました。";
     }
     clubPathwayState.messageKind = "";
     await refreshClubPathwayData({ renderAfter: false });
-    if (action === "create") await loadKoshienOnlineState({ force: true });
+    if (action === "create" && actionCurrent()) await loadKoshienOnlineState({ force: true });
   } catch (error) {
+    if (!actionCurrent()) return;
     clubPathwayState.message = error?.message || "クラブ操作に失敗しました。";
     clubPathwayState.messageKind = "error";
   } finally {
-    clubPathwayState.busy = false;
-    render();
+    if (clubPathwayState === pathway) {
+      clubPathwayState.busy = false;
+      render();
+    }
   }
 }
 
@@ -3608,7 +3714,7 @@ function koshienLaterAdminControls(canEditResults) {
             </div>
             ${koshienLaterScheduleFields(item, round, adminState, canEditResults)}
             <div class="koshien-later-card-actions">
-              ${adminState === "unprepared" ? `<button class="primary-button" type="button" data-koshien-later-prepare="${item.phase}" ${actionDisabled ? "disabled" : ""}>${koshienLaterAdminSaving === item.phase ? "準備中…" : "準備する"}</button>` : ""}
+              ${adminState === "unprepared" ? `<button class="primary-button" type="button" data-koshien-later-prepare="${item.phase}" ${actionDisabled ? "disabled" : ""}>${koshienLaterAdminSaving?.phase === item.phase ? "準備中…" : "準備する"}</button>` : ""}
               ${adminState === "before" ? `<button class="primary-button" type="button" data-koshien-later-status="${item.phase}:open" ${actionDisabled ? "disabled" : ""}>受付を開始</button>
                 <button class="ghost-button" type="button" data-koshien-later-schedule="${item.phase}" ${actionDisabled ? "disabled" : ""}>受付日時を変更</button>` : ""}
               ${adminState === "open" ? `<button class="ghost-button" type="button" data-koshien-later-schedule="${item.phase}" ${actionDisabled ? "disabled" : ""}>締切日時を変更</button>

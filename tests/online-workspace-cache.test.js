@@ -29,6 +29,7 @@ function harness(online=true) {
     onlineKoshienCatalogSequence:0,onlineKoshienCatalog:{},onlineKoshienScopeVersion:0,
     pendingKoshienLoadPromise:null,pendingKoshienLoadScope:null,loadedKoshienOnlineEventId:"old-event",loadedKoshienResultRevision:"secret",
     lastKoshienOnlineLoadUserId:"A",koshienPhase2LoadRequest:null,koshienLaterLoadRequest:null,
+    koshienPhase2DraftSaving:false,koshienLaterPhaseSaving:false,koshienLaterAdminSaving:"",
     koshienPhase2DraftLoading:false,koshienLaterPhaseLoading:false,koshienPhase2DraftView:{secret:true},koshienLaterPhaseView:{secret:true},koshienOnlineRankingView:{secret:true},
     koshienPhase2DraftMessage:"",koshienPhase2DraftMessageKind:"",koshienLaterPhaseMessage:"",koshienLaterPhaseMessageKind:"",
     els:{confirmDialog:{open:true,close(){this.open=false;}},koshienLaterPreviewRoot:{textContent:"SECRET PICK"}},
@@ -140,4 +141,70 @@ test("an older tab refuses to overwrite a changed scoped key or recreate a delet
  c.localStorage.getItem=()=>null;
  assert.equal(c.persist(),false);
  assert.equal(h.writes.at(-1)[1],first);
+});
+
+function installClubFunctions(h) {
+ const c=h.ctx;
+ c.activeClubRecord=()=>c.clubPathwayState.myClubs.find(x=>x.league_id===c.onlineLeagueId)||null;
+ c.renderClubPathways=()=>{};
+ c.refreshOnlineKoshienCatalog=async()=>{};
+ vm.runInContext(extract("function captureOnlineKoshienScope()","\nasync function saveKoshienOnlineNow")+extract("async function refreshClubPathwayData(","\nfunction renderDashboard"),c);
+ return c;
+}
+test("confirmed membership loss clears old workspace before failing secondary requests",async()=>{
+ const h=harness(),c=installClubFunctions(h);
+ c.state=JSON.parse(h.legacy);
+ c.onlineAuthUser={id:"A",role:"admin",clubRole:"owner"};
+ c.clubPathwayState.pendingRequests=[{name:"private request"}];
+ c.onlineKoshienCatalog={rows:[{name:"private event"}]};
+ c.window.YosoDataService={league:{listMyClubs:async()=>[],listMyJoinRequests:async()=>{throw Error("offline secondary request");}}};
+ await c.refreshClubPathwayData();
+ assert.equal(c.state.events.length,0);
+ assert.equal(c.onlineLeagueId,"");
+ assert.equal(c.onlineAuthUser.clubRole,"member");
+ assert.equal(c.clubPathwayState.pendingRequests.length,0);
+ assert.equal(c.onlineKoshienCatalog.rows.length,0);
+ assert.equal(c.clubPathwayState.messageKind,"error");
+ assert.ok(!c.rendered.includes("OLD PRIVATE"));
+});
+test("a late same-actor club list cannot restore membership after newer verified revocation",async()=>{
+ const h=harness(),c=installClubFunctions(h);
+ let resolve;const delayed=new Promise(r=>resolve=r);let calls=0;
+ c.state=JSON.parse(h.legacy);
+ c.window.YosoDataService={league:{listMyClubs:()=>++calls===1?delayed:Promise.resolve([])}};
+ const earlier=c.refreshClubPathwayData();
+ await c.refreshClubPathwayData();
+ resolve([{league_id:"club-A",membership_role:"owner"}]);
+ await earlier;
+ assert.equal(c.clubPathwayState.myClubs.length,0);
+ assert.equal(c.state.events.length,0);
+});
+test("a delayed club creation cannot switch the new actor's active club",async()=>{
+ const h=harness(),c=installClubFunctions(h);
+ let resolve;const delayed=new Promise(r=>resolve=r);
+ c.window.YosoDataService={league:{createClub:()=>delayed}};
+ c.saveActiveClub=()=>{throw Error("stale creation switched club");};
+ const button={dataset:{clubAction:"create"},closest:()=>null};
+ const pending=c.handleClubPathwayAction(button);
+ c.applyOnlineAuthUser({id:"B"});
+ const newPathway=c.clubPathwayState;
+ newPathway.busy=true;
+ resolve({league_id:"old-created",league_name:"OLD PRIVATE CLUB"});
+ await pending;
+ assert.equal(c.clubPathwayState,newPathway);
+ assert.equal(newPathway.busy,true);
+ assert.equal(newPathway.message,"");
+ assert.equal(c.onlineLeagueId,"");
+});
+test("a delayed club search does not populate a different account's UI",async()=>{
+ const h=harness(),c=installClubFunctions(h);
+ let resolve;const delayed=new Promise(r=>resolve=r);
+ c.window.YosoDataService={league:{searchClubs:()=>delayed}};
+ const button={dataset:{clubAction:"search"},closest:()=>({querySelector:()=>({value:"old club"})})};
+ const pending=c.handleClubPathwayAction(button);
+ c.applyOnlineAuthUser({id:"B"});
+ resolve([{league_id:"old-result",league_name:"OLD PRIVATE CLUB"}]);
+ await pending;
+ assert.equal(c.clubPathwayState.searchResults.length,0);
+ assert.equal(c.clubPathwayState.message,"");
 });
