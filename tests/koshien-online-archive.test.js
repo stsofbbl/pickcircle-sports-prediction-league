@@ -46,12 +46,15 @@ test("archive rejects unauthenticated and stale or unauthorized updates", async 
 });
 
 function actionHarness({ requestedStatus = "archive", confirmed = true, admin = true,
-  loadedId = "event-1", serverError = false, refreshOk = true } = {}) {
+  loadedId = "event-1", serverError = false, refreshOk = true,
+  userId = "admin", leagueId = "club-1", switchLeagueAfterSave = false } = {}) {
   const calls = [];
   const item = { id: "event-1", name: "大会", status: "finalized", resultFlow: { status: "finalized" } };
   const ctx = {
     state: { activeEventId: "event-1", event: item },
     loadedKoshienOnlineEventId: loadedId,
+    currentAuthUser: () => userId ? { id: userId } : null,
+    onlineLeagueId: leagueId,
     isResultFinalized: (value) => value.resultFlow.status === "finalized",
     isClubAdmin: () => admin,
     alert: (message) => calls.push(["alert", message]),
@@ -59,10 +62,11 @@ function actionHarness({ requestedStatus = "archive", confirmed = true, admin = 
     window: { YosoDataService: { koshien: { archiveEvent: async (args) => {
       calls.push(["server", args, item.status]);
       if (serverError) throw new Error("server rejected");
+      if (switchLeagueAfterSave) ctx.onlineLeagueId = "club-2";
       return { id: item.id, status: "archive" };
     }}}},
-    loadKoshienOnlineState: async ({ force }) => {
-      calls.push(["refresh", force]);
+    loadKoshienOnlineState: async ({ force, exactEventId, expectedLeagueId }) => {
+      calls.push(["refresh", force, exactEventId, expectedLeagueId]);
       return refreshOk ? { ok: true, event: { id: item.id, status: "archive" } } : null;
     },
   };
@@ -79,7 +83,7 @@ test("archive action waits for server and forced reload without local status mut
   await ctx.archiveOnlineKoshienEvent(item, "archive");
   assert.deepEqual(calls.map((x) => x[0]), ["confirm", "server", "refresh"]);
   assert.equal(calls[1][2], "finalized");
-  assert.equal(calls[2][1], true);
+  assert.deepEqual(calls[2], ["refresh", true, "event-1", "club-1"]);
   assert.equal(item.status, "finalized");
 });
 
@@ -98,6 +102,19 @@ test("archive action rejects other transitions, stale event and failed persisten
       assert.ok(calls.some((x) => x[0] === "alert"));
     }
   }
+});
+
+test("archive action fails closed without actor or club and ignores a stale club response", async () => {
+  for (const options of [{ userId: "" }, { leagueId: "" }]) {
+    const { ctx, item, calls } = actionHarness(options);
+    await ctx.archiveOnlineKoshienEvent(item, "archive");
+    assert.deepEqual(calls.map((x) => x[0]), ["confirm", "alert"]);
+    assert.equal(item.status, "finalized");
+  }
+  const { ctx, item, calls } = actionHarness({ switchLeagueAfterSave: true });
+  await ctx.archiveOnlineKoshienEvent(item, "archive");
+  assert.deepEqual(calls.map((x) => x[0]), ["confirm", "server"]);
+  assert.equal(item.status, "finalized");
 });
 
 test("online Koshien status buttons do not offer local-only transitions", () => {
