@@ -155,7 +155,8 @@ const fixture = String.raw`
   addEventListener("unhandledrejection",e=>errors.push(String(e.reason)));
   window.lifecycleFixture={scenario,user,leagueId,priorId,nextId,revision,calls,alerts,errors,events,roster,priorUnchanged:()=>JSON.stringify(prior)===priorBefore,
     cacheUnchanged:()=>localStorage.getItem("yoso-league-state-v1")===poisoned,
-    switchOffline(){offline=true;user=scenario==="owner"?member:owner;return clone(user);}
+    switchOffline(){offline=true;user=scenario==="owner"?member:owner;return clone(user);},
+    restoreOriginal(){user=scenario==="owner"?owner:member;return clone(user);}
   };
 })();
 `;
@@ -237,6 +238,22 @@ const assertions = String.raw`
     check(saved.eventId===f.nextId&&saved.teams.length===8&&saved.captain===f.roster[0].schoolName,"wrong prediction payload");
   }
   check(f.priorUnchanged(),"prior event modified");
+  // Exercise real DOM creation and persistence for a non-server preset.
+  const officialTitle=active(), localTitle="Fixture private local ranking";
+  let localKey="", localRaw="";
+  if(f.scenario==="owner"){
+    await navigate("settings");
+    value("#newTournamentTemplate","rankingOdds");
+    value("#newTournamentName",localTitle);
+    click("#settingsNewEventButton");
+    await wait(()=>active()===localTitle,"local tournament creation failed");
+    localKey=scopedLocalWorkspace?.key;
+    check(Boolean(localKey)&&localKey!=="yoso-league-state-v1","missing actor/club local key");
+    localRaw=localStorage.getItem(localKey);
+    const saved=JSON.parse(localRaw);
+    check(saved.events.length===1&&saved.events[0].name===localTitle&&saved.events[0].templateId==="rankingOdds","wrong local payload");
+    check(!localRaw.includes(officialTitle)&&!localRaw.includes("Fixture School"),"server event leaked into local storage");
+  }
   // Switch identity while offline using the actual host function.
   const oldTitle=active();
   const next=f.switchOffline();
@@ -250,6 +267,17 @@ const assertions = String.raw`
   check(!document.body.textContent.includes(oldTitle),"offline reload revealed previous event");
   check(!document.body.textContent.includes("LEGACY PRIVATE"),"offline reload revealed legacy cache");
   check(f.cacheUnchanged(),"online prediction/render overwrote legacy storage");
+  if(f.scenario==="owner"){
+    await refreshClubPathwayData();
+    check(!document.body.textContent.includes(localTitle),"different actor restored private local event");
+    check(localStorage.getItem(localKey)===localRaw,"different actor changed private local data");
+    applyOnlineAuthUser(f.restoreOriginal());
+    check(!document.body.textContent.includes(localTitle),"local event restored before membership verification");
+    await refreshClubPathwayData();
+    await wait(()=>active()===localTitle,"verified actor failed to restore local format");
+    check(state.events.every(e=>baseTemplateId(e.templateId)!=="koshien"),"offline restoration included server snapshot");
+    check(JSON.parse(localStorage.getItem(localKey)).events.length===1,"local restore duplicated event");
+  }
   check(f.alerts.length===0,"unexpected alert: "+f.alerts.join(";"));
   check(f.errors.length===0,"unexpected browser error: "+f.errors.join(";"));
   document.documentElement.dataset.lifecycleResult="pass";
