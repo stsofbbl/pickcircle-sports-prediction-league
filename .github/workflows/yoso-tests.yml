@@ -25,6 +25,23 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Verify ranking v1 prototype save and visibility in disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql.service
+          sudo -u postgres createdb yoso_ranking_v1_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_ranking_v1_test' EXIT
+          cat tests/sql/ranking-v1-save-visibility-fixture.sql prototypes/ranking-v1/save-visibility.sql prototypes/ranking-v1/finalize.sql prototypes/ranking-v1/membership-integrity.sql tests/sql/fixtures/ranking-v1-production-membership.sql prototypes/ranking-v1/api.sql tests/sql/ranking-v1-save-visibility-checks.sql tests/sql/ranking-v1-finalize-checks.sql tests/sql/ranking-v1-api-checks.sql prototypes/ranking-v1/management.sql tests/sql/ranking-v1-management-checks.sql tests/sql/ranking-v1-membership-checks.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_ranking_v1_test
+          test "$(sudo -u postgres psql -X -At -d yoso_ranking_v1_test -c "SELECT to_regclass('public.events') IS NULL AND NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname IN ('authenticated','anon'))")" = t
+          # The second fixture is committed ONLY in this disposable database
+          # to exercise actual independent PostgreSQL sessions.
+          trap 'sudo -u postgres dropdb --if-exists yoso_ranking_v1_test; sudo -u postgres psql -X -q -d postgres -c "DROP ROLE IF EXISTS authenticated; DROP ROLE IF EXISTS anon;"' EXIT
+          { cat tests/sql/ranking-v1-save-visibility-fixture.sql prototypes/ranking-v1/save-visibility.sql prototypes/ranking-v1/finalize.sql prototypes/ranking-v1/membership-integrity.sql tests/sql/fixtures/ranking-v1-production-membership.sql prototypes/ranking-v1/api.sql prototypes/ranking-v1/management.sql; echo COMMIT\;; } | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_ranking_v1_test
+          node scripts/verify-ranking-v1-score-parity.cjs yoso_ranking_v1_test
+          python3 scripts/verify-ranking-v1-concurrency.py yoso_ranking_v1_test
+          bash scripts/verify-ranking-v1-http.sh yoso_ranking_v1_test
+
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash
         run: |
@@ -63,6 +80,7 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check app.js
+          node scripts/build-ranking-v1-browser.cjs --check
           find js -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Verify hosted connection in isolated Chrome
         shell: bash
@@ -71,6 +89,12 @@ jobs:
           test -n "$CHROME_BIN"
           curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
           node scripts/verify-supabase-browser.cjs "$RUNNER_TEMP/yoso-supabase-sdk.js"
+      - name: Verify isolated ranking panel in real Chrome
+        shell: bash
+        run: |
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME_BIN"
+          node scripts/verify-ranking-v1-browser.cjs
       - name: Check Edge Functions
         run: |
           deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts
