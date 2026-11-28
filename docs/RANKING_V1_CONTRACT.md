@@ -88,3 +88,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### コアRLSと連鎖削除の検証（2026-11-27・未適用）
 `07f23f74` の実CIで、本番同様の scores.player_id ON DELETE CASCADE により、プレイヤー削除が外部キーの前に順位得点保護トリガーの42501で拒否されることを確認した。保護は変更せず、テストはこの正確なエラーメッセージまたはFK拒否を受け入れ、直後に予想・得点・結果・確定receipt・player bindingとプレイヤーIDが不変であることを検査する。6主要テーブルの本番17RLS policyとData APIのSELECT/INSERT/UPDATE/DELETE権限を合成fixtureへ反映（その他のACL・全schema・Auth構成は再現しない）。重複していたfixtureのmember read policyを削除し、anonと除名後の6テーブル直接読取拒否を追加。変更はテスト/文書のみ。本番RLS・採点・履歴保護の実装は変更しない。
+
+### 受付後メタデータ固定候補（隔離試作のみ・正式仕様未承認）
+既存の draft 限定編集とレビューrevisionを維持するため、management guardに受付開始後の大会行のメタデータ変更拒否を追加する候補。statusとサーバー更新時刻を除く行全体を比較し、既存のclose/finalize RPCとそのpermit検証は変更しない。旧競技・甲子園・得点計算には影響させない。直接UPDATEの拒否をopen/resultWait/finalizedのSQLと実SDK HTTPで検証。並行ロック試験はメタデータ変更ではなくSELECT FOR UPDATEで同じ親行ロックを取得する。正式仕様の決定や本番DB適用ではない。

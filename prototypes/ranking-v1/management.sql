@@ -14,7 +14,14 @@ BEGIN
  IF TG_OP='INSERT' THEN action_needed:='create';
  ELSIF OLD.status='draft' THEN
   action_needed:=CASE WHEN NEW.status='open' THEN 'open' ELSE 'edit' END;
- ELSIF OLD.status='open' AND NEW.status='resultWait' THEN action_needed:='close';
+ ELSE
+  -- Candidate for the draft-only editing contract: once open, only the
+  -- existing reviewed lifecycle transitions and server timestamp may change.
+  -- Compare all event metadata, including legacy columns not used by the UI.
+  IF (to_jsonb(NEW) - 'status' - 'updated_at') IS DISTINCT FROM
+     (to_jsonb(OLD) - 'status' - 'updated_at')
+  THEN RAISE EXCEPTION 'ranking opened metadata immutable' USING ERRCODE='42501'; END IF;
+  IF OLD.status='open' AND NEW.status='resultWait' THEN action_needed:='close'; END IF;
  END IF;
  IF action_needed IS NOT NULL AND NOT EXISTS(
   SELECT 1 FROM ranking_v1_private.management_permits p

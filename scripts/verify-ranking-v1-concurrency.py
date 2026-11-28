@@ -81,7 +81,7 @@ try:
     # Exact NOWAIT error, followed by a successful retry with no extra row.
     create_event("a0000000-0000-4000-8000-000000000011", "1 day")
     a=start()
-    send(a,"BEGIN;"+auth(OWNER)+"UPDATE public.events SET name='Locked' WHERE id='a0000000-0000-4000-8000-000000000011' RETURNING id;")
+    send(a,"BEGIN;"+auth(OWNER)+"SELECT id FROM public.events WHERE id='a0000000-0000-4000-8000-000000000011' FOR UPDATE;")
     assert line(a)=="a0000000-0000-4000-8000-000000000011"
     sql(auth(MEMBER)+insert("a0000000-0000-4000-8000-000000000011",MEMBER),error="55P03")
     assert sql("SELECT count(*) FROM public.predictions WHERE event_id='a0000000-0000-4000-8000-000000000011';")=="0"
