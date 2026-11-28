@@ -2384,7 +2384,7 @@ function statusToResultFlow(status) {
 }
 
 function syncActiveEvent() {
-  if (!state.event || (onlineWorkspaceMode && !state.event.id)) return;
+  if (!state.event?.id) return;
   state.events ||= [];
   const index = state.events.findIndex((event) => event.id === state.event.id);
   if (index >= 0) state.events[index] = state.event;
@@ -2945,12 +2945,18 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
     if (renderAfter) renderClubPathways();
     return;
   }
+  let scope = captureOnlineKoshienScope();
   try {
     const league = window.YosoDataService?.league;
     const clubs = await league?.listMyClubs?.() || [];
+    if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.myClubs = clubs;
-    const requestedClub = activeClubRecord() || clubs[0];
-    if (!window.YosoSupabase?.config?.().activeLeagueId && requestedClub?.league_id) saveActiveClub(requestedClub);
+    const selected = activeClubRecord();
+    const requestedClub = selected || (!scope.configLeagueId ? clubs[0] : null);
+    if (requestedClub?.league_id && (!scope.configLeagueId || !scope.leagueId)) {
+      saveActiveClub(requestedClub);
+      scope = captureOnlineKoshienScope();
+    }
     const activeClub = activeClubRecord();
     const [requests, pending] = await Promise.all([
       league?.listMyJoinRequests?.() || [],
@@ -2958,9 +2964,11 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
         ? league?.listPendingJoinRequests?.({ leagueId: activeClub.league_id }) || []
         : [],
     ]);
+    if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.myRequests = requests;
     clubPathwayState.pendingRequests = pending;
   } catch (error) {
+    if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.message = error?.message || "クラブ情報を取得できませんでした。";
     clubPathwayState.messageKind = "error";
   }
@@ -3103,6 +3111,10 @@ function renderDashboard() {
 function renderHomeReadinessPanel({ participant, missingTournamentCount, openEvents }) {
   if (!els.homeReadinessPanel) return;
   const activeEvent = openEvents[0] || state.event;
+  if (!activeEvent?.id) {
+    els.homeReadinessPanel.innerHTML = '<article class="readiness-card"><div><strong>オンライン大会未選択</strong><small>大会一覧から選択してください。</small></div><a class="primary-link" href="#settings">大会一覧へ</a></article>';
+    return;
+  }
   els.homeReadinessPanel.innerHTML = `
     <article class="readiness-card primary-readiness">
       <div>
@@ -3165,7 +3177,7 @@ function renderActiveTournaments() {
 function renderActiveEventManager() {
   if (!els.activeEventManager) return;
   const event = state.event;
-  if (!event || (onlineWorkspaceMode && !event.id)) {
+  if (!event?.id) {
     els.activeEventManager.innerHTML = emptyTournamentMarkup("管理する大会がありません");
     return;
   }
@@ -5235,7 +5247,7 @@ function updatePresetSummary() {
 }
 
 function renderEvent() {
-  if (onlineWorkspaceMode && !state.event?.id) {
+  if (!state.event?.id) {
     els.eventTitle.textContent = "オンライン大会未選択";
     els.eventSubtitle.textContent = "大会一覧から選択して、最新データを読み込んでください。";
     if (els.eventRuleGuide) els.eventRuleGuide.innerHTML = "";
@@ -8226,7 +8238,7 @@ els.koshienLaterPreviewDialog?.addEventListener("close", () => {
 });
 
 async function confirmSave() {
-  if (onlineWorkspaceMode && !state.event?.id) return;
+  if (!state.event?.id) return;
   persist();
   if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
     els.saveButton.textContent = UI_TEXT.save.syncing;

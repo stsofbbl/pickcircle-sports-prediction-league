@@ -18,7 +18,15 @@ const fixture = String.raw`
   if (!["owner","member"].includes(scenario)) throw Error("invalid fixture scenario");
   const owner = {id:"00000000-0000-4000-8000-000000000001",displayName:"Fixture Owner",clubRole:"owner",role:"admin"};
   const member = {id:"00000000-0000-4000-8000-000000000002",displayName:"Fixture Member",clubRole:"member",role:"member"};
-  const user = scenario === "owner" ? owner : member;
+  let user = scenario === "owner" ? owner : member;
+  let offline = false;
+  const poisoned = JSON.stringify({
+    leagueName:"LEGACY PRIVATE CLUB",participants:["LEGACY PRIVATE PERSON"],
+    activeTemplate:"rankingOdds",activeEventId:"legacy-private",
+    events:[{id:"legacy-private",name:"LEGACY PRIVATE EVENT",templateId:"rankingOdds",predictions:{"LEGACY PRIVATE PERSON":{picks:["SECRET PICK"]}}}],
+    connection:{mode:"supabase"}
+  });
+  localStorage.setItem("yoso-league-state-v1",poisoned);
   const leagueId = "00000000-0000-4000-8000-000000000010";
   const priorId = "00000000-0000-4000-8000-000000000011";
   const nextId = "00000000-0000-4000-8000-000000000012";
@@ -92,6 +100,7 @@ const fixture = String.raw`
       },
       loadSnapshot:async({eventId,strictEventId})=>{
         record("load",{eventId,strictEventId:Boolean(strictEventId)});
+        if(offline) throw Error("fixture offline");
         const row=events.get(eventId)||(strictEventId?null:prior);
         return row?snapshot(row):{skipped:true,reason:"not found"};
       },
@@ -144,7 +153,10 @@ const fixture = String.raw`
   window.fetch=async()=>{throw Error("Network disabled in lifecycle fixture");};
   addEventListener("error",e=>errors.push(String(e.message)));
   addEventListener("unhandledrejection",e=>errors.push(String(e.reason)));
-  window.lifecycleFixture={scenario,user,leagueId,priorId,nextId,revision,calls,alerts,errors,events,roster,priorUnchanged:()=>JSON.stringify(prior)===priorBefore};
+  window.lifecycleFixture={scenario,user,leagueId,priorId,nextId,revision,calls,alerts,errors,events,roster,priorUnchanged:()=>JSON.stringify(prior)===priorBefore,
+    cacheUnchanged:()=>localStorage.getItem("yoso-league-state-v1")===poisoned,
+    switchOffline(){offline=true;user=scenario==="owner"?member:owner;return clone(user);}
+  };
 })();
 `;
 const assertions = String.raw`
@@ -164,6 +176,8 @@ const assertions = String.raw`
   };
   const active=()=>q("#activeEventManager .active-manager-summary h3")?.textContent;
   await wait(()=>q("#onlineKoshienCatalog [data-online-koshien-select]")&&active()==="Fixture Prior 2026"&&q("#authScreen")?.hidden===true,"bootstrap/catalog did not finish");
+  check(f.cacheUnchanged(),"startup overwrote legacy cache");
+  check(!document.body.textContent.includes("LEGACY PRIVATE"),"legacy data rendered on startup");
   await navigate("settings");
   if(f.scenario==="owner"){
     value("#newTournamentTemplate","koshien");
@@ -223,6 +237,19 @@ const assertions = String.raw`
     check(saved.eventId===f.nextId&&saved.teams.length===8&&saved.captain===f.roster[0].schoolName,"wrong prediction payload");
   }
   check(f.priorUnchanged(),"prior event modified");
+  // Switch identity while offline using the actual host function.
+  const oldTitle=active();
+  const next=f.switchOffline();
+  applyOnlineAuthUser(next);
+  check(q("#authScreen").hidden===true,"new actor unexpectedly locked");
+  check(!document.body.textContent.includes(oldTitle),"previous event survives identity switch");
+  check(!q("#eventForm").textContent.includes("Fixture School"),"old prediction roster survives identity switch");
+  check(q("#saveButton").disabled,"unloaded event can save");
+  check(await loadKoshienOnlineState({force:true})===null,"offline fixture returned snapshot");
+  render();
+  check(!document.body.textContent.includes(oldTitle),"offline reload revealed previous event");
+  check(!document.body.textContent.includes("LEGACY PRIVATE"),"offline reload revealed legacy cache");
+  check(f.cacheUnchanged(),"online prediction/render overwrote legacy storage");
   check(f.alerts.length===0,"unexpected alert: "+f.alerts.join(";"));
   check(f.errors.length===0,"unexpected browser error: "+f.errors.join(";"));
   document.documentElement.dataset.lifecycleResult="pass";

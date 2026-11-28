@@ -72,3 +72,18 @@ test("online persistence never writes server snapshots or fallback data into leg
  const h=harness();h.ctx.state=JSON.parse(h.legacy);
  assert.equal(h.ctx.saveLocalStateOnly(),false);h.ctx.persist();assert.equal(h.writes.length,0);
 });
+
+test("a delayed old-account club-list response is not applied after identity changes",async()=>{
+ const h=harness();let resolve;
+ const delayed=new Promise(r=>resolve=r);
+ h.ctx.window.YosoDataService={league:{listMyClubs:()=>delayed}};
+ h.ctx.currentAuthUser=()=>h.ctx.onlineAuthUser;
+ h.ctx.renderClubPathways=()=>{};
+ h.ctx.refreshOnlineKoshienCatalog=()=>{throw Error("old scope refreshed catalog");};
+ vm.runInContext(extract("function captureOnlineKoshienScope()","\nasync function saveKoshienOnlineNow")+extract("async function refreshClubPathwayData(","\nasync function handleClubPathwayAction"),h.ctx);
+ const pending=h.ctx.refreshClubPathwayData();
+ h.ctx.applyOnlineAuthUser({id:"B"});
+ resolve([{league_id:"club-A",league_name:"OLD PRIVATE CLUB"}]);
+ await pending;
+ assert.equal(h.ctx.clubPathwayState.myClubs.length,0);
+});
