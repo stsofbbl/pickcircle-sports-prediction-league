@@ -185,3 +185,182 @@ test("manager observer adds JHBF controls only to an editable Koshien event", ()
   while (timers.length) timers.shift()();
   assert.equal(inserted, 1);
 });
+
+function createOfficialFetchRaceHarness() {
+  const start=moduleSource.indexOf("  function currentImportScopeKey()");
+  const end=moduleSource.indexOf("  async function handleApplyStartRounds()",start);
+  const repStart=moduleSource.indexOf("  async function handleApplyRepresentatives()");
+  const repEnd=moduleSource.indexOf("  async function handleAlias(",repStart);
+  assert.ok(start>=0 && end>start && repStart>=0 && repEnd>repStart);
+  const requests=[], saves=[], renders=[];
+  const deferred=(kind,args)=>new Promise((resolve,reject)=>requests.push({kind,args,resolve,reject}));
+  const ctx=vm.createContext({
+    console:{warn(){}}, state:{event:{id:"A",config:{teams:["A"],externalResults:{year:2027}}}},
+    view:{eventId:"",scopeKey:"",generation:0}, onlineLeagueId:"club",
+    currentAuthUser:()=>({id:"admin"}), jstDateValue:()=>"2027-08-01",
+    sourceConfig:()=>({year:2027,fixedSeason:true}), saveLocalStateOnly:()=>saves.push("local"),
+    renderActiveEventManager:()=>renders.push("render"), renderScoresOnly(){},
+    fetchResults:args=>deferred("results",args),
+    fetchRepresentatives:args=>deferred("representatives",args),
+    fetchStartRounds:args=>deferred("rounds",args),
+    loadContext:eventId=>deferred("context",{eventId}),
+    buildImportPreview:rows=>rows, buildRepresentativePreview:rows=>({valid:true,completeCount:rows.length,rows}),
+    buildStartRoundPreview:()=>({valid:true}), getTeams:()=>ctx.state.event.config.teams,
+    representativeTeamMeta:()=>({}), normalizeKoshienEvent(){},
+    window:{confirm:()=>true,YosoDataService:{koshien:{replaceRepresentatives:args=>deferred("save",args)}}},
+  });
+  vm.runInContext(moduleSource.slice(start,end)+moduleSource.slice(repStart,repEnd),ctx);
+  ctx.resetForEvent();
+  const root={querySelector:()=>null};
+  const switchEvent=id=>{ctx.state.event={id,config:{teams:[id],externalResults:{year:2027}}};ctx.resetForEvent();};
+  return {ctx,root,requests,saves,renders,switchEvent};
+}
+test("delayed representative results are discarded after A → B → A switch",async()=>{
+  const h=createOfficialFetchRaceHarness();
+  const pending=h.ctx.handleFetchRepresentatives(h.root);
+  assert.equal(h.requests[0].args.eventId,"A");
+  h.switchEvent("B");h.switchEvent("A");
+  const fresh=h.ctx.handleFetchRepresentatives(h.root);
+  h.requests[0].resolve({rows:[{schoolName:"old"}]});
+  await pending;
+  assert.equal(h.ctx.view.loading,true);
+  assert.equal(h.ctx.view.representativeRows.length,0);
+  h.requests[1].resolve({rows:[{schoolName:"new"}]});
+  await fresh;
+  assert.equal(h.ctx.view.representativeRows[0].schoolName,"new");
+  assert.equal(h.ctx.view.loading,false);
+});
+test("late official results/context and start-round responses cannot populate another event",async()=>{
+  const h=createOfficialFetchRaceHarness();
+  const result=h.ctx.handleFetch(h.root);
+  h.requests[0].resolve({rows:[{name:"A result"}]});
+  // A promise crossing a VM realm may need more than one microtask.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.requests[1].kind,"context");
+  h.switchEvent("B");
+  h.requests[1].resolve({matches:[]});
+  await result;
+  assert.equal(h.ctx.view.rows.length,0);
+  assert.equal(h.ctx.view.context,null);
+  const rounds=h.ctx.handleFetchStartRounds(h.root);
+  assert.equal(h.requests[2].args.eventId,"B");
+  h.switchEvent("C");
+  h.requests[2].resolve({rows:[{name:"B round"}]});
+  h.requests[3].resolve({matches:[]});
+  await rounds;
+  assert.equal(h.ctx.view.startRoundRows.length,0);
+  assert.equal(h.ctx.view.context,null);
+});
+test("late representative save success or failure does not overwrite selected tournament",async()=>{
+  for(const fail of [false,true]){
+    const h=createOfficialFetchRaceHarness();
+    h.ctx.view.representativeRows=[{schoolName:"A school"}];
+    const pending=h.ctx.handleApplyRepresentatives();
+    assert.equal(h.requests[0].args.eventId,"A");
+    h.switchEvent("B");
+    if(fail) h.requests[0].reject(Error("offline")); else h.requests[0].resolve({count:49});
+    await pending;
+    assert.equal(h.ctx.state.event.config.teams[0],"B");
+    assert.equal(h.saves.length,0);
+    assert.equal(h.ctx.view.representativeMessage,"");
+  }
+});
+
+test("persisted season stays authoritative after opening and rejects a mismatched result date",async()=>{
+  const begin=moduleSource.indexOf("  function sourceConfig()");
+  const end=moduleSource.indexOf("  async function client()",begin);
+  const ctx=vm.createContext({state:{event:{season:"2027",status:"open",name:"甲子園2026",config:{externalResults:{year:2026,competitionType:"senbatsu"}}}}});
+  vm.runInContext(moduleSource.slice(begin,end),ctx);
+  for(const status of ["draft","open","resultWait","finalized","archive"]){
+    ctx.state.event.status=status;
+    assert.equal(ctx.sourceConfig().year,2027);
+    assert.equal(ctx.sourceConfig().competitionType,"summer");
+    assert.equal(ctx.sourceConfig().fixedSeason,true);
+  }
+  ctx.state.event.season="";
+  assert.equal(ctx.sourceConfig().year,2026);
+  assert.equal(ctx.sourceConfig().competitionType,"senbatsu");
+  const h=createOfficialFetchRaceHarness();
+  const wrongDate={querySelector:sel=>sel==="[data-jhbf-base-date]"?{value:"2026-08-01"}:null};
+  await h.ctx.handleFetch(wrongDate);
+  assert.equal(h.requests.length,0);
+  assert.equal(h.saves.length,0);
+  assert.match(h.ctx.view.message,/大会年度/);
+});
+
+function createOfficialWriteRaceHarness(){
+  const requests=[],renders=[],saves=[],messages=[];
+  const defer=(kind,args)=>new Promise((resolve,reject)=>requests.push({kind,args,resolve,reject}));
+  const row={status:"ready",externalKey:"fixture-key",roundLabel:"R1",sourceUrl:"fixture",fetchedAt:"2027-08-01",match:{matchNo:1},canonicalPayload:{roundKey:"R1",team1Id:"t1",team2Id:"t2"},rawPayload:{}};
+  const ctx=vm.createContext({
+    console:{warn(){}},state:{event:{id:"A",results:{matches:[{match_id:"R1-1"}]}}},view:{eventId:"",scopeKey:"",generation:0},onlineLeagueId:"club",currentAuthUser:()=>({id:"admin"}),
+    jstDateValue:()=>"2027-08-01",renderActiveEventManager:()=>renders.push("render"),renderScoresOnly(){},saveLocalStateOnly:()=>saves.push(ctx.state.event.id),
+    buildOfficialFirstRoundPreview:()=>({valid:true,rows:[]}),buildOfficialSecondRoundPreview:()=>({valid:true,rows:[]}),
+    loadContext:eventId=>defer("context",{eventId}),loadKoshienOnlineState:args=>defer("reload",args),buildImportPreview:rows=>rows,
+    saveAlias:args=>defer("alias",args),recordImports:(eventId,rows)=>defer("audit",{eventId,rows}),
+    sameCompletedMatch:()=>true,unorderedPairMatches:()=>true,
+    localMatchFor:()=>ctx.state.event.results.matches[0],applyRowToLocalMatch:(row,match)=>{match.changed=true;},
+    applyKoshienMatchFinishes(){},currentKoshienParticipantName:()=>"admin",setKoshienMatchMessage:m=>messages.push(m),
+    saveKoshienOnlineNow:()=>defer("result",{eventId:ctx.state.event.id}),
+    window:{confirm:()=>true,YosoDataService:{koshien:{
+      registerOfficialFirstRoundMatches:args=>defer("r1",args),
+      registerOfficialSecondRoundSlots:args=>defer("r2",args),
+    }}},
+  });
+  const extract=(start,end)=>moduleSource.slice(moduleSource.indexOf(start),moduleSource.indexOf(end,moduleSource.indexOf(start)));
+  vm.runInContext(extract("  function currentImportScopeKey()","  async function handleFetch(root)")+
+    extract("  async function handleApplyOfficialFirstRoundMatches()","  function representativeTeamMeta(")+
+    extract("  async function handleAlias(button)","  function localMatchFor(")+
+    extract("  async function recordPendingImportForMatch(","  function bindControls()"),ctx);
+  const switchEvent=id=>{ctx.state.event={id,results:{matches:[{match_id:"R1-1"}]}};ctx.resetForEvent();};
+  switchEvent("A");
+  return {ctx,requests,renders,saves,messages,row,switchEvent};
+}
+test("R1/R2 save cannot reload another event or mutate its status",async()=>{
+  for(const [handler,count] of [["handleApplyOfficialFirstRoundMatches",17],["handleApplyOfficialSecondRoundSlots",16]]){
+    const h=createOfficialWriteRaceHarness();
+    const pending=h.ctx[handler]();
+    assert.equal(h.requests[0].args.eventId,"A");
+    h.switchEvent("B");
+    h.requests[0].resolve({count});
+    await pending;
+    assert.equal(h.requests.length,1);
+    assert.equal(h.ctx.view.startRoundMessage,"");
+  }
+});
+test("alias and pending-match audit are bound to the captured event across awaits",async()=>{
+  const h=createOfficialWriteRaceHarness();
+  const alias=h.ctx.handleAlias({closest:()=>({querySelector:()=>({value:"t1"})}),dataset:{jhbfSaveAlias:"alias"}});
+  assert.equal(h.requests[0].args.eventId,"A");
+  h.switchEvent("B");h.requests[0].resolve({});
+  await alias;
+  assert.equal(h.requests.length,1);
+  h.ctx.view.pendingImports["R1-1"]=h.row;
+  const scope=h.ctx.captureImportScope();
+  const audit=h.ctx.recordPendingImportForMatch("R1-1",scope);
+  assert.equal(h.requests[1].args.eventId,"B");
+  h.switchEvent("C");
+  h.ctx.view.pendingImports["R1-1"]={externalKey:"C-key"};
+  h.requests[1].resolve({matches:[{matchId:"fixture",status:"completed",roundKey:"R1",matchNo:1}]});
+  const result=await audit;
+  assert.equal(result.reason,"event_scope_changed");
+  assert.equal(h.requests.length,2);
+  assert.equal(h.ctx.view.pendingImports["R1-1"].externalKey,"C-key");
+  const stale=await h.ctx.recordPendingImportForMatch("R1-1",scope);
+  assert.equal(stale.reason,"event_scope_changed");
+});
+test("bulk result success or failure after switch never audits or rolls back a different event",async()=>{
+  for(const failed of [false,true]){
+    const h=createOfficialWriteRaceHarness();
+    h.ctx.view.rows=[h.row];
+    const pending=h.ctx.handleApply({querySelectorAll:()=>[{dataset:{jhbfSelect:"fixture-key"}}]});
+    assert.equal(h.requests[0].kind,"result");
+    h.switchEvent("B");
+    if(failed)h.requests[0].reject(Error("offline"));else h.requests[0].resolve({ok:true});
+    await pending;
+    assert.equal(h.requests.length,1);
+    assert.equal(h.saves.includes("B"),false);
+    assert.equal(h.ctx.state.event.results.matches[0].changed,undefined);
+    assert.equal(h.messages.length,0);
+  }
+});

@@ -210,6 +210,10 @@
                   <span>締切</span>
                   <input id="newTournamentDeadline" type="datetime-local" />
                 </label>
+                <label class="field compact-field">
+                  <span>大会年度（甲子園のみ）</span>
+                  <input id="newTournamentSeason" type="number" min="2020" max="2035" step="1" placeholder="例: 2027" />
+                </label>
                 <div class="create-submit-row">
                   <button id="settingsNewEventButton" class="primary-button" type="button">作成</button>
                 </div>
@@ -224,6 +228,7 @@
             </div>
             <div class="field tournament-manage-field">
               <span>大会一覧</span>
+              <div class="tournament-manage-list" id="onlineKoshienCatalog" hidden></div>
               <div class="tournament-manage-list" id="tournamentManageList"></div>
             </div>
           </section>
@@ -508,6 +513,7 @@
                   <button type="button" data-approval-policy="admin">管理者のみ</button>
                   <button type="button" data-approval-policy="unanimous">全員承認</button>
                 </div>
+                <p class="field-note" id="onlineKoshienApprovalPolicyNote" hidden>オンライン甲子園の新規大会は管理者承認方式です。複数人承認と既存大会の方式変更は準備中です。</p>
                 <div class="settings-action-list">
                   <article class="setting-row">
                     <div>

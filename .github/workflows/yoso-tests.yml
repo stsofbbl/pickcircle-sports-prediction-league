@@ -25,6 +25,8 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Verify immutable Koshien release manifest
+        run: python3 scripts/verify-koshien-release-manifest.py
       - name: Verify phase3 visibility in isolated PostgreSQL
         shell: bash
         run: |
@@ -54,8 +56,35 @@ jobs:
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124000000_admin_finalize_koshien_results.sql
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124040000_protect_finalized_koshien_event_delete.sql
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < supabase/migrations/20261124050000_reopen_archived_koshien_consistently.sql
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-new-event-draft.sql
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-draft-open.sql
           python3 scripts/verify-admin-finalize-concurrency.py yoso_admin_finalize_mvp_test
           sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_admin_finalize_mvp_test < tests/sql/koshien-admin-finalize-checks.sql
+      - name: Verify Koshien draft lifecycle with captured production RPCs
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_koshien_lifecycle_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_koshien_lifecycle_test' EXIT
+          # Roles are cluster-wide and already exist from the previous disposable DB.
+          sed '/^CREATE ROLE anon NOLOGIN;/d; /^CREATE ROLE authenticated NOLOGIN;/d' tests/sql/koshien-admin-finalize-setup.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test
+          for f in tests/sql/fixtures/koshien-production-reopen.sql supabase/migrations/20261124000000_admin_finalize_koshien_results.sql tests/sql/fixtures/koshien-lifecycle-setup.sql tests/sql/fixtures/koshien-lifecycle-production-functions.sql supabase/migrations/20261124100000_guard_koshien_draft_open.sql supabase/migrations/20261124110000_keep_open_koshien_rounds_confirmed.sql supabase/migrations/20261124120000_keep_confirmed_koshien_start_rounds.sql; do
+            sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test < "$f"
+          done
+          python3 scripts/assemble-koshien-integrity-test.py tests/sql/koshien-lifecycle-integration.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test < tests/sql/fixtures/koshien-schedule-production-functions.sql
+          python3 scripts/assemble-koshien-integrity-test.py tests/sql/koshien-schedule-year-integration.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_lifecycle_test
+          python3 scripts/verify-koshien-draft-open-concurrency.py yoso_koshien_lifecycle_test
+          curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          bash scripts/verify-koshien-http.sh yoso_koshien_lifecycle_test
+      - name: Verify production FK graph club-deletion compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u postgres createdb yoso_koshien_delete_graph_test
+          trap 'sudo -u postgres dropdb --if-exists yoso_koshien_delete_graph_test' EXIT
+          sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_delete_graph_test < tests/sql/fixtures/koshien-production-delete-graph.sql
+          python3 scripts/assemble-koshien-integrity-test.py tests/sql/koshien-delete-graph-integration.sql | sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d yoso_koshien_delete_graph_test
       - name: Verify Koshien cron gate in disposable PostgreSQL
         run: python3 scripts/verify-koshien-cron-gate.py
       - name: Run Koshien schedule and automation tests
@@ -69,8 +98,9 @@ jobs:
         run: |
           export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           test -n "$CHROME_BIN"
-          curl --fail --silent --show-error --location --max-time 30 https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js -o "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          test -s "$RUNNER_TEMP/yoso-supabase-sdk.js"
           node scripts/verify-supabase-browser.cjs "$RUNNER_TEMP/yoso-supabase-sdk.js"
+          node scripts/verify-koshien-lifecycle-browser.cjs
       - name: Check Edge Functions
         run: |
           deno check --config supabase/functions/jhbf-results/deno.json supabase/functions/jhbf-results/index.ts

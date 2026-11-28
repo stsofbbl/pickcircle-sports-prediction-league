@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 import { parseJhbfResultsHtml, parseJhbfStartRoundsHtml } from "../_shared/jhbf-parser.mjs";
 import { attachStartsAt, parseJhbfScheduleHtml } from "../_shared/jhbf-schedule-parser.mjs";
+import { jhbfResultSourceUrl, assertSameJhbfResultSource } from "../_shared/jhbf-result-source.mjs";
 import {
   buildCanonicalResultRows,
   dueResultDates,
@@ -52,6 +53,7 @@ async function fetchAllowedHtml(initialUrl: URL, year: number, kind: "tournament
   let current = initialUrl;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     assertAllowedUrl(current, year, kind);
+    if (kind === "results") assertSameJhbfResultSource(current, initialUrl);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let response: Response;
@@ -180,12 +182,8 @@ async function syncSchedule(supabase: DbClient, event: DbRow, reason: string) {
   return { reason, saved: data, warnings };
 }
 
-function compactDate(dateKey: string): string {
-  return dateKey.replaceAll("-", "");
-}
-
 async function fetchCompletedResultsForDate(year: number, dateKey: string) {
-  const url = new URL(`https://www.jhbf.or.jp/sensyuken/${year}/schedule/schedule_${compactDate(dateKey)}.html`);
+  const url = jhbfResultSourceUrl("summer", year, dateKey);
   const fetched = await fetchAllowedHtml(url, year, "results");
   if (fetched.status === 404) return { rows: [], warnings: [`page_not_found:${dateKey}`] };
   const fetchedAt = new Date().toISOString();

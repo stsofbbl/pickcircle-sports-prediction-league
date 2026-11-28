@@ -434,3 +434,11 @@ test("札幌日大1-3仙台育英 is copied into the existing editor without sav
     winner_id: "仙台育英", loser_id: "", status: "scheduled",
   });
 });
+
+test("official start-round apply is disabled after an open event has confirmed the draw",()=>{
+  const now=Date.parse("2027-07-01T00:00:00Z");
+  const event={status:"open",deadline:"2027-08-01T00:00:00Z",config:{startRoundsConfirmed:true}};
+  assert.equal(api.canConfirmStartRounds(event,now),false);
+  assert.equal(api.canConfirmStartRounds({...event,status:"draft"},now),true);
+  assert.equal(api.canConfirmStartRounds({...event,config:{startRoundsConfirmed:false}},now),true);
+});

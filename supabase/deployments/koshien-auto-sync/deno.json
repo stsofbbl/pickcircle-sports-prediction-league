@@ -1,5 +1,5 @@
 {
   "imports": {
-    "https://raw.githubusercontent.com/stsofbbl/pickcircle-sports-prediction-league/d0736692446a4b6b0cb0ed6e5dcb72e4f0e4f8f6/supabase/functions/_shared/koshien-auto-sync-core.mjs": "https://raw.githubusercontent.com/stsofbbl/pickcircle-sports-prediction-league/2510ca0bc737796d6345420ca806d4f81e72cda2/supabase/functions/_shared/koshien-auto-sync-core.mjs"
+    "https://raw.githubusercontent.com/stsofbbl/pickcircle-sports-prediction-league/c6ad7ceff3a53f3855c9dd89e08cff45a93f069f/supabase/functions/_shared/koshien-auto-sync-core.mjs": "https://raw.githubusercontent.com/stsofbbl/pickcircle-sports-prediction-league/2510ca0bc737796d6345420ca806d4f81e72cda2/supabase/functions/_shared/koshien-auto-sync-core.mjs"
   }
 }
