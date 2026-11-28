@@ -179,6 +179,8 @@ const defaultState = {
   events: null,
   event: null,
 };
+// Once this page enters online mode, never write its workspace to the legacy shared key.
+let onlineWorkspaceMode = isSupabaseAuthEnabled();
 let state = loadState();
 
 const els = {
@@ -299,7 +301,23 @@ const els = {
 
 if (els.newEventButton) els.newEventButton.hidden = true;
 
+function createOnlineWorkspaceState() {
+  const base = structuredClone(defaultState);
+  const config = window.YosoSupabase?.config?.() || {};
+  base.leagueName = "クラブ未選択";
+  base.participants = [];
+  base.connection = normalizeConnectionSettings({ mode: "supabase", leagueId: config.inviteCode || "" });
+  base.event = createEvent("worldCup", [], { name: "オンライン大会未選択", status: "draft" });
+  base.event.id = "";
+  base.activeEventId = null;
+  base.events = [];
+  return base;
+}
+
 function loadState() {
+  // Untagged legacy cache cannot prove which account or club owns its data.
+  // Preserve it unchanged for an explicit local-only recovery path, not as an online fallback.
+  if (onlineWorkspaceMode) return createOnlineWorkspaceState();
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return createDefaultState();
@@ -479,7 +497,9 @@ function applyOnlineAuthUser(user) {
   if (previousUserId !== nextUserId) {
     onlineKoshienCatalogSequence++;
     onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
-    invalidateOnlineKoshienScope();
+    invalidateOnlineKoshienScope({ clearWorkspace: true, clearIdentity: true });
+    renderAuthState();
+    render();
   }
 }
 
@@ -694,7 +714,6 @@ function handleConnectionSave() {
       setConnectionMessage(problem);
       return;
     }
-    invalidateOnlineKoshienScope();
     const savedConfig = window.YosoSupabase?.saveConfig?.({
       url: primaryValue,
       anonKey: secondaryValue,
@@ -705,6 +724,10 @@ function handleConnectionSave() {
       auth: { enabled: true },
       sync: { autoSaveKoshien: true },
     });
+    if (isSupabaseAuthEnabled()) {
+      onlineWorkspaceMode = true;
+      invalidateOnlineKoshienScope({ clearWorkspace: true, clearIdentity: true });
+    }
     state.connection = normalizeConnectionSettings({
       ...state.connection,
       mode: "supabase",
@@ -714,8 +737,8 @@ function handleConnectionSave() {
       lastSyncAt: state.connection?.lastSyncAt || "",
     });
     persist();
-    renderConnectionSettings();
     renderAuthState();
+    render();
     setConnectionMessage("Supabase接続設定を保存しました。オンラインログインに切り替わります。ログイン後に甲子園データを保存・読込できます。");
     return;
   }
@@ -817,7 +840,7 @@ async function syncKoshienToSupabaseNow() {
       return;
     }
     state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
-    if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
+    saveLocalStateOnly();
     renderConnectionSettings();
     setConnectionMessage(koshienSaveOutcomeMessage(result, `Supabaseへ保存しました。更新: ${formatDateTime(state.connection.lastSyncAt)}`));
   } catch (error) {
@@ -1666,16 +1689,17 @@ function normalizeResultFlow(flow, participants = state.participants || defaultS
 
 function persist() {
   syncActiveEvent();
-  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
-  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  saveLocalStateOnly();
 }
 
 function saveLocalStateOnly() {
+  if (onlineWorkspaceMode || isSupabaseAuthEnabled()) return false;
   if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return true;
 }
 
-function invalidateOnlineKoshienScope() {
+function invalidateOnlineKoshienScope({ clearWorkspace = false, clearIdentity = false } = {}) {
   onlineKoshienScopeVersion++;
   pendingKoshienLoadPromise = null;
   pendingKoshienLoadScope = null;
@@ -1693,6 +1717,24 @@ function invalidateOnlineKoshienScope() {
   koshienPhase2DraftMessageKind = "";
   koshienLaterPhaseMessage = "";
   koshienLaterPhaseMessageKind = "";
+  if (clearWorkspace) {
+    state = createOnlineWorkspaceState();
+    onlineLeagueMembers = [];
+    onlineLeagueAdminMessage = "";
+    onlineKoshienEventId = "";
+    koshienLaterPreviewState = null;
+    // Dialog content may outlive render(); do not retain the former user's preview.
+    for (const dialog of [els.confirmDialog, els.koshienLaterPreviewDialog]) {
+      if (dialog?.open) dialog.close();
+    }
+    if (els.koshienLaterPreviewRoot) els.koshienLaterPreviewRoot.textContent = "";
+    if (clearIdentity) {
+      onlineLeagueId = "";
+      clubPathwayState = { mode: "", busy: false, message: "", messageKind: "",
+        searchQuery: "", renameName: null, renameLeagueId: "", searchResults: [],
+        inviteMatch: null, myClubs: [], myRequests: [], pendingRequests: [] };
+    }
+  }
 }
 
 function captureOnlineKoshienScope() {
@@ -1827,7 +1869,7 @@ async function loadKoshienOnlineState({ force = false, exactEventId = "", expect
       loadedKoshienOnlineEventId = "";
       loadedKoshienResultRevision = "";
       console.warn("Koshien Supabase load failed", error);
-      setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。ローカル保存を表示しています。");
+      setConnectionMessage("Supabaseから甲子園データを読み込めませんでした。オンライン保存は未確認です。再読込してください。");
       return null;
     } finally {
       if (requestIsCurrent()) {
@@ -2179,11 +2221,11 @@ async function updateKoshienLaterPhaseSchedule(phase, root) {
 }
 
 function koshienLoadSkipMessage(reason) {
-  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期は無効です。ローカル保存を表示しています。";
-  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できないため、ローカル保存を表示しています。";
-  if (reason === "league is not ready") return "参加リーグを確認できませんでした。ローカル保存を表示しています。";
+  if (reason === "autoSaveKoshien is disabled") return "Supabase甲子園同期は無効です。オンライン保存は未確認です。再読込してください。";
+  if (reason === "Supabase session is not ready") return "Supabaseログインが確認できないため、オンライン保存は未確認です。再読込してください。";
+  if (reason === "league is not ready") return "参加リーグを確認できませんでした。オンライン保存は未確認です。再読込してください。";
   if (reason === "koshien event is not found") return "Supabaseに甲子園大会がまだありません。管理者が大会を保存すると別端末で読み込めます。";
-  return "Supabaseから読み込むデータがないため、ローカル保存を表示しています。";
+  return "Supabaseから読み込むデータがないため、オンライン保存は未確認です。再読込してください。";
 }
 
 function resolveKoshienOnlineGameMultiplier(metadata, current) {
@@ -2322,8 +2364,7 @@ function applyKoshienOnlineSnapshot(snapshot) {
     leagueId: snapshot.league?.invite_code || state.connection?.leagueId,
     lastSyncAt: new Date().toISOString(),
   });
-  if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
-  else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  saveLocalStateOnly();
 }
 
 function mergeEventList(events, nextEvent) {
@@ -2343,7 +2384,7 @@ function statusToResultFlow(status) {
 }
 
 function syncActiveEvent() {
-  if (!state.event) return;
+  if (!state.event || (onlineWorkspaceMode && !state.event.id)) return;
   state.events ||= [];
   const index = state.events.findIndex((event) => event.id === state.event.id);
   if (index >= 0) state.events[index] = state.event;
@@ -2868,7 +2909,10 @@ function saveActiveClub(club) {
   const leagueId = String(club?.league_id || "");
   if (!leagueId) return;
   const leagueChanged = String(onlineLeagueId) !== leagueId;
-  if (leagueChanged) globalThis.YosoRankingV1?.invalidate();
+  if (leagueChanged) {
+    globalThis.YosoRankingV1?.invalidate();
+    invalidateOnlineKoshienScope({ clearWorkspace: true });
+  }
   state.leagueName = club.league_name || state.leagueName;
   clubPathwayState.renameLeagueId = leagueId;
   clubPathwayState.renameName = club.league_name || null;
@@ -2887,7 +2931,7 @@ function saveActiveClub(club) {
     onlineKoshienCatalogSequence++;
     onlineKoshienCatalog = { scope: "", rows: [], busy: false, error: "", truncated: false };
     onlineKoshienEventId = "";
-    invalidateOnlineKoshienScope();
+    render();
   }
   lastKoshienOnlineLoadUserId = "";
 }
@@ -3007,7 +3051,7 @@ async function handleClubPathwayAction(button) {
       await league?.deleteClub?.({ leagueId: activeClub?.league_id, confirmationName });
       onlineLeagueId = "";
       onlineKoshienEventId = "";
-      invalidateOnlineKoshienScope();
+      invalidateOnlineKoshienScope({ clearWorkspace: true });
       window.YosoSupabase?.saveConfig?.({ activeLeagueId: "", inviteCode: "", leagueName: state.leagueName });
       clubPathwayState.message = "クラブを削除しました。";
     }
@@ -3121,7 +3165,7 @@ function renderActiveTournaments() {
 function renderActiveEventManager() {
   if (!els.activeEventManager) return;
   const event = state.event;
-  if (!event) {
+  if (!event || (onlineWorkspaceMode && !event.id)) {
     els.activeEventManager.innerHTML = emptyTournamentMarkup("管理する大会がありません");
     return;
   }
@@ -5191,6 +5235,15 @@ function updatePresetSummary() {
 }
 
 function renderEvent() {
+  if (onlineWorkspaceMode && !state.event?.id) {
+    els.eventTitle.textContent = "オンライン大会未選択";
+    els.eventSubtitle.textContent = "大会一覧から選択して、最新データを読み込んでください。";
+    if (els.eventRuleGuide) els.eventRuleGuide.innerHTML = "";
+    els.eventForm.innerHTML = "";
+    if (els.saveButton) els.saveButton.disabled = true;
+    return;
+  }
+  if (els.saveButton) els.saveButton.disabled = false;
   ensureResultFlow();
   const template = templates[state.event.templateId];
   els.eventTitle.textContent = state.event.name;
@@ -8173,23 +8226,24 @@ els.koshienLaterPreviewDialog?.addEventListener("close", () => {
 });
 
 async function confirmSave() {
+  if (onlineWorkspaceMode && !state.event?.id) return;
   persist();
   if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
     els.saveButton.textContent = UI_TEXT.save.syncing;
     try {
       const result = await saveKoshienOnlineNow();
-      els.saveButton.textContent = result?.skipped ? UI_TEXT.save.local : result?.partial ? UI_TEXT.save.partial : UI_TEXT.save.saved;
+      els.saveButton.textContent = result?.skipped ? (onlineWorkspaceMode ? "未保存" : UI_TEXT.save.local) : result?.partial ? UI_TEXT.save.partial : UI_TEXT.save.saved;
     } catch (error) {
       console.warn("Koshien Supabase save failed", error);
-      els.saveButton.textContent = UI_TEXT.save.local;
+      els.saveButton.textContent = onlineWorkspaceMode ? "未保存" : UI_TEXT.save.local;
     }
     setTimeout(() => {
       els.saveButton.textContent = UI_TEXT.save.confirm;
     }, 900);
     return;
   }
-  // This path persists only on this device; never imply shared confirmation.
-  els.saveButton.textContent = UI_TEXT.save.local;
+  // Unsupported online formats remain in memory; never imply durable or shared storage.
+  els.saveButton.textContent = onlineWorkspaceMode ? "一時保持のみ" : UI_TEXT.save.local;
   setTimeout(() => {
     els.saveButton.textContent = UI_TEXT.save.confirm;
   }, 900);
@@ -8197,8 +8251,12 @@ async function confirmSave() {
 
 els.resetButton?.addEventListener("click", () => {
   if (!confirm("ローカル保存データを初期化しますか？")) return;
-  localStorage.removeItem(STORAGE_KEY);
-  state = createDefaultState();
+  if (onlineWorkspaceMode) {
+    invalidateOnlineKoshienScope({ clearWorkspace: true });
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+    state = createDefaultState();
+  }
   render();
 });
 

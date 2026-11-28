@@ -45,6 +45,10 @@ let onlineKoshienScopeVersion=0,pendingKoshienLoadPromise=null,pendingKoshienLoa
 let koshienPhase2LoadRequest=null,koshienLaterLoadRequest=null,koshienPhase2DraftLoading=false,koshienLaterPhaseLoading=false;
 let koshienPhase2DraftView={},koshienLaterPhaseView={},koshienOnlineRankingView={};
 let koshienPhase2DraftMessage="",koshienPhase2DraftMessageKind="",koshienLaterPhaseMessage="",koshienLaterPhaseMessageKind="";
+let state={events:[]},onlineLeagueMembers=[],onlineLeagueAdminMessage="",onlineKoshienEventId="",koshienLaterPreviewState=null,clubPathwayState={};
+function createOnlineWorkspaceState(){return {events:[],participants:[]};}
+function renderAuthState(){}
+function render(){}
 let pageId="active";
 const els={pages:[],navLinks:[]};
 const currentAuthUser=()=>onlineAuthUser,currentPageId=()=>pageId;

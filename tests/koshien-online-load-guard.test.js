@@ -80,6 +80,8 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
     },
     localStorage: { setItem() {} },
     STORAGE_KEY: "yoso-state",
+    onlineWorkspaceMode: true,
+    isSupabaseAuthEnabled: () => true,
     syncActiveEvent() {},
     queueKoshienOnlineSave() {
       saveCalls.push({ automatic: true });
