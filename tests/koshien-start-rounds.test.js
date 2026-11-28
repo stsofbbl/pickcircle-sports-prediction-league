@@ -75,3 +75,22 @@ test("explicit official rounds are not overwritten by the first-15 fallback", ()
   assert.doesNotMatch(dataService, /Number\(current\.startRound\)\s*===\s*2\s*\|\|\s*index\s*<\s*15/);
   assert.doesNotMatch(importer, /Number\(previous\.startRound\)\s*===\s*2\s*\|\|\s*index\s*<\s*15/);
 });
+
+test("manual confirmation blocks changing an open confirmed draw without disabling odds or multiplier save",()=>{
+  const start=app.indexOf("function isOnlineKoshienStartRoundLocked(");
+  const end=app.indexOf("async function saveKoshienStartRounds(",start);
+  assert.ok(start>=0 && end>start);
+  const vm=require("node:vm");
+  const ctx=vm.createContext({isSupabaseAuthEnabled:()=>true,baseTemplateId:id=>id,state:{event:null}});
+  vm.runInContext(app.slice(start,end),ctx);
+  const event={templateId:"koshien",status:"open",config:{startRoundsConfirmed:true}};
+  assert.equal(ctx.isOnlineKoshienStartRoundLocked(event),true);
+  assert.equal(ctx.isOnlineKoshienStartRoundLocked({...event,status:"draft"}),false);
+  assert.equal(ctx.isOnlineKoshienStartRoundLocked({...event,config:{startRoundsConfirmed:false}}),false);
+  assert.equal(ctx.isOnlineKoshienStartRoundLocked({...event,templateId:"worldCup"}),false);
+  ctx.isSupabaseAuthEnabled=()=>false;
+  assert.equal(ctx.isOnlineKoshienStartRoundLocked(event),false);
+  assert.match(app,/if \(isOnlineKoshienStartRoundLocked\(\)\)/);
+  assert.match(app,/data-koshien-start-rounds-save[\s\S]*?canEditSettings && !startRoundsLocked/);
+  assert.match(app,/data-koshien-game-multipliers-save[\s\S]*?canEditSettings && teams.length === 49/);
+});

@@ -166,6 +166,12 @@
             <div class="tournament-list" id="activeTournamentCards"></div>
           </section>
 
+          <section class="settings-section" id="rankingV1Section" hidden aria-label="オンライン順位予想">
+            <div class="settings-section-head"><h3>オンライン順位予想</h3></div>
+            <button id="rankingV1Open" class="primary-button" type="button" hidden>オンライン大会を開く</button>
+            <div id="rankingV1Root" hidden></div>
+          </section>
+
           <section class="settings-section active-event-manager-section" aria-label="選択中の大会管理">
             <div class="settings-section-head">
               <h3>選択中の大会管理</h3>
@@ -210,6 +216,10 @@
                   <span>締切</span>
                   <input id="newTournamentDeadline" type="datetime-local" />
                 </label>
+                <label class="field compact-field">
+                  <span>大会年度（甲子園のみ）</span>
+                  <input id="newTournamentSeason" type="number" min="2020" max="2035" step="1" placeholder="例: 2027" />
+                </label>
                 <div class="create-submit-row">
                   <button id="settingsNewEventButton" class="primary-button" type="button">作成</button>
                 </div>
@@ -224,6 +234,7 @@
             </div>
             <div class="field tournament-manage-field">
               <span>大会一覧</span>
+              <div class="tournament-manage-list" id="onlineKoshienCatalog" hidden></div>
               <div class="tournament-manage-list" id="tournamentManageList"></div>
             </div>
           </section>
@@ -508,6 +519,7 @@
                   <button type="button" data-approval-policy="admin">管理者のみ</button>
                   <button type="button" data-approval-policy="unanimous">全員承認</button>
                 </div>
+                <p class="field-note" id="onlineKoshienApprovalPolicyNote" hidden>オンライン甲子園の新規大会は管理者承認方式です。複数人承認と既存大会の方式変更は準備中です。</p>
                 <div class="settings-action-list">
                   <article class="setting-row">
                     <div>
@@ -601,6 +613,7 @@
     <script src="./js/koshien-later-phases.js?v=20260820-1"></script>
     <script src="./js/koshien-later-phase-preview.js"></script>
     <script src="./js/data-service.js?v=20260820-1"></script>
+    <script src="./js/ranking-v1.generated.js"></script>
     <script src="./app.js?v=20261114-connection-2"></script>
     <script src="./js/koshien-current-stage.js?v=20260723-2"></script>
     <script src="./js/jhbf-result-import.js?v=20260805-1"></script>

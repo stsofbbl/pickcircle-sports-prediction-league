@@ -1,0 +1,229 @@
+{
+  "format": 1,
+  "pr": 58,
+  "base_commit": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+  "source_commit": "596565e0a4f326752ed65e304fe7cb07880a2698",
+  "production_deployment": "dpl_FjsiVGYdCafxUo96d7N6ow72axJ4",
+  "db_apply_order": [
+    {
+      "path": "supabase/migrations/20261124100000_guard_koshien_draft_open.sql",
+      "blob": "f836b7bfdff96fe97dc2fff0119ba7261032ad75"
+    },
+    {
+      "path": "supabase/migrations/20261124110000_keep_open_koshien_rounds_confirmed.sql",
+      "blob": "1f4afdaec8cb2c081f3d63505e4804f30d11ade7"
+    },
+    {
+      "path": "supabase/migrations/20261124120000_keep_confirmed_koshien_start_rounds.sql",
+      "blob": "970c2c6bc974bb531be83a3c6a0852ea974a129f"
+    },
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/draft-open-permit.sql",
+      "blob": "ff96b463c536f57ac8bef3d9477ded01417afe7c"
+    },
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/import-identity.sql",
+      "blob": "4816f9d387c02ff681c4532f47c5da3ccc5707c8"
+    },
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/schedule-year.sql",
+      "blob": "8198494a17efbc15d97a90f805a36edbf005511d"
+    }
+  ],
+  "db_rollback_candidates": [
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/rollback-schedule-year.sql",
+      "blob": "b8ed77787f42967965e206c5cf405bde41023b6d"
+    },
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/rollback-import-identity.sql",
+      "blob": "f32cf097211c21330d5040cc9b6a8786e133182b"
+    },
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/rollback-draft-open-permit.sql",
+      "blob": "daad6b61acec71ac78fc59b7432cfa86f39730ef"
+    }
+  ],
+  "read_only_checks": [
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/preflight.sql",
+      "blob": "f828eec31f90ae0a988493772aec574bf694fb5c"
+    },
+    {
+      "path": "supabase/release-candidates/koshien-official-integrity/data-fingerprint.sql",
+      "blob": "7898bead84b4812502eb571c2fd04994feabbd4c"
+    }
+  ],
+  "edge_functions": [
+    {
+      "slug": "jhbf-schedule",
+      "observed_version": 1,
+      "verify_jwt": true,
+      "candidate": [
+        {
+          "path": "supabase/functions/jhbf-schedule/index.ts",
+          "blob": "f8c058813285f3e184c7faa689cc5b20346654c1"
+        },
+        {
+          "path": "supabase/functions/jhbf-schedule/deno.json",
+          "blob": "f6ca8454c56395e6085268c61831ffffe0326163"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-schedule-parser.mjs",
+          "blob": "ba1f540488ef99cd1f6885e47f5bba1e8190176b"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-event-fetch-guard.mjs",
+          "blob": "72623c4b9040d4c2a3d65a2dba22ba305fa572c0"
+        }
+      ],
+      "rollback": [
+        {
+          "path": "supabase/functions/jhbf-schedule/index.ts",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "92e032c3e8fddf0ffbcd3360fff0df7c0c6d34fe"
+        },
+        {
+          "path": "supabase/functions/jhbf-schedule/deno.json",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "f6ca8454c56395e6085268c61831ffffe0326163"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-schedule-parser.mjs",
+          "ref": "057b17c0e5bd5b050fd648b638775329980b48ff",
+          "blob": "fc3a0c83f818c04b24264238e2944746ed15bfcd"
+        }
+      ]
+    },
+    {
+      "slug": "jhbf-results",
+      "observed_version": 6,
+      "verify_jwt": true,
+      "candidate": [
+        {
+          "path": "supabase/functions/jhbf-results/index.ts",
+          "blob": "2240fd2705c3dcdae8f98b8993cd384fd3a6f4b1"
+        },
+        {
+          "path": "supabase/functions/jhbf-results/deno.json",
+          "blob": "aee0ec940fcdeddd5fb9aaa0fc8664b07fde5691"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-parser.mjs",
+          "blob": "a669fe72ea0c61d2165bbcfa383ca18d7bad4b89"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-event-fetch-guard.mjs",
+          "blob": "72623c4b9040d4c2a3d65a2dba22ba305fa572c0"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-result-source.mjs",
+          "blob": "99ac2eb36a5a968e2c57e09c786d83495a0d4d5a"
+        }
+      ],
+      "rollback": [
+        {
+          "path": "supabase/functions/jhbf-results/index.ts",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "bce4b27addc0514f71d87f00c92724b5271707db"
+        },
+        {
+          "path": "supabase/functions/jhbf-results/deno.json",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "aee0ec940fcdeddd5fb9aaa0fc8664b07fde5691"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-parser.mjs",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "a669fe72ea0c61d2165bbcfa383ca18d7bad4b89"
+        }
+      ]
+    },
+    {
+      "slug": "koshien-auto-sync",
+      "observed_version": 5,
+      "verify_jwt": false,
+      "candidate": [
+        {
+          "path": "supabase/deployments/koshien-auto-sync/index.ts",
+          "blob": "98445659059f5da4b124f53f2f287066e35e4339"
+        },
+        {
+          "path": "supabase/deployments/koshien-auto-sync/deno.json",
+          "blob": "2d13eb68ed05d8115e34000218b4f37c8f42bf51"
+        }
+      ],
+      "immutable_dependencies": [
+        {
+          "path": "supabase/functions/koshien-auto-sync/worker.ts",
+          "ref": "c6ad7ceff3a53f3855c9dd89e08cff45a93f069f",
+          "blob": "fe7eba671fc589b68338eb4828812581373c4307"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-parser.mjs",
+          "ref": "c6ad7ceff3a53f3855c9dd89e08cff45a93f069f",
+          "blob": "a669fe72ea0c61d2165bbcfa383ca18d7bad4b89"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-schedule-parser.mjs",
+          "ref": "c6ad7ceff3a53f3855c9dd89e08cff45a93f069f",
+          "blob": "ba1f540488ef99cd1f6885e47f5bba1e8190176b"
+        },
+        {
+          "path": "supabase/functions/_shared/koshien-auto-sync-core.mjs",
+          "ref": "c6ad7ceff3a53f3855c9dd89e08cff45a93f069f",
+          "blob": "e24dc2ecdec26f5454ff7179fb0caccc37303b34"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-result-source.mjs",
+          "ref": "c6ad7ceff3a53f3855c9dd89e08cff45a93f069f",
+          "blob": "99ac2eb36a5a968e2c57e09c786d83495a0d4d5a"
+        },
+        {
+          "path": "supabase/functions/_shared/koshien-auto-sync-core.mjs",
+          "ref": "2510ca0bc737796d6345420ca806d4f81e72cda2",
+          "blob": "e24dc2ecdec26f5454ff7179fb0caccc37303b34"
+        }
+      ],
+      "rollback": [
+        {
+          "path": "supabase/deployments/koshien-auto-sync/index.ts",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "bb9f33b9d1c82a729e945dfa3b9f895f54598e91"
+        },
+        {
+          "path": "supabase/deployments/koshien-auto-sync/deno.json",
+          "ref": "6db64bf4417aa0a8f34634354eb42e9ea636c6d2",
+          "blob": "5924da3406162a3f88a8b389cc2dee129cfa513f"
+        }
+      ],
+      "rollback_dependencies": [
+        {
+          "path": "supabase/functions/koshien-auto-sync/worker.ts",
+          "ref": "d0736692446a4b6b0cb0ed6e5dcb72e4f0e4f8f6",
+          "blob": "a57a98da5fd6252ed83e8641d876329c119049bb"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-parser.mjs",
+          "ref": "d0736692446a4b6b0cb0ed6e5dcb72e4f0e4f8f6",
+          "blob": "a669fe72ea0c61d2165bbcfa383ca18d7bad4b89"
+        },
+        {
+          "path": "supabase/functions/_shared/jhbf-schedule-parser.mjs",
+          "ref": "d0736692446a4b6b0cb0ed6e5dcb72e4f0e4f8f6",
+          "blob": "36f6864a6bd00f2421cd5b17d9ab7a1319a042fc"
+        },
+        {
+          "path": "supabase/functions/_shared/koshien-auto-sync-core.mjs",
+          "ref": "d0736692446a4b6b0cb0ed6e5dcb72e4f0e4f8f6",
+          "blob": "da25a446bd8fd12db4fa1555c8d6671e24263291"
+        },
+        {
+          "path": "supabase/functions/_shared/koshien-auto-sync-core.mjs",
+          "ref": "2510ca0bc737796d6345420ca806d4f81e72cda2",
+          "blob": "e24dc2ecdec26f5454ff7179fb0caccc37303b34"
+        }
+      ]
+    }
+  ]
+}

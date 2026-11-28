@@ -3,7 +3,11 @@
   "framework": null,
   "git": {
     "deploymentEnabled": {
-      "codex/yoso2-admin-finalize-mvp": false
+      "codex/yoso2-admin-finalize-mvp": false,
+      "codex/yoso2-new-koshien-draft": false,
+      "codex/yoso2-ranking-preset-contract": false,
+      "codex/yoso2-koshien-conflict-http": false,
+      "codex/yoso2-integration-review": false
     }
   },
   "rewrites": [
