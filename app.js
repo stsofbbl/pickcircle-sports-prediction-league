@@ -8179,7 +8179,7 @@ async function archiveOnlineKoshienEvent(item, requestedStatus) {
     const userId = String(currentAuthUser()?.id || "");
     const leagueId = String(onlineLeagueId || "");
     if (!userId || !leagueId) throw new Error("対象クラブとログイン状態を確認してください。");
-    await archive({ eventId: item.id });
+    await archive({ eventId: item.id, leagueId, userId });
     if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId
       || String(state.activeEventId || "") !== String(item.id)) return;
     const snapshot = await loadKoshienOnlineState({ force: true, exactEventId: item.id, expectedLeagueId: leagueId });
@@ -8214,13 +8214,14 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (!confirm(`「${target.name}」を削除しますか？`)) return;
-    if (isSupabaseAuthEnabled() && currentAuthUser() && baseTemplateId(target.templateId) === "koshien") {
+    if (isSupabaseAuthEnabled() && baseTemplateId(target.templateId) === "koshien") {
       try {
         const deleteEvent = window.YosoDataService?.koshien?.deleteEvent;
         if (typeof deleteEvent !== "function") throw new Error("削除機能を読み込めませんでした。再読み込みしてください。");
         const userId = String(currentAuthUser()?.id || "");
         const leagueId = String(onlineLeagueId || "");
-        const result = await deleteEvent({ eventId, confirmationName: target.name });
+        if (!userId || !leagueId) throw new Error("対象クラブとログイン状態を確認してください。");
+        const result = await deleteEvent({ eventId, confirmationName: target.name, leagueId, userId });
         if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId) return;
         if (result?.ok !== true || String(result.eventId) !== String(eventId)) {
           throw new Error("オンライン大会の削除を確認できませんでした。");

@@ -842,20 +842,28 @@
     return data;
   }
 
-  async function deleteKoshienEvent({ eventId, confirmationName } = {}) {
+  async function deleteKoshienEvent({ eventId, confirmationName, leagueId, userId } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     const normalizedName = String(confirmationName || "").trim();
-    if (!normalizedEventId || !normalizedName) throw new Error("削除対象の大会を確認できませんでした。");
+    const requestedLeagueId = String(leagueId || "").trim();
+    const requestedUserId = String(userId || "").trim();
+    if (!normalizedEventId || !normalizedName || !requestedLeagueId || !requestedUserId) {
+      throw new Error("削除対象の大会とクラブを確認できませんでした。");
+    }
     const supabase = await supabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured");
+    const user = await window.YosoSupabase?.sessionUser?.();
+    if (!supabase || String(user?.id || "") !== requestedUserId) throw new Error("オンラインログインが必要です。");
     const { data, error } = await supabase
       .from("events")
       .delete()
       .eq("id", normalizedEventId)
+      .eq("league_id", requestedLeagueId)
+      .eq("preset_type", "koshien")
       .eq("name", normalizedName)
-      .select("id");
+      .select("id,league_id,preset_type");
     if (error) throw error;
-    if (!Array.isArray(data) || data.length !== 1 || String(data[0].id) !== normalizedEventId) {
+    if (!Array.isArray(data) || data.length !== 1 || String(data[0].id) !== normalizedEventId
+      || String(data[0].league_id) !== requestedLeagueId || data[0].preset_type !== "koshien") {
       throw new Error("対象大会だけを削除できませんでした。");
     }
     return { ok: true, eventId: normalizedEventId };
@@ -1276,23 +1284,29 @@
     return data;
   }
 
-  async function archiveKoshienEvent({ eventId } = {}) {
+  async function archiveKoshienEvent({ eventId, leagueId, userId } = {}) {
     const normalizedEventId = String(eventId || "").trim();
-    if (!normalizedEventId) throw new Error("アーカイブする大会を指定してください。");
+    const requestedLeagueId = String(leagueId || "").trim();
+    const requestedUserId = String(userId || "").trim();
+    if (!normalizedEventId || !requestedLeagueId || !requestedUserId) {
+      throw new Error("アーカイブする大会とクラブを指定してください。");
+    }
     const supabase = await supabaseClient();
     const user = await window.YosoSupabase?.sessionUser?.();
-    if (!supabase || !user?.id) throw new Error("オンラインログインが必要です。");
+    if (!supabase || String(user?.id || "") !== requestedUserId) throw new Error("オンラインログインが必要です。");
     const { data, error } = await supabase
       .from("events")
       .update({ status: "archive", archived_at: new Date().toISOString() })
       .eq("id", normalizedEventId)
+      .eq("league_id", requestedLeagueId)
       .eq("preset_type", "koshien")
       .eq("status", "finalized")
       .is("archived_at", null)
-      .select("id, status, archived_at")
+      .select("id,league_id,preset_type,status,archived_at")
       .maybeSingle();
     if (error) throw koshienSaveError("event_archive", error, "大会をアーカイブできませんでした。");
-    if (data?.id !== normalizedEventId || data.status !== "archive" || !data.archived_at) {
+    if (data?.id !== normalizedEventId || String(data.league_id) !== requestedLeagueId
+      || data.preset_type !== "koshien" || data.status !== "archive" || !data.archived_at) {
       throw new Error("大会の状態が変更されたか、アーカイブ権限がありません。再読み込みして確認してください。");
     }
     return data;
