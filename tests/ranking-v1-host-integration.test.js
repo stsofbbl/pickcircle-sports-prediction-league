@@ -13,6 +13,7 @@ function harness(){
   YosoRankingV1:{enabled:false,sync:s=>calls.push(s),invalidate:()=>calls.push("invalidate")},
   lastRenderedPageId:"",onlineLeagueId:"club-a",authRecoveryMode:false,onlineAuthUser:user,
   loadedKoshienOnlineEventId:"old",lastKoshienOnlineLoadUserId:"old",onlineKoshienCatalogSequence:7,
+  invalidateOnlineKoshienScope:()=>{ctx.loadedKoshienOnlineEventId="";ctx.lastKoshienOnlineLoadUserId="";},
   onlineKoshienCatalog:{scope:"old-scope",rows:[{id:"old-event"}],busy:true,error:"old",truncated:true}});
  vm.runInContext(extract("function rankingV1HostContext()","function applyTheme(")+extract("function applyOnlineAuthUser(","async function bootstrapSupabaseAuth("),ctx);
  return {ctx,calls,run:s=>vm.runInContext(s,ctx),select:s=>selected=s,page:p=>page=p,user:u=>user=u};

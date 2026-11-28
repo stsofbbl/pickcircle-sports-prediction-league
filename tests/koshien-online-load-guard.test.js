@@ -14,13 +14,24 @@ function section(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = null, switchLeagueAfterSave = false } = {}) {
+function snapshot(id = "event-id", leagueId = "league-id", userId = "user-id") {
+  return { ok: true, currentUser: { id: userId }, league: { id: leagueId },
+    event: { id, league_id: leagueId, preset_type: "koshien" }, predictions: [], results: null };
+}
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = null, switchLeagueAfterSave = false, phaseRefresh } = {}) {
   const saveCalls = [];
   const context = vm.createContext({
     console: { ...console, warn() {} },
     clearTimeout() {},
     currentKoshienParticipantName: () => "Admin",
-    currentAuthUser: () => ({ id: "user-id" }),
+    currentAuthUser: () => ({ id: context.actorId }), actorId: "user-id",
     baseTemplateId: () => "koshien",
     koshienHasScorableResults: () => false,
     koshienScoreRows: () => [],
@@ -29,9 +40,11 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
     renderConnectionSettings() {},
     refreshKoshienPhase2DraftState: async () => {
       if (refreshError) throw refreshError;
+      if (phaseRefresh) await phaseRefresh();
     },
     refreshKoshienLaterPhaseState: async () => {},
     applyKoshienOnlineSnapshot(snapshot) {
+      context.onlineLeagueId = snapshot.league.id;
       context.onlineKoshienEventId = snapshot.event.id;
       context.state.event = { id: snapshot.event.id, templateId: "koshien", results: { matches: [], finishes: {} } };
       context.state.activeEventId = snapshot.event.id;
@@ -55,13 +68,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
       YosoDataService: {
         shouldAutoSaveKoshien: () => true,
         koshien: {
-          loadSnapshot: loadSnapshot || (async () => ({
-            ok: true,
-            currentUser: { id: "user-id" },
-            event: { id: "event-id" },
-            predictions: [],
-            results: null,
-          })),
+          loadSnapshot: loadSnapshot || (async () => snapshot()),
           saveSnapshot: async (payload) => {
             saveCalls.push(payload);
             if (switchLeagueAfterSave) context.onlineLeagueId = "other-league";
@@ -82,6 +89,13 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
     loadedKoshienOnlineEventId: loadedEventId,
     pendingKoshienSyncTimer: null,
     pendingKoshienLoadPromise: null,
+    pendingKoshienLoadScope: null, onlineKoshienScopeVersion: 0,
+    koshienPhase2LoadRequest: null, koshienLaterLoadRequest: null,
+    koshienPhase2DraftLoading: false, koshienLaterPhaseLoading: false,
+    koshienPhase2DraftView: {}, koshienLaterPhaseView: {}, koshienOnlineRankingView: {},
+    koshienPhase2DraftMessage: "", koshienPhase2DraftMessageKind: "",
+    koshienLaterPhaseMessage: "", koshienLaterPhaseMessageKind: "",
+    loadedKoshienResultRevision: "",
     lastKoshienOnlineLoadUserId: "",
   });
 
@@ -169,4 +183,60 @@ test("a partially failed online refresh cannot leave saving enabled", async () =
 
   assert.equal(result?.skipped, true);
   assert.deepEqual(saveCalls, []);
+});
+
+test("ordinary reload rejects mismatched actor, league, preset and event ownership", async () => {
+  for (const bad of [
+    snapshot("event-id", "other-league"), snapshot("event-id", "league-id", "other-user"),
+    { ...snapshot(), event: { ...snapshot().event, league_id: "other-league" } },
+    { ...snapshot(), event: { ...snapshot().event, preset_type: "ranking_v1" } },
+  ]) {
+    const { context } = createSyncHarness({ loadedEventId: "event-id", loadSnapshot: async () => bad });
+    const old = context.state.event;
+    assert.equal(await context.loadKoshienOnlineState({ force: true }), null);
+    assert.equal(context.state.event, old);
+    assert.equal(context.loadedKoshienOnlineEventId, "");
+  }
+});
+
+test("new scope can load immediately and old response cannot replace it or clear its gate", async () => {
+  const old = deferred(), next = deferred();
+  let calls = 0;
+  const { context } = createSyncHarness({ loadSnapshot: () => (++calls === 1 ? old.promise : next.promise) });
+  const first = context.loadKoshienOnlineState({ force: true });
+  context.invalidateOnlineKoshienScope();
+  context.onlineLeagueId = "other-league";
+  const second = context.loadKoshienOnlineState({ force: true });
+  next.resolve(snapshot("new-event", "other-league"));
+  assert.equal((await second).ok, true);
+  old.resolve(snapshot());
+  assert.equal(await first, null);
+  assert.equal(context.state.event.id, "new-event");
+  assert.equal(context.loadedKoshienOnlineEventId, "new-event");
+  assert.equal(calls, 2);
+});
+
+test("ABA switch invalidates an old response even when actor and club are restored", async () => {
+  const d = deferred();
+  const { context } = createSyncHarness({ loadSnapshot: () => d.promise });
+  const first = context.loadKoshienOnlineState({ force: true });
+  context.invalidateOnlineKoshienScope();
+  context.actorId = "other-user";
+  context.invalidateOnlineKoshienScope();
+  context.actorId = "user-id";
+  d.resolve(snapshot());
+  assert.equal(await first, null);
+  assert.equal(context.loadedKoshienOnlineEventId, "");
+});
+
+test("scope switch during secondary phase refresh never reopens the previous save gate", async () => {
+  const phase = deferred(), entered = deferred();
+  const { context } = createSyncHarness({ phaseRefresh: () => { entered.resolve(); return phase.promise; } });
+  const first = context.loadKoshienOnlineState({ force: true });
+  await entered.promise;
+  context.invalidateOnlineKoshienScope();
+  context.onlineLeagueId = "other-league";
+  phase.resolve();
+  assert.equal(await first, null);
+  assert.equal(context.loadedKoshienOnlineEventId, "");
 });
