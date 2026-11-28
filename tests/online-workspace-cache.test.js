@@ -29,6 +29,7 @@ function harness(online=true) {
     onlineKoshienCatalogSequence:0,onlineKoshienCatalog:{},onlineKoshienScopeVersion:0,
     pendingKoshienLoadPromise:null,pendingKoshienLoadScope:null,loadedKoshienOnlineEventId:"old-event",loadedKoshienResultRevision:"secret",
     lastKoshienOnlineLoadUserId:"A",koshienPhase2LoadRequest:null,koshienLaterLoadRequest:null,
+    koshienPhase2DraftSaving:false,koshienLaterPhaseSaving:false,koshienLaterAdminSaving:"",
     koshienPhase2DraftLoading:false,koshienLaterPhaseLoading:false,koshienPhase2DraftView:{secret:true},koshienLaterPhaseView:{secret:true},koshienOnlineRankingView:{secret:true},
     koshienPhase2DraftMessage:"",koshienPhase2DraftMessageKind:"",koshienLaterPhaseMessage:"",koshienLaterPhaseMessageKind:"",
     els:{confirmDialog:{open:true,close(){this.open=false;}},koshienLaterPreviewRoot:{textContent:"SECRET PICK"}},

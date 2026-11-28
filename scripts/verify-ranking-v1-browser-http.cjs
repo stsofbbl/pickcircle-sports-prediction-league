@@ -42,7 +42,7 @@ const harness=`
 let onlineAuthUser=null,onlineLeagueId=${JSON.stringify(club)},authRecoveryMode=false,lastRenderedPageId="",loadedKoshienOnlineEventId="",lastKoshienOnlineLoadUserId="";
 let onlineKoshienCatalogSequence=0,onlineKoshienCatalog={scope:"",rows:[],busy:false,error:"",truncated:false};
 let onlineKoshienScopeVersion=0,pendingKoshienLoadPromise=null,pendingKoshienLoadScope=null,loadedKoshienResultRevision="",scopedLocalWorkspace=null;
-let koshienPhase2LoadRequest=null,koshienLaterLoadRequest=null,koshienPhase2DraftLoading=false,koshienLaterPhaseLoading=false;
+let koshienPhase2LoadRequest=null,koshienLaterLoadRequest=null,koshienPhase2DraftLoading=false,koshienLaterPhaseLoading=false,koshienPhase2DraftSaving=false,koshienLaterPhaseSaving=false,koshienLaterAdminSaving="";
 let koshienPhase2DraftView={},koshienLaterPhaseView={},koshienOnlineRankingView={};
 let koshienPhase2DraftMessage="",koshienPhase2DraftMessageKind="",koshienLaterPhaseMessage="",koshienLaterPhaseMessageKind="";
 let state={events:[]},onlineLeagueMembers=[],onlineLeagueAdminMessage="",onlineKoshienEventId="",koshienLaterPreviewState=null,clubPathwayState={};

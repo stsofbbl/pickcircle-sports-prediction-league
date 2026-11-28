@@ -94,6 +94,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
     pendingKoshienLoadScope: null, onlineKoshienScopeVersion: 0,
     koshienPhase2LoadRequest: null, koshienLaterLoadRequest: null,
     koshienPhase2DraftLoading: false, koshienLaterPhaseLoading: false,
+    koshienPhase2DraftSaving: false, koshienLaterPhaseSaving: false, koshienLaterAdminSaving: "",
     koshienPhase2DraftView: {}, koshienLaterPhaseView: {}, koshienOnlineRankingView: {},
     koshienPhase2DraftMessage: "", koshienPhase2DraftMessageKind: "",
     koshienLaterPhaseMessage: "", koshienLaterPhaseMessageKind: "",
@@ -308,4 +309,60 @@ test("an older failed phase refresh cannot erase a newer success", async () => {
   assert.equal(ctx.koshienLaterPhaseView.tag, "new");
   assert.equal(ctx.koshienPhase2DraftMessage, "");
   assert.equal(ctx.koshienLaterPhaseMessage, "");
+});
+
+function phaseWriteHarness() {
+  const h=createSyncHarness(), c=h.context, calls=[];
+  c.els={eventForm:{querySelector:()=>({value:"initial-choice"})}};
+  c.createKoshienPhase2RequestId=()=>"fixture-request";
+  c.koshienPhase2DraftView={eventId:"event-id",canViewerPick:true,draftId:"draft-id",currentTurn:{pickNo:1}};
+  c.koshienLaterPhaseView={eventId:"event-id",loadedFromDb:true,rounds:{revenge:{version:3},zombie:{version:3},phase3:{version:3}}};
+  c.applyKoshienPhase2DraftResponse=(response,eventId)=>calls.push(["phase2",response,eventId]);
+  c.applyKoshienLaterPhaseResponse=(response,eventId)=>calls.push(["later",response,eventId]);
+  c.refreshKoshienPhase2DraftState=async()=>{calls.push(["refresh2"]);return {loadedFromDb:true};};
+  c.refreshKoshienLaterPhaseState=async()=>{calls.push(["refreshLater"]);return {loadedFromDb:true};};
+  c.setKoshienMatchMessage=(message,kind)=>calls.push(["message",message,kind]);
+  c.renderActiveEventManager=()=>{};
+  c.koshienJapanInputToIso=x=>x;
+  c.window.confirm=()=>true;
+  c.render=()=>{c.els.eventForm.querySelector=()=>({value:"rerendered-default"});};
+  vm.runInContext(section("async function confirmKoshienPhase2DraftPick()", "\nfunction koshienLoadSkipMessage"), c);
+  return {c,calls};
+}
+test("phase2 old actor conflict cannot apply latest state or unset a new pending pick",async()=>{
+  const {c,calls}=phaseWriteHarness(), first=deferred(), second=deferred();
+  let count=0;
+  c.window.YosoDataService.koshien.savePhase2DraftPick=()=>++count===1?first.promise:second.promise;
+  const a=c.confirmKoshienPhase2DraftPick();
+  c.invalidateOnlineKoshienScope();c.actorId="new-actor";
+  c.koshienPhase2DraftView={eventId:"event-id",canViewerPick:true,draftId:"draft-id",currentTurn:{pickNo:1}};
+  const b=c.confirmKoshienPhase2DraftPick(), newRequest=c.koshienPhase2DraftSaving;
+  first.reject(Object.assign(Error("old conflict"),{latestState:{private:"old"}}));
+  await a;
+  assert.equal(c.koshienPhase2DraftSaving,newRequest);
+  assert.equal(calls.length,0);
+  second.resolve({private:"new"});await b;
+  assert.deepEqual(calls,[["phase2",{private:"new"},"event-id"]]);
+  assert.equal(c.koshienPhase2DraftSaving,false);
+});
+test("later choice sends the selected input before rerender and discards old actor success",async()=>{
+  const {c,calls}=phaseWriteHarness(), wait=deferred();
+  let sent;
+  c.window.YosoDataService.koshien.saveRevengePick=x=>{sent=x;return wait.promise;};
+  const pending=c.saveKoshienLaterChoice("revenge");
+  assert.equal(sent.teamId,"initial-choice");
+  c.invalidateOnlineKoshienScope();c.actorId="new-actor";
+  wait.resolve({private:"old"});await pending;
+  assert.equal(calls.length,0);
+  assert.equal(c.koshienLaterPhaseMessage,"");
+});
+test("later admin response from old actor is not applied or followed by secondary requests",async()=>{
+  const {c,calls}=phaseWriteHarness(), wait=deferred();
+  c.window.YosoDataService.koshien.setLaterPhaseStatus=()=>wait.promise;
+  const pending=c.setKoshienLaterPhaseStatus("zombie","open");
+  c.invalidateOnlineKoshienScope();c.actorId="new-actor";
+  calls.length=0;
+  wait.resolve({private:"old"});await pending;
+  assert.equal(calls.length,0);
+  assert.equal(c.koshienLaterAdminSaving,"");
 });
