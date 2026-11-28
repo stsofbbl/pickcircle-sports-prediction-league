@@ -34,13 +34,17 @@ function extract(start,end){const a=app.indexOf(start),b=app.indexOf(end,a+start
 const bundle=read("js/ranking-v1.generated.js");
 assert.equal(bundle.split("const RELEASE_ENABLED=false;").length,2);
 const enabled=bundle.replace("const RELEASE_ENABLED=false;","const RELEASE_ENABLED=true;");
-const hook=extract("function rankingV1HostContext()","function applyTheme(")+extract("function applyOnlineAuthUser(","async function bootstrapSupabaseAuth(");
+const hook=extract("function rankingV1HostContext()","function applyTheme(")+extract("function applyOnlineAuthUser(","async function bootstrapSupabaseAuth(")+extract("function invalidateOnlineKoshienScope()","function captureOnlineKoshienScope()");
 const setup=`
 window.YOSO_SUPABASE_CONFIG={url:location.origin,anonKey:${JSON.stringify(anon)},sdkUrl:"/sdk.js",activeLeagueId:${JSON.stringify(club)},auth:{enabled:true}};
 `;
 const harness=`
 let onlineAuthUser=null,onlineLeagueId=${JSON.stringify(club)},authRecoveryMode=false,lastRenderedPageId="",loadedKoshienOnlineEventId="",lastKoshienOnlineLoadUserId="";
 let onlineKoshienCatalogSequence=0,onlineKoshienCatalog={scope:"",rows:[],busy:false,error:"",truncated:false};
+let onlineKoshienScopeVersion=0,pendingKoshienLoadPromise=null,pendingKoshienLoadScope=null,loadedKoshienResultRevision="";
+let koshienPhase2LoadRequest=null,koshienLaterLoadRequest=null,koshienPhase2DraftLoading=false,koshienLaterPhaseLoading=false;
+let koshienPhase2DraftView={},koshienLaterPhaseView={},koshienOnlineRankingView={};
+let koshienPhase2DraftMessage="",koshienPhase2DraftMessageKind="",koshienLaterPhaseMessage="",koshienLaterPhaseMessageKind="";
 let pageId="active";
 const els={pages:[],navLinks:[]};
 const currentAuthUser=()=>onlineAuthUser,currentPageId=()=>pageId;
@@ -58,8 +62,9 @@ window.fixture={
   const c=await YosoSupabase.client(),r=await c.auth.signInWithPassword({email,password});
   check(!r.error&&r.data.user.id===uid,"login failed");
   onlineKoshienCatalog={scope:"previous",rows:[{id:"old-event"}],busy:true,error:"old",truncated:true};
-  const sequence=onlineKoshienCatalogSequence;
+  const sequence=onlineKoshienCatalogSequence,scopeVersion=onlineKoshienScopeVersion;
   applyOnlineAuthUser({id:uid,provider:"supabase"});renderPage();
+  check(onlineKoshienScopeVersion===scopeVersion+1&&!loadedKoshienOnlineEventId&&!loadedKoshienResultRevision,"login retained Koshien scope");
   check(onlineKoshienCatalogSequence===sequence+1&&onlineKoshienCatalog.scope===""&&onlineKoshienCatalog.rows.length===0&&!onlineKoshienCatalog.busy&&!onlineKoshienCatalog.error&&!onlineKoshienCatalog.truncated,"login retained old Koshien catalog");
   check(!section.hidden,"entry hidden after login");return true;
  },
