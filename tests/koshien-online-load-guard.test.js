@@ -366,3 +366,56 @@ test("later admin response from old actor is not applied or followed by secondar
   assert.equal(calls.length,0);
   assert.equal(c.koshienLaterAdminSaving,"");
 });
+
+function cancelHarness() {
+  const {context:c}=createSyncHarness();
+  const calls=[];
+  c.state.event.results={matches:[{id:"match-1",status:"completed",round:"R1",match_no:1,winner_id:"team-a"}],marker:"old"};
+  c.koshienMatchById=id=>c.state.event.results.matches.find(m=>m.id===id);
+  c.isCurrentUserAdmin=()=>true;
+  c.hasPreparedKoshienDownstream=()=>false;
+  c.window.confirm=()=>true;
+  c.window.YosoKoshienResults={clearOfficialAdvancement:()=>({ok:true})};
+  c.koshienRoundLabel=x=>x;
+  c.applyKoshienMatchFinishes=()=>{};
+  c.setKoshienMatchMessage=(message,kind)=>{c.state.event.results.matchMessage={text:message,type:kind};calls.push(["message",kind]);};
+  c.renderScoresOnly=()=>{};
+  c.renderActiveEventManager=()=>{};
+  c.refreshKoshienPhase2DraftState=async()=>calls.push(["refresh2"]);
+  c.refreshKoshienLaterPhaseState=async()=>calls.push(["refreshLater"]);
+  const pending=deferred();
+  c.window.YosoDataService.koshien.cancelKoshienMatchResult=payload=>{calls.push(["send",payload.eventId]);return pending.promise;};
+  vm.runInContext(section("async function cancelKoshienMatchResult(matchId)","\nfunction setKoshienMatchMessage"),c);
+  return {c,calls,pending};
+}
+test("failed cancellation from a prior workspace never rolls back the new event",async()=>{
+  const {c,calls,pending}=cancelHarness();
+  const task=c.cancelKoshienMatchResult("match-1");
+  assert.ok(calls.some(x=>x[0]==="send"&&x[1]==="event-id"));
+  c.invalidateOnlineKoshienScope();
+  c.state.event={id:"other",results:{matches:[],marker:"new"}};
+  c.state.activeEventId="other";
+  const newer=c.state.event.results;
+  calls.length=0;
+  pending.reject(Error("old cancellation failure"));await task;
+  assert.equal(c.state.event.results,newer);
+  assert.equal(calls.length,0);
+});
+test("late cancellation success does not refresh a newly selected event",async()=>{
+  const {c,calls,pending}=cancelHarness();
+  const task=c.cancelKoshienMatchResult("match-1");
+  c.invalidateOnlineKoshienScope();c.actorId="other";
+  calls.length=0;pending.resolve({ok:true});await task;
+  assert.equal(calls.length,0);
+});
+test("current cancellation failure rolls back only unchanged optimistic results",async()=>{
+  for (const edit of [false,true]){
+    const {c,pending}=cancelHarness();
+    const task=c.cancelKoshienMatchResult("match-1");
+    if(edit)c.state.event.results.marker="newer local edit";
+    pending.reject(Error("fixture failure"));await task;
+    assert.equal(c.state.event.results.marker,edit?"newer local edit":"old");
+    assert.equal(c.state.event.results.matches[0].status,edit?"scheduled":"completed");
+    assert.equal(c.state.event.results.matchMessage.type,"error");
+  }
+});

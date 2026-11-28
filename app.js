@@ -5809,6 +5809,10 @@ async function cancelKoshienMatchResult(matchId) {
   }
   if (!window.confirm(`${koshienRoundLabel(match.round)} ${match.match_no} の確定結果を取り消しますか？得点とランキングも再計算されます。`)) return;
 
+  const scope = captureOnlineKoshienScope();
+  const targetEvent = state.event;
+  if (!scope.userId || !scope.leagueId || !scope.eventId || targetEvent.id !== scope.eventId) return;
+  const scopeIsCurrent = () => state.event === targetEvent && isOnlineKoshienScopeCurrent(scope);
   const previousResults = JSON.parse(JSON.stringify(state.event.results));
   const clearedAdvancement = window.YosoKoshienResults.clearOfficialAdvancement(state.event.results.matches, match);
   if (!clearedAdvancement.ok) {
@@ -5823,6 +5827,7 @@ async function cancelKoshienMatchResult(matchId) {
   match.status = "scheduled";
   if (match.round === "F") match.metadata = { ...(match.metadata || {}), used_tiebreak: false };
   applyKoshienMatchFinishes();
+  const optimisticResults = JSON.stringify(targetEvent.results);
   if (koshienLaterPhaseView.eventId === String(state.event.id)) koshienLaterPhaseView.official_scores = [];
   saveLocalStateOnly();
   setKoshienMatchMessage("試合結果を取り消し、Supabaseへ反映しています…", "success");
@@ -5830,18 +5835,31 @@ async function cancelKoshienMatchResult(matchId) {
 
   try {
     await window.YosoDataService.koshien.cancelKoshienMatchResult({
-      eventId: String(state.event.id),
+      eventId: scope.eventId,
       roundKey: match.round,
       matchNo: Number(match.match_no),
       resultsPayload: state.event.results,
       scoreRows: koshienScoreRows(),
     });
+    if (!scopeIsCurrent()) return;
     await Promise.all([
       refreshKoshienPhase2DraftState({ renderAfter: false }),
       refreshKoshienLaterPhaseState({ renderAfter: false }),
     ]);
+    if (!scopeIsCurrent()) return;
     setKoshienMatchMessage(`${koshienRoundLabel(match.round)} ${match.match_no} の結果を取り消しました。得点とランキングを再計算しました。`, "success");
   } catch (error) {
+    if (!scopeIsCurrent()) return;
+    // Do not undo newer edits made while the cancellation was in flight.
+    const currentResults = { ...targetEvent.results };
+    const optimistic = JSON.parse(optimisticResults);
+    delete currentResults.matchMessage;
+    delete optimistic.matchMessage;
+    if (JSON.stringify(currentResults) !== JSON.stringify(optimistic)) {
+      setKoshienMatchMessage("取消結果を確認できません。別の編集があるため元に戻さず、再読込してください。", "error");
+      renderScoresOnly();
+      return;
+    }
     state.event.results = previousResults;
     saveLocalStateOnly();
     setKoshienMatchMessage(/dependent completed match exists/i.test(error?.message || "")
