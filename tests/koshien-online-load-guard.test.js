@@ -240,3 +240,70 @@ test("scope switch during secondary phase refresh never reopens the previous sav
   assert.equal(await first, null);
   assert.equal(context.loadedKoshienOnlineEventId, "");
 });
+
+test("a load changing the selected event remains deduplicated during its phase refresh", async () => {
+  const phase = deferred(), entered = deferred();
+  let calls = 0;
+  const { context } = createSyncHarness({
+    loadSnapshot: async () => { calls++; return snapshot("new-event"); },
+    phaseRefresh: () => { entered.resolve(); return phase.promise; },
+  });
+  const first = context.loadKoshienOnlineState({ force: true });
+  await entered.promise;
+  const second = context.loadKoshienOnlineState({ force: true });
+  phase.resolve();
+  assert.equal((await first).ok, true);
+  assert.equal((await second).ok, true);
+  assert.equal(calls, 1);
+  assert.equal(context.loadedKoshienOnlineEventId, "new-event");
+});
+
+function phaseHarness() {
+  const { context } = createSyncHarness();
+  context.window.YosoKoshienPhase2Draft = { buildDraftViewState: value => value };
+  vm.runInContext(section("function applyKoshienPhase2DraftResponse", "\nfunction createKoshienPhase2RequestId"), context);
+  return context;
+}
+
+test("stale phase2 and later-phase responses cannot overwrite the new club state", async () => {
+  const ctx = phaseHarness();
+  const old2 = deferred(), oldLater = deferred();
+  ctx.window.YosoDataService.koshien.loadPhase2DraftState = () => old2.promise;
+  ctx.window.YosoDataService.koshien.loadLaterPhaseState = () => oldLater.promise;
+  const p2 = ctx.refreshKoshienPhase2DraftState({ renderAfter: false });
+  const pl = ctx.refreshKoshienLaterPhaseState({ renderAfter: false });
+  ctx.invalidateOnlineKoshienScope();
+  ctx.onlineLeagueId = "other-league";
+  ctx.state.activeEventId = ctx.state.event.id = "new-event";
+  ctx.window.YosoDataService.koshien.loadPhase2DraftState = async () => ({ tag: "new" });
+  ctx.window.YosoDataService.koshien.loadLaterPhaseState = async () => ({ event_id: "new-event", tag: "new" });
+  await ctx.refreshKoshienPhase2DraftState({ renderAfter: false });
+  await ctx.refreshKoshienLaterPhaseState({ renderAfter: false });
+  old2.resolve({ tag: "old" });
+  oldLater.resolve({ event_id: "event-id", tag: "old" });
+  await Promise.all([p2, pl]);
+  assert.equal(ctx.koshienPhase2DraftView.tag, "new");
+  assert.equal(ctx.koshienLaterPhaseView.tag, "new");
+  assert.equal(ctx.koshienPhase2DraftLoading, false);
+  assert.equal(ctx.koshienLaterPhaseLoading, false);
+});
+
+test("an older failed phase refresh cannot erase a newer success", async () => {
+  const ctx = phaseHarness();
+  const old2 = deferred(), oldLater = deferred();
+  ctx.window.YosoDataService.koshien.loadPhase2DraftState = () => old2.promise;
+  ctx.window.YosoDataService.koshien.loadLaterPhaseState = () => oldLater.promise;
+  const p2 = ctx.refreshKoshienPhase2DraftState({ renderAfter: false });
+  const pl = ctx.refreshKoshienLaterPhaseState({ renderAfter: false });
+  ctx.window.YosoDataService.koshien.loadPhase2DraftState = async () => ({ tag: "new" });
+  ctx.window.YosoDataService.koshien.loadLaterPhaseState = async () => ({ event_id: "event-id", tag: "new" });
+  await ctx.refreshKoshienPhase2DraftState({ renderAfter: false });
+  await ctx.refreshKoshienLaterPhaseState({ renderAfter: false });
+  old2.reject(Error("old failure"));
+  oldLater.reject(Error("old failure"));
+  await Promise.all([p2, pl]);
+  assert.equal(ctx.koshienPhase2DraftView.tag, "new");
+  assert.equal(ctx.koshienLaterPhaseView.tag, "new");
+  assert.equal(ctx.koshienPhase2DraftMessage, "");
+  assert.equal(ctx.koshienLaterPhaseMessage, "");
+});

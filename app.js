@@ -1762,7 +1762,7 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
 
 async function loadKoshienOnlineState({ force = false, exactEventId = "", expectedLeagueId = "" } = {}) {
   if (!window.YosoDataService?.shouldAutoSaveKoshien?.() || !window.YosoDataService?.koshien?.loadSnapshot) return null;
-  const scope = captureOnlineKoshienScope();
+  let scope = captureOnlineKoshienScope();
   if (!scope.userId) return null;
   const requestedLeagueId = String(expectedLeagueId || scope.configLeagueId || scope.leagueId || "");
   if ((scope.leagueId && requestedLeagueId !== scope.leagueId)
@@ -1772,13 +1772,16 @@ async function loadKoshienOnlineState({ force = false, exactEventId = "", expect
   if (!force && lastKoshienOnlineLoadUserId === scope.userId && selectedEventId
     && loadedKoshienOnlineEventId === selectedEventId) return null;
   if (pendingKoshienLoadPromise && pendingKoshienLoadScope
-    && isOnlineKoshienScopeCurrent(pendingKoshienLoadScope)) {
+    && isOnlineKoshienScopeCurrent(pendingKoshienLoadScope.scope)) {
     return exactEventId ? null : pendingKoshienLoadPromise;
   }
+  onlineKoshienScopeVersion++;
+  scope = captureOnlineKoshienScope();
   loadedKoshienOnlineEventId = "";
   loadedKoshienResultRevision = "";
-  pendingKoshienLoadScope = scope;
-  const requestIsCurrent = () => pendingKoshienLoadScope === scope;
+  const request = { scope };
+  pendingKoshienLoadScope = request;
+  const requestIsCurrent = () => pendingKoshienLoadScope === request;
   setConnectionMessage("Supabaseから甲子園データを読み込んでいます...");
   pendingKoshienLoadPromise = (async () => {
     let appliedScope = scope;
@@ -1801,6 +1804,7 @@ async function loadKoshienOnlineState({ force = false, exactEventId = "", expect
         }
         applyKoshienOnlineSnapshot(snapshot);
         appliedScope = captureOnlineKoshienScope();
+        request.scope = appliedScope;
         // Applying a legitimate snapshot can select the initial club or a different event.
         // Subsequent phase responses must stay in that new scope.
         await Promise.all([
