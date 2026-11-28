@@ -15,7 +15,7 @@ function harness({ autoSave = true, templateId = "fightCard", saved = {}, throws
   const ctx = vm.createContext({
     window: { YosoDataService: { shouldAutoSaveKoshien: () => autoSave }, YosoKoshienResults: { OFFICIAL_PHASE1_POINTS: {} } },
     els: { newTournamentTemplate: { value: templateId, innerHTML: "" }, saveButton: { textContent: "" } },
-    onlineWorkspaceMode: online,
+    onlineWorkspaceMode: online, scopedLocalWorkspace: null,
     state: { activeTemplate: templateId, event: { id: "fixture-event", templateId } },
     escapeHtml: String, escapeAttr: String,
     persist: () => { calls.push("local"); return localSaved; },
@@ -79,4 +79,12 @@ test("online Koshien failures are not shown as local saves",async()=>{
     await ctx.confirmSave();
     assert.equal(ctx.els.saveButton.textContent,"未保存");
   }
+});
+
+test("known conflicting local workspace keeps an unsaved warning",async()=>{
+ const {ctx,timers}=harness({online:true,localSaved:false});
+ ctx.scopedLocalWorkspace={conflict:true};
+ await ctx.confirmSave();
+ assert.equal(ctx.els.saveButton.textContent,"別タブで変更・未保存");
+ assert.equal(timers.length,0);
 });

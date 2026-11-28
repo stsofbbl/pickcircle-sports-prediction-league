@@ -120,3 +120,24 @@ test("corrupt scoped storage is not overwritten",()=>{
  assert.equal(c.persist(),false);
  assert.equal(h.writes.length,0);
 });
+
+test("an older tab refuses to overwrite a changed scoped key or recreate a deleted key",()=>{
+ const h=harness();const c=h.ctx;
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-A"}),true);
+ const local={id:"local-1",templateId:"rankingOdds",predictions:{}};
+ c.scopedLocalWorkspace.ids.add(local.id);c.state.events=[local];c.state.event=local;
+ assert.equal(c.persist(),true);
+ const [key,first]=h.writes.at(-1);const count=h.writes.length;
+ assert.equal(c.persist(),true);assert.equal(h.writes.length,count);
+ const external=JSON.stringify({...JSON.parse(first),events:[{...local,name:"other tab"}]});
+ h.writes.push([key,external]);local.name="stale tab";
+ assert.equal(c.persist(),false);assert.equal(c.scopedLocalWorkspace.conflict,true);
+ assert.equal(h.writes.at(-1)[1],external);
+ h.writes.push([key,first]);assert.equal(c.persist(),false);
+ assert.equal(h.writes.at(-1)[1],first);
+ c.invalidateOnlineKoshienScope({clearWorkspace:true});
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-A"}),true);
+ c.localStorage.getItem=()=>null;
+ assert.equal(c.persist(),false);
+ assert.equal(h.writes.at(-1)[1],first);
+});
