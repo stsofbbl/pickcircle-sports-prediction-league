@@ -1713,7 +1713,7 @@ function activateScopedLocalWorkspace(club) {
     const existing = new Set((state.events || []).map(event => event.id));
     if (data.events.some(event => existing.has(event.id))) return false;
     const restored = data.events.map(event => normalizeEvent(event, state));
-    scopedLocalWorkspace = { identity, key, ids: new Set(restored.map(event => event.id)) };
+    scopedLocalWorkspace = { identity, key, raw, conflict: false, ids: new Set(restored.map(event => event.id)) };
     state.events = [...(state.events || []), ...restored];
     if (!state.event?.id && restored.length) {
       state.participants = uniqueStrings([String(currentAuthUser()?.displayName || ""), ...restored.flatMap(event => Object.keys(event.predictions || {}))]);
@@ -1734,11 +1734,24 @@ function persist() {
 function saveLocalStateOnly() {
   if (onlineWorkspaceMode || isSupabaseAuthEnabled()) {
     if (!scopedLocalWorkspaceReady()) return false;
-    const { key, identity, ids } = scopedLocalWorkspace;
+    const workspace = scopedLocalWorkspace;
+    const { key, identity, ids } = workspace;
     // Only explicit local-format creations/restores, never server snapshots.
     const events = (state.events || []).filter(event => ids.has(event.id) && baseTemplateId(event.templateId) !== "koshien");
     try {
-      localStorage.setItem(key, JSON.stringify({ version: 1, identity, events }));
+      if (workspace.conflict || localStorage.getItem(key) !== workspace.raw) {
+        workspace.conflict = true;
+        return false;
+      }
+      // Do not rewrite unchanged data on render; an empty new workspace needs no key.
+      const next = JSON.stringify({ version: 1, identity, events });
+      if (next === workspace.raw || (workspace.raw === null && events.length === 0)) return true;
+      localStorage.setItem(key, next);
+      if (localStorage.getItem(key) !== next) {
+        workspace.conflict = true;
+        return false;
+      }
+      workspace.raw = next;
       return true;
     } catch (error) {
       console.warn("Scoped local save failed", error);
@@ -4751,10 +4764,15 @@ async function createTournamentFromSettingsAction(options = {}) {
         window.alert("端末内保存には利用可能な形式と確認済みのクラブが必要です。");
         return;
       }
+      if (scopedLocalWorkspace.conflict) {
+        window.alert("別タブで端末内データが変更されました。再読込してから大会を作成してください。");
+        return;
+      }
       scopedLocalWorkspace.ids.add(event.id);
     }
-    addAndSelectEvent(event);
+    const saved = addAndSelectEvent(event);
     render();
+    if (onlineWorkspaceMode && !saved) window.alert("端末内大会を保存できませんでした。別タブやブラウザの保存設定を確認してください。");
     return;
   }
   if (onlineKoshienDraftCreating) return;
@@ -4846,7 +4864,7 @@ function addAndSelectEvent(event) {
   state.events.push(event);
   setActiveEvent(event.id);
   if (els.newTournamentName) els.newTournamentName.value = "";
-  persist();
+  return persist();
 }
 
 function renderRankingEventOptions() {
@@ -8305,6 +8323,12 @@ async function confirmSave() {
   }
   // Local-format saves are never presented as shared confirmation.
   els.saveButton.textContent = localSaved ? UI_TEXT.save.local : "未保存";
+  if (!localSaved) {
+    if (onlineWorkspaceMode && scopedLocalWorkspace?.conflict) {
+      els.saveButton.textContent = "別タブで変更・未保存";
+    }
+    return;
+  }
   setTimeout(() => {
     els.saveButton.textContent = UI_TEXT.save.confirm;
   }, 900);
@@ -8522,6 +8546,19 @@ els.approvalPolicyGroup?.querySelectorAll("[data-approval-policy]").forEach((but
 });
 
 window.addEventListener("hashchange", renderPage);
+window.addEventListener("storage", (event) => {
+  const workspace = scopedLocalWorkspace;
+  if (!workspace || !scopedLocalWorkspaceReady() || (event.key !== null && event.key !== workspace.key)) return;
+  try {
+    if (localStorage.getItem(workspace.key) === workspace.raw) return;
+  } catch {
+    // Treat unreadable storage as unavailable, not as permission to overwrite.
+  }
+  workspace.conflict = true;
+  if (els.saveButton && workspace.ids.has(state.event?.id)) {
+    els.saveButton.textContent = "別タブで変更・未保存";
+  }
+});
 
 els.themeToggle?.addEventListener("click", () => {
   applyTheme(document.body.dataset.theme === "day" ? "dark" : "day");
