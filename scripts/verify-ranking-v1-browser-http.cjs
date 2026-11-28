@@ -41,7 +41,7 @@ window.YOSO_SUPABASE_CONFIG={url:location.origin,anonKey:${JSON.stringify(anon)}
 const harness=`
 let onlineAuthUser=null,onlineLeagueId=${JSON.stringify(club)},authRecoveryMode=false,lastRenderedPageId="",loadedKoshienOnlineEventId="",lastKoshienOnlineLoadUserId="";
 let onlineKoshienCatalogSequence=0,onlineKoshienCatalog={scope:"",rows:[],busy:false,error:"",truncated:false};
-let onlineKoshienScopeVersion=0,pendingKoshienLoadPromise=null,pendingKoshienLoadScope=null,loadedKoshienResultRevision="";
+let onlineKoshienScopeVersion=0,pendingKoshienLoadPromise=null,pendingKoshienLoadScope=null,loadedKoshienResultRevision="",scopedLocalWorkspace=null;
 let koshienPhase2LoadRequest=null,koshienLaterLoadRequest=null,koshienPhase2DraftLoading=false,koshienLaterPhaseLoading=false;
 let koshienPhase2DraftView={},koshienLaterPhaseView={},koshienOnlineRankingView={};
 let koshienPhase2DraftMessage="",koshienPhase2DraftMessageKind="",koshienLaterPhaseMessage="",koshienLaterPhaseMessageKind="";

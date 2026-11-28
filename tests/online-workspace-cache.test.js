@@ -14,10 +14,14 @@ const privateState = { leagueName:"OLD CLUB", participants:["OLD PRIVATE USER"],
 function harness(online=true) {
   const legacy=JSON.stringify(privateState), writes=[], reads=[];
   const ctx=vm.createContext({
-    structuredClone,onlineWorkspaceMode:online,isSupabaseAuthEnabled:()=>online,
+    structuredClone,onlineWorkspaceMode:online,isSupabaseAuthEnabled:()=>online,scopedLocalWorkspace:null,
+    templates:{worldCup:{},rankingOdds:{},koshien:{}},baseTemplateId:x=>x,
+    currentAuthUser:()=>ctx.onlineAuthUser,
+    normalizeEvent:x=>x,uniqueStrings:xs=>[...new Set(xs.filter(Boolean))],
+    setActiveEvent:id=>{ctx.state.activeEventId=id;ctx.state.event=ctx.state.events.find(e=>e.id===id);},
     STORAGE_KEY:"legacy",defaultState:{activeTemplate:"worldCup",participants:["example"],connection:{}},
-    window:{YosoSupabase:{config:()=>({inviteCode:"fixture"})}},
-    localStorage:{getItem:k=>{reads.push(k);return legacy;},setItem:(k,v)=>writes.push([k,v])},
+    window:{YosoSupabase:{config:()=>({inviteCode:"fixture",url:"https://fixture.invalid",activeLeagueId:ctx.onlineLeagueId})}},
+    localStorage:{getItem:k=>{reads.push(k);return k==="legacy"?legacy:(writes.filter(x=>x[0]===k).at(-1)?.[1]??null);},setItem:(k,v)=>writes.push([k,v])},
     normalizeState:x=>x,normalizeConnectionSettings:x=>x,createDefaultState:()=>({}),
     createEvent:(templateId,participants,options)=>({id:"generated",templateId,...options,predictions:{},results:{}}),
     onlineAuthUser:{id:"A"},onlineLeagueId:"club-A",onlineKoshienEventId:"old-event",onlineLeagueMembers:[{userId:"A"}],
@@ -33,7 +37,7 @@ function harness(online=true) {
   vm.runInContext([
     extract("function createOnlineWorkspaceState()","\nlet authSession"),
     extract("function applyOnlineAuthUser(","\nasync function bootstrapSupabaseAuth"),
-    extract("function persist()","\nfunction captureOnlineKoshienScope"),
+    extract("function localWorkspaceIdentity()","\nfunction captureOnlineKoshienScope"),
     extract("function syncActiveEvent()","\nconst PAGE_IDS")
   ].join("\n"),ctx);
   ctx.state=ctx.loadState();
@@ -86,4 +90,33 @@ test("a delayed old-account club-list response is not applied after identity cha
  resolve([{league_id:"club-A",league_name:"OLD PRIVATE CLUB"}]);
  await pending;
  assert.equal(h.ctx.clubPathwayState.myClubs.length,0);
+});
+
+test("only explicitly local events are stored and restored for the verified actor and club",()=>{
+ const h=harness();const c=h.ctx;
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-A"}),true);
+ const local={id:"local-1",templateId:"rankingOdds",predictions:{"LOCAL PICK":{picks:["A"]}}};
+ const server={id:"server-1",templateId:"koshien",predictions:{"SERVER PRIVATE":{}}};
+ c.scopedLocalWorkspace.ids.add(local.id);c.state.events=[local,server];c.state.event=local;
+ assert.equal(c.persist(),true);
+ const [key,raw]=h.writes.at(-1);assert.notEqual(key,"legacy");
+ assert.deepEqual(JSON.parse(raw).events,[local]);
+ c.applyOnlineAuthUser({id:"B"});c.onlineLeagueId="club-A";
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-A"}),true);
+ assert.equal(c.state.events.length,0);
+ c.applyOnlineAuthUser({id:"A"});c.onlineLeagueId="club-B";
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-B"}),true);
+ assert.equal(c.state.events.length,0);
+ c.invalidateOnlineKoshienScope({clearWorkspace:true});c.onlineLeagueId="club-A";
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-A"}),true);
+ assert.equal(c.state.events[0].id,"local-1");
+ assert.equal(c.state.event.id,"local-1");
+ assert.ok(!JSON.stringify(c.state).includes("SERVER PRIVATE"));
+});
+test("corrupt scoped storage is not overwritten",()=>{
+ const h=harness();const c=h.ctx;
+ c.localStorage.getItem=()=>"{bad";
+ assert.equal(c.activateScopedLocalWorkspace({league_id:"club-A"}),false);
+ assert.equal(c.persist(),false);
+ assert.equal(h.writes.length,0);
 });

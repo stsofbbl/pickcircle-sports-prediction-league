@@ -80,7 +80,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
     },
     localStorage: { setItem() {} },
     STORAGE_KEY: "yoso-state",
-    onlineWorkspaceMode: true,
+    onlineWorkspaceMode: true, scopedLocalWorkspace: null,
     isSupabaseAuthEnabled: () => true,
     syncActiveEvent() {},
     queueKoshienOnlineSave() {
@@ -102,7 +102,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
   });
 
   vm.runInContext([
-    section("function persist()", "\nfunction saveLocalStateOnly"),
+    section("function localWorkspaceIdentity()", "\nfunction saveLocalStateOnly"),
     section("function saveLocalStateOnly()", "\nasync function saveKoshienOnlineNow"),
     section("async function saveKoshienOnlineNow", "\nasync function loadKoshienOnlineState"),
     section("async function loadKoshienOnlineState", "\nfunction applyKoshienPhase2DraftResponse"),

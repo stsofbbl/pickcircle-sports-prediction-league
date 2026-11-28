@@ -181,6 +181,7 @@ const defaultState = {
 };
 // Once this page enters online mode, never write its workspace to the legacy shared key.
 let onlineWorkspaceMode = isSupabaseAuthEnabled();
+let scopedLocalWorkspace = null;
 let state = loadState();
 
 const els = {
@@ -1687,13 +1688,67 @@ function normalizeResultFlow(flow, participants = state.participants || defaultS
   return next;
 }
 
+function localWorkspaceIdentity() {
+  if (!onlineWorkspaceMode) return null;
+  const actorId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  const config = window.YosoSupabase?.config?.() || {};
+  const project = String(config.url || "");
+  if (!actorId || !leagueId || !project || String(config.activeLeagueId || "") !== leagueId) return null;
+  return JSON.stringify([project, actorId, leagueId]);
+}
+
+function scopedLocalWorkspaceReady() {
+  return Boolean(scopedLocalWorkspace && scopedLocalWorkspace.identity === localWorkspaceIdentity());
+}
+
+function activateScopedLocalWorkspace(club) {
+  const identity = localWorkspaceIdentity();
+  if (!identity || String(club?.league_id || "") !== String(onlineLeagueId)) return false;
+  if (scopedLocalWorkspaceReady()) return true;
+  const key = STORAGE_KEY + ":local-formats:v1:" + encodeURIComponent(identity);
+  try {
+    const raw = localStorage.getItem(key);
+    const data = raw === null ? { version: 1, identity, events: [] } : JSON.parse(raw);
+    if (data?.version !== 1 || data.identity !== identity || !Array.isArray(data.events)
+      || data.events.some(event => !event?.id || !Object.hasOwn(templates, event.templateId)
+        || baseTemplateId(event.templateId) === "koshien")
+      || new Set(data.events.map(event => event.id)).size !== data.events.length) return false;
+    const existing = new Set((state.events || []).map(event => event.id));
+    if (data.events.some(event => existing.has(event.id))) return false;
+    const restored = data.events.map(event => normalizeEvent(event, state));
+    scopedLocalWorkspace = { identity, key, ids: new Set(restored.map(event => event.id)) };
+    state.events = [...(state.events || []), ...restored];
+    if (!state.event?.id && restored.length) {
+      state.participants = uniqueStrings([String(currentAuthUser()?.displayName || ""), ...restored.flatMap(event => Object.keys(event.predictions || {}))]);
+      setActiveEvent(restored[0].id);
+    }
+    return true;
+  } catch (error) {
+    console.warn("Scoped local storage unavailable", error);
+    return false;
+  }
+}
+
 function persist() {
   syncActiveEvent();
-  saveLocalStateOnly();
+  return saveLocalStateOnly();
 }
 
 function saveLocalStateOnly() {
-  if (onlineWorkspaceMode || isSupabaseAuthEnabled()) return false;
+  if (onlineWorkspaceMode || isSupabaseAuthEnabled()) {
+    if (!scopedLocalWorkspaceReady()) return false;
+    const { key, identity, ids } = scopedLocalWorkspace;
+    // Only explicit local-format creations/restores, never server snapshots.
+    const events = (state.events || []).filter(event => ids.has(event.id) && baseTemplateId(event.templateId) !== "koshien");
+    try {
+      localStorage.setItem(key, JSON.stringify({ version: 1, identity, events }));
+      return true;
+    } catch (error) {
+      console.warn("Scoped local save failed", error);
+      return false;
+    }
+  }
   if (window.YosoDataService?.local?.saveState) window.YosoDataService.local.saveState(STORAGE_KEY, state);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   return true;
@@ -1718,6 +1773,7 @@ function invalidateOnlineKoshienScope({ clearWorkspace = false, clearIdentity = 
   koshienLaterPhaseMessage = "";
   koshienLaterPhaseMessageKind = "";
   if (clearWorkspace) {
+    scopedLocalWorkspace = null;
     state = createOnlineWorkspaceState();
     onlineLeagueMembers = [];
     onlineLeagueAdminMessage = "";
@@ -2967,6 +3023,14 @@ async function refreshClubPathwayData({ renderAfter = true } = {}) {
     if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.myRequests = requests;
     clubPathwayState.pendingRequests = pending;
+    if (activeClub) {
+      const restored = activateScopedLocalWorkspace(activeClub);
+      if (restored) render();
+    } else if (onlineLeagueId) {
+      invalidateOnlineKoshienScope({ clearWorkspace: true });
+      onlineLeagueId = "";
+      render();
+    }
   } catch (error) {
     if (!isOnlineKoshienScopeCurrent(scope)) return;
     clubPathwayState.message = error?.message || "クラブ情報を取得できませんでした。";
@@ -4586,7 +4650,7 @@ function renderTournamentCreateOptions() {
   const onlineKoshienAvailable = Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
   els.newTournamentTemplate.innerHTML = Object.values(templates).map((template) => {
     const onlineSupported = baseTemplateId(template.id) === "koshien" && onlineKoshienAvailable;
-    const label = onlineSupported ? "オンライン対応" : onlineWorkspaceMode ? "一時保持のみ（再読込で消去）" : "端末内のみ";
+    const label = onlineSupported ? "オンライン対応" : onlineWorkspaceMode && baseTemplateId(template.id) === "koshien" ? "現在利用不可" : "端末内のみ";
     return `<option value="${escapeAttr(template.id)}" ${template.id === currentValue ? "selected" : ""}>${escapeHtml(template.name)}（${label}）</option>`;
   }).join("");
 }
@@ -4702,6 +4766,13 @@ async function createTournamentFromSettingsAction(options = {}) {
   const onlineKoshien = baseTemplateId(event.templateId) === "koshien"
     && Boolean(window.YosoDataService?.shouldAutoSaveKoshien?.());
   if (!onlineKoshien) {
+    if (onlineWorkspaceMode) {
+      if (baseTemplateId(event.templateId) === "koshien" || !scopedLocalWorkspaceReady()) {
+        window.alert("端末内保存には利用可能な形式と確認済みのクラブが必要です。");
+        return;
+      }
+      scopedLocalWorkspace.ids.add(event.id);
+    }
     addAndSelectEvent(event);
     render();
     return;
@@ -8239,7 +8310,7 @@ els.koshienLaterPreviewDialog?.addEventListener("close", () => {
 
 async function confirmSave() {
   if (!state.event?.id) return;
-  persist();
+  const localSaved = persist();
   if (window.YosoDataService?.shouldAutoSaveKoshien?.() && baseTemplateId(state.event?.templateId) === "koshien") {
     els.saveButton.textContent = UI_TEXT.save.syncing;
     try {
@@ -8254,8 +8325,8 @@ async function confirmSave() {
     }, 900);
     return;
   }
-  // Unsupported online formats remain in memory; never imply durable or shared storage.
-  els.saveButton.textContent = onlineWorkspaceMode ? "一時保持のみ" : UI_TEXT.save.local;
+  // Local-format saves are never presented as shared confirmation.
+  els.saveButton.textContent = localSaved ? UI_TEXT.save.local : "未保存";
   setTimeout(() => {
     els.saveButton.textContent = UI_TEXT.save.confirm;
   }, 900);

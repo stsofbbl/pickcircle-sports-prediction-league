@@ -10,14 +10,15 @@ function section(start, end) {
   assert.ok(a >= 0 && b > a, "existing function boundary");
   return app.slice(a, b);
 }
-function harness({ autoSave = true, templateId = "fightCard", saved = {}, throws = false } = {}) {
+function harness({ autoSave = true, templateId = "fightCard", saved = {}, throws = false, online = false, localSaved = true } = {}) {
   const calls = [], timers = [];
   const ctx = vm.createContext({
     window: { YosoDataService: { shouldAutoSaveKoshien: () => autoSave }, YosoKoshienResults: { OFFICIAL_PHASE1_POINTS: {} } },
     els: { newTournamentTemplate: { value: templateId, innerHTML: "" }, saveButton: { textContent: "" } },
-    state: { activeTemplate: templateId, event: { templateId } },
+    onlineWorkspaceMode: online,
+    state: { activeTemplate: templateId, event: { id: "fixture-event", templateId } },
     escapeHtml: String, escapeAttr: String,
-    persist: () => calls.push("local"),
+    persist: () => { calls.push("local"); return localSaved; },
     saveKoshienOnlineNow: async () => {
       calls.push("online");
       if (throws) throw new Error("network unavailable");
@@ -63,5 +64,19 @@ test("existing online Koshien save statuses are unchanged", async () => {
     await ctx.confirmSave();
     assert.deepEqual(calls, ["local", "online"]);
     assert.equal(ctx.els.saveButton.textContent, expected);
+  }
+});
+
+test("online local-format save is not shown as successful when scoped storage failed", async () => {
+  const {ctx,calls}=harness({online:true,localSaved:false});
+  await ctx.confirmSave();
+  assert.deepEqual(calls,["local"]);
+  assert.equal(ctx.els.saveButton.textContent,"未保存");
+});
+test("online Koshien failures are not shown as local saves",async()=>{
+  for(const options of [{saved:{skipped:true}},{throws:true}]){
+    const {ctx}=harness({online:true,templateId:"koshien",...options});
+    await ctx.confirmSave();
+    assert.equal(ctx.els.saveButton.textContent,"未保存");
   }
 });
