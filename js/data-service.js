@@ -403,7 +403,7 @@
     return data;
   }
 
-  async function saveKoshienResultTransaction({ supabase, league, event, teamRows, scoreRows }) {
+  async function saveKoshienResultTransaction({ supabase, league, event, teamRows, scoreRows, assertScope }) {
     const eventId = String(event.id);
     const teamByName = new Map(teamRows.map((team) => [team.name, team]));
     let matchRows;
@@ -424,6 +424,7 @@
     if (!persistedScoreRows.length) {
       throw koshienSaveError("scores", null, "scores保存用データが空です。");
     }
+    await assertScope();
     const { error } = await supabase.rpc("save_koshien_result_snapshot", {
       p_event_id: eventId,
       p_match_rows: matchRows,
@@ -719,7 +720,7 @@
     });
   }
 
-  async function replaceKoshienRepresentatives({ eventId, rows, year } = {}) {
+  async function replaceKoshienRepresentatives({ eventId, rows, year, assertScope } = {}) {
     const normalizedEventId = String(eventId || "").trim();
     const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
       district_name: String(row?.districtName || "").trim(),
@@ -728,6 +729,7 @@
     if (!normalizedEventId) throw new Error("代表校を反映するevent_idが必要です。");
     const supabase = await supabaseClient();
     if (!supabase) throw new Error("Supabase is not configured");
+    if (assertScope) await assertScope();
     const { data, error } = await supabase.rpc("replace_koshien_representatives", {
       p_event_id: normalizedEventId,
       p_rows: normalizedRows,
@@ -879,6 +881,7 @@
     profile,
     scoreRows,
     savePrediction,
+    assertScope,
   }) {
     const displayName = participantName || displayNameFromUser(user, profile);
     const playerPayload = {
@@ -887,6 +890,7 @@
       display_name: displayName,
       is_admin: isClubAdminRole(clubRoleFromMembership(membership)),
     };
+    await assertScope();
     const { data: player, error: playerError } = await supabase
       .from("players")
       .upsert(playerPayload, { onConflict: "league_id,profile_id" })
@@ -915,6 +919,7 @@
     if (phase1Picks.length !== pickCount) return { player, teamRows, predictionSaved: false };
     const captain = teamByName.get(prediction.captain);
     if (!captain) throw new Error("キャプテンは選択した8校から選んでください。");
+    await assertScope();
     const { error: phase1Error } = await supabase.rpc("save_koshien_phase1_prediction", {
       p_event_id: eventId,
       p_team_ids: phase1Picks.map((pick) => teamByName.get(pick.name).id),
@@ -1031,7 +1036,7 @@
     };
   }
 
-  async function saveKoshienSnapshot({ state, event, eventId, participantName, scoreRows = [] }) {
+  async function saveKoshienSnapshot({ event, eventId, leagueId, userId, participantName, scoreRows = [] }) {
     if (!shouldAutoSaveKoshien()) return { skipped: true, reason: "autoSaveKoshien is disabled" };
     if (!event || event.templateId !== "koshien") return { skipped: true, reason: "event is not koshien" };
     const normalizedEventId = String(eventId || event.id || "").trim();
@@ -1043,9 +1048,26 @@
     const user = await window.YosoSupabase.sessionUser();
     if (!supabase || !user) return { skipped: true, reason: "Supabase session is not ready" };
 
-    const league = await ensureLeagueMembership({ createIfMissing: true });
-    if (!league?.id) return { skipped: true, reason: "league is not ready" };
+    const requestedLeagueId = String(leagueId || "").trim();
+    const requestedUserId = String(userId || "").trim();
+    if (!requestedLeagueId || !requestedUserId || String(user.id) !== requestedUserId) {
+      throw new Error("保存対象のクラブとログイン状態を確認してください。");
+    }
+    const initialInviteCode = String(config().inviteCode || "");
+    const assertScope = async () => {
+      const actor = await window.YosoSupabase.sessionUser();
+      const current = config();
+      if (String(actor?.id || "") !== requestedUserId
+        || (current.activeLeagueId && String(current.activeLeagueId) !== requestedLeagueId)
+        || String(current.inviteCode || "") !== initialInviteCode) {
+        throw new Error("保存中にクラブまたはログイン状態が変わりました。再読込してください。");
+      }
+    };
+    const league = await ensureLeagueMembership();
     const membership = await getCurrentMembership(user.id);
+    if (String(league?.id || "") !== requestedLeagueId || String(membership?.league_id || "") !== requestedLeagueId) {
+      throw new Error("保存対象クラブへの参加を確認できませんでした。");
+    }
     const profile = await getProfile(user.id);
     const isAdmin = isClubAdminRole(clubRoleFromMembership(membership));
     const savePrediction = event.status === "open"
@@ -1061,10 +1083,17 @@
     const deadline = event.deadline ? new Date(event.deadline).toISOString() : null;
     const { data: existingEvent, error: existingEventError } = await supabase
       .from("events")
-      .select("id, rules")
+      .select("id,league_id,preset_type,status,rules")
       .eq("id", normalizedEventId)
+      .eq("league_id", requestedLeagueId)
+      .eq("preset_type", "koshien")
       .maybeSingle();
     if (existingEventError) throw existingEventError;
+    if (String(existingEvent?.id || "") !== normalizedEventId
+      || String(existingEvent.league_id || "") !== requestedLeagueId
+      || existingEvent.preset_type !== "koshien" || existingEvent.status === "draft") {
+      throw new Error("保存対象の既存甲子園大会を確認できませんでした。大会一覧から再読込してください。");
+    }
     const {
       event: eventForSave,
       rosterComplete,
@@ -1076,29 +1105,20 @@
         status: eventForSave.status || "open",
         prediction_deadline: deadline,
       };
-      let eventError;
-      if (existingEvent) {
-        ({ error: eventError } = await supabase
-          .from("events")
-          .update(eventSettings)
-          .eq("id", normalizedEventId));
-      } else {
-        const eventPayload = {
-          id: normalizedEventId,
-          league_id: league.id,
-          ...eventSettings,
-          preset_type: "koshien",
-          rules: {
-            approvalPolicy: eventForSave.approvalPolicy || state.approvalPolicy,
-            config: eventForSave.config || {},
-            resultFlow: eventForSave.resultFlow || {},
-            localEventId: eventForSave.id,
-          },
-          created_by: user.id,
-        };
-        ({ error: eventError } = await supabase.from("events").upsert(eventPayload));
-      }
+      await assertScope();
+      const { data: updated, error: eventError } = await supabase
+        .from("events")
+        .update(eventSettings)
+        .eq("id", normalizedEventId)
+        .eq("league_id", requestedLeagueId)
+        .eq("preset_type", "koshien")
+        .select("id,league_id,preset_type")
+        .maybeSingle();
       if (eventError) throw eventError;
+      if (String(updated?.id || "") !== normalizedEventId
+        || String(updated.league_id || "") !== requestedLeagueId || updated.preset_type !== "koshien") {
+        throw new Error("対象大会の更新を確認できませんでした。");
+      }
 
       const teams = Array.isArray(eventForSave.config?.teams) ? eventForSave.config.teams : [];
       if (!rosterComplete) {
@@ -1107,6 +1127,7 @@
         }
         await replaceKoshienRepresentatives({
           eventId: normalizedEventId,
+          assertScope,
           year: eventForSave.config?.externalResults?.year,
           rows: teams.map((name) => ({
             districtName: eventForSave.config?.teamMeta?.[name]?.district || "",
@@ -1115,8 +1136,6 @@
         });
       }
 
-    } else if (!existingEvent) {
-      return { skipped: true, reason: "admin must create the Koshien event before members can save predictions" };
     }
 
     let structuredSaved = false;
@@ -1133,6 +1152,7 @@
         profile,
         scoreRows,
         savePrediction,
+        assertScope,
       });
       structuredSaved = true;
     } catch (error) {
@@ -1154,10 +1174,12 @@
         event: eventForSave,
         teamRows: structuredContext?.teamRows || [],
         scoreRows,
+        assertScope,
       });
       rawResultsSaved = true;
       scoresSaved = true;
     } else if (isAdmin && eventForSave.results) {
+      await assertScope();
       const { error: resultsError } = await supabase.from("results").upsert({
         event_id: normalizedEventId,
         payload: eventForSave.results,
@@ -1167,6 +1189,7 @@
       rawResultsSaved = true;
     }
 
+    await assertScope();
     return {
       ok: true,
       ...(warnings.length ? { partial: true, warnings } : {}),

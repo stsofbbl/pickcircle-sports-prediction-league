@@ -14,7 +14,7 @@ function section(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = null } = {}) {
+function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = null, switchLeagueAfterSave = false } = {}) {
   const saveCalls = [];
   const context = vm.createContext({
     console: { ...console, warn() {} },
@@ -64,6 +64,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
           })),
           saveSnapshot: async (payload) => {
             saveCalls.push(payload);
+            if (switchLeagueAfterSave) context.onlineLeagueId = "other-league";
             return { ok: true };
           },
         },
@@ -76,6 +77,7 @@ function createSyncHarness({ loadedEventId = "", loadSnapshot, refreshError = nu
     queueKoshienOnlineSave() {
       saveCalls.push({ automatic: true });
     },
+    onlineLeagueId: "league-id",
     onlineKoshienEventId: "event-id",
     loadedKoshienOnlineEventId: loadedEventId,
     pendingKoshienSyncTimer: null,
@@ -120,6 +122,16 @@ test("an explicit save is allowed only after the formal online event has loaded"
   const saved = await afterLoad.context.saveKoshienOnlineNow();
   assert.equal(saved?.ok, true);
   assert.equal(afterLoad.saveCalls.length, 1);
+  assert.equal(afterLoad.saveCalls[0].leagueId, "league-id");
+  assert.equal(afterLoad.saveCalls[0].userId, "user-id");
+});
+
+test("a save response from a previous club cannot mark the current workspace synced", async () => {
+  const h = createSyncHarness({ loadedEventId: "event-id", switchLeagueAfterSave: true });
+  const result = await h.context.saveKoshienOnlineNow();
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "online Koshien save scope changed");
+  assert.equal(h.context.state.connection.lastSyncAt, undefined);
 });
 
 test("a local state from another event is never sent to the formal event", async () => {

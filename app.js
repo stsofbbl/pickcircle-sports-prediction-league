@@ -827,7 +827,7 @@ function koshienSaveSkipMessage(reason) {
   if (reason === "Supabase session is not ready") return "Supabaseログインが確認できません。メールアドレスでログインしてください。";
   if (reason === "league is not ready") return "参加リーグを確認できませんでした。リーグIDを確認してください。";
   if (reason === "online Koshien state is not loaded") return "オンラインの正式な甲子園大会を読み込んでから保存してください。";
-  if (reason === "admin must create the Koshien event before members can save predictions") return "まだ管理者が甲子園大会をオンライン作成していません。先に管理者で保存してください。";
+  if (reason === "online Koshien save scope changed") return "保存中に対象が切り替わりました。元の大会を再読込して確認してください。";
   return "Supabaseへ保存できませんでした。設定とログイン状態を確認してください。";
 }
 
@@ -1692,13 +1692,24 @@ async function saveKoshienOnlineNow({ participantName = currentKoshienParticipan
     || activeEventId !== displayedEventId) {
     return { skipped: true, reason: "online Koshien state is not loaded" };
   }
+  const userId = String(currentAuthUser()?.id || "");
+  const leagueId = String(onlineLeagueId || "");
+  if (!userId || !leagueId) return { skipped: true, reason: "league is not ready" };
   const result = await window.YosoDataService.koshien.saveSnapshot({
     state,
     event: state.event,
     eventId: displayedEventId,
+    leagueId,
+    userId,
     participantName,
     scoreRows: koshienHasScorableResults(state.event) ? koshienScoreRows() : [],
   });
+  if (String(currentAuthUser()?.id || "") !== userId || String(onlineLeagueId || "") !== leagueId
+    || String(state.activeEventId || "") !== displayedEventId
+    || String(state.event?.id || "") !== displayedEventId
+    || String(loadedKoshienOnlineEventId || "") !== displayedEventId) {
+    return { skipped: true, reason: "online Koshien save scope changed" };
+  }
   if (!result?.skipped && updateConnection) {
     state.connection = normalizeConnectionSettings({ ...state.connection, mode: "supabase", lastSyncAt: new Date().toISOString() });
     saveLocalStateOnly();
