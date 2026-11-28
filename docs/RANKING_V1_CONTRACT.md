@@ -91,3 +91,6 @@ GitHub Actionsの使い捨てDBで、既存の固定バージョンSDK 2.119.0�
 
 ### 読み取り専用の本番基準チェック（2026-11-27）
 `prototypes/ranking-v1/preflight.sql` は、本番で実行済みの単一SELECT（16項目すべてtrue）を固定する。主要6テーブルの列49・制約25・policy17・trigger8（関数本体hash/owner/security設定含む）・role×table権限18組・関連関数9件を件数とfingerprintで照合し、名前衝突/既存ranking event/会員とplayer/profile整合/RLS有効を再確認する。search_pathは実測 `{public,extensions}` と一致必須。DBデータや秘密情報を出力しない。#58/#60適用前の基準であり、#58の承認済み変更後は意図された差分と他のdriftをレビューして再基準化すること。falseの場合は停止、勝手に修復・hash更新しない。全schemaや全関数、認証設定の代替ではない。候補SQLの本番適用を許可するものではなく、復元可能なbackup、完全schema検証、正式仕様承認が別途必要。
+
+### 受付後メタデータ固定候補（隔離試作のみ・正式仕様未承認）
+既存の draft 限定編集とレビューrevisionを維持するため、management guardに受付開始後の大会行のメタデータ変更拒否を追加する候補。statusとサーバー更新時刻を除く行全体を比較し、既存のclose/finalize RPCとそのpermit検証は変更しない。旧競技・甲子園・得点計算には影響させない。直接UPDATEの拒否をopen/resultWait/finalizedのSQLと実SDK HTTPで検証。並行ロック試験はメタデータ変更ではなくSELECT FOR UPDATEで同じ親行ロックを取得する。正式仕様の決定や本番DB適用ではない。

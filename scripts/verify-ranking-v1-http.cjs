@@ -99,6 +99,13 @@ async function main(){
   await assert.rejects(m.api.open(edited.revision),denied);
   assert.equal((await a.api.open(edited.revision)).status,"open");
   assert.equal((await a.api.open(edited.revision)).recovered,true);
+  const deniedMetadata=async payload=>{
+    const response=await owner.client.from("events").update(payload).eq("id",event);
+    assert.equal(response.error?.code,"42501","direct metadata write must be denied");
+  };
+  await deniedMetadata({name:"HTTP bypass"});
+  await deniedMetadata({rules_config:{bypass:true}});
+  assert.equal((await a.api.open(edited.revision)).recovered,true);
   await assert.rejects(a.api.close(),denied);
   await Promise.all([a.api.save(first,config),m.api.save(second,config)]);
   const memberView=createRankingController({client:member.client});
@@ -138,6 +145,7 @@ async function main(){
   await assert.rejects(m2.api.save(first,config),denied);
   assert.equal((await a.api.close()).status,"resultWait");
   assert.equal((await a.api.close()).recovered,true);
+  await deniedMetadata({name:"Closed bypass"});
   const managerView=createRankingController({client:owner.client});
   managerView.select({actorId:owner.uid,leagueId:club,eventId:event});
   assert.equal((await managerView.refresh()).actions.reviewResult,true);
@@ -145,6 +153,8 @@ async function main(){
   await assert.rejects(m2.api.finalize(finalReview.revision,first,config),denied);
   const rendered=await managerView.finalize();
   assert.equal(rendered.status,"finalized");
+  await deniedMetadata({name:"Finalized bypass"});
+  await deniedMetadata({archived_at:new Date().toISOString()});
   assert.equal(rendered.ranking.length,2);
   assert.deepEqual(plain(rendered.ranking.map(r=>r.score)),[first,second].map(prediction=>scoreRanking({config,prediction,result:first}).scoreTenths/10).sort((a,b)=>b-a));
   assert.equal((await a.api.finalize(finalReview.revision,first,config)).recovered,true);

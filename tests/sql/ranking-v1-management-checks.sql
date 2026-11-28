@@ -36,6 +36,14 @@ BEGIN
  IF a->>'status'<>'open' OR a->'recovered'<>'false'::jsonb THEN RAISE EXCEPTION 'open failed'; END IF;
  a:=public.ranking_v1_api_open(club,v_id,me,edited_rev);
  IF a->'recovered'<>'true'::jsonb THEN RAISE EXCEPTION 'open retry failed'; END IF;
+ BEGIN UPDATE public.events SET name='Direct after open' WHERE events.id=v_id; RAISE EXCEPTION 'opened name edit accepted';
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN UPDATE public.events SET rules_config='{"changed":true}' WHERE events.id=v_id; RAISE EXCEPTION 'opened rules_config edit accepted';
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN UPDATE public.events SET season='2030',current_phase='results',archived_at=now() WHERE events.id=v_id; RAISE EXCEPTION 'opened metadata edit accepted';
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ a:=public.ranking_v1_api_open(club,v_id,me,edited_rev);
+ IF a->'recovered'<>'true'::jsonb OR a->>'name'<>'Updated Cup' THEN RAISE EXCEPTION 'opened revision changed'; END IF;
  BEGIN PERFORM public.ranking_v1_api_close(club,v_id,me); RAISE EXCEPTION 'early close accepted';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN PERFORM public.ranking_v1_api_edit_draft(club,v_id,me,edited_rev,'Changed','baseball',deadline,c); RAISE EXCEPTION 'opened edit accepted';
@@ -46,6 +54,12 @@ BEGIN
  IF a->>'status'<>'resultWait' OR a->'recovered'<>'false'::jsonb THEN RAISE EXCEPTION 'close failed'; END IF;
  a:=public.ranking_v1_api_close(club,'management-expired',me);
  IF a->'recovered'<>'true'::jsonb THEN RAISE EXCEPTION 'close retry failed'; END IF;
+ BEGIN UPDATE public.events SET name='Direct after close' WHERE events.id='management-expired'; RAISE EXCEPTION 'closed name edit accepted';
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN UPDATE public.events SET name='Direct after finalize' WHERE events.id='expired'; RAISE EXCEPTION 'finalized name edit accepted';
+ EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ IF (SELECT name FROM public.events WHERE id='management-expired')<>'expired'
+ OR (SELECT status FROM public.events WHERE id='expired')<>'finalized' THEN RAISE EXCEPTION 'metadata guard changed existing data'; END IF;
 END $f$;
 SET LOCAL request.jwt.claim.sub='00000000-0000-0000-0000-000000000002';
 DO $f$ DECLARE club uuid:='00000000-0000-0000-0000-000000000010'; me uuid:=auth.uid(); v_id text:='a0000000-0000-4000-8000-000000000001';
